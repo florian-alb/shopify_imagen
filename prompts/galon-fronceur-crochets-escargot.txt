@@ -1,0 +1,37 @@
+Use the uploaded image as the exact product reference.
+
+Preserve the curtain exactly as shown:
+- same color
+- same premium blackout fabric
+- same insulated / padded construction
+- same texture and textile richness
+- same stitching and craftsmanship
+- same substantial weight
+- same premium drape and overall design
+
+Do not change the product.
+Do not make the fabric thinner, lighter, or cheaper-looking.
+Do not replace the textile with linen, sheer, or lightweight fabric.
+
+Generate a professional close-up image focused on the top section of the curtain with a gathered heading tape using snail hooks (galon fronceur avec crochets escargot).
+Show the upper part of the curtain in a realistic and luxurious way, with elegant gathering and a refined structured fall.
+The heading tape and hook-based finish should be clearly visible or clearly suggested through the construction of the top section, while remaining visually clean and premium.
+
+The image should communicate quality tailoring, functionality, and a custom-made luxury feel.
+It should look like a high-end curtain sold by a premium home furnishing brand for over $1000.
+
+Style:
+- ultra photorealistic
+- luxury product close-up
+- premium textile detail photography
+- sophisticated e-commerce image
+- soft directional lighting
+- crisp material detail
+- elegant editorial furnishing aesthetic
+
+Format:
+- square 1:1
+
+No text.
+No watermark.
+No collage.

@@ -1,0 +1,37 @@
+Use the uploaded image as the exact product reference.
+
+Preserve the curtain exactly as shown:
+- same color
+- same premium textile
+- same blackout / insulated / padded construction
+- same fabric texture and density
+- same stitching and luxury finish
+- same heavy drape
+- same premium overall character
+
+Do not change the product.
+Do not invent another material.
+Do not make the curtain appear thin, flat, or low-end.
+
+Generate a premium close-up image focused on the top section of the curtain with Flemish pleats / tailored pinch pleats using Flemish hooks (plis flamands avec agrafes flamandes).
+Show a highly elegant, structured pleated heading with a bespoke, custom-made appearance.
+The pleats should look precise, refined, and luxurious, with a graceful fall and a couture-like finish.
+The top construction should communicate craftsmanship, sophistication, and a made-to-measure luxury furnishing aesthetic.
+
+The image should feel like a premium editorial product shot for a designer curtain collection, clearly positioned as a high-value luxury product worth more than $1000.
+
+Style:
+- ultra photorealistic
+- luxury close-up product photography
+- bespoke furnishing detail shot
+- sophisticated editorial quality
+- soft refined lighting
+- realistic shadows and textile depth
+- premium, high-end e-commerce aesthetic
+
+Format:
+- square 1:1
+
+No text.
+No watermark.
+No collage.

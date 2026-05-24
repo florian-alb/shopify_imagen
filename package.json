@@ -1,0 +1,33 @@
+{
+  "name": "shopify-curtain-image-automation",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dry-run": "tsx src/index.ts dry-run",
+    "test": "tsx src/index.ts dry-run",
+    "export-images": "tsx src/index.ts export-images",
+    "generate": "tsx src/index.ts generate",
+    "attach-images": "tsx src/index.ts attach-images",
+    "build:review": "vite build --config vite.review.config.ts",
+    "review": "npm run build:review && tsx src/index.ts review",
+    "full": "tsx src/index.ts full",
+    "typecheck": "tsc --noEmit && tsc -p review-ui/tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "lucide-react": "^1.16.0",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "sharp": "^0.34.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.2.15",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vite": "^8.0.14"
+  }
+}

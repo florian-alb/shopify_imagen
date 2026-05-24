@@ -1,0 +1,45 @@
+Use the uploaded image as the exact product reference.
+
+Preserve the curtain exactly as shown in the reference image:
+- same color
+- same premium fabric appearance
+- same padded / blackout / insulated construction
+- same texture and material density
+- same stitching and finishing
+- same drape behavior
+- same overall design and proportions
+- same sense of thickness and weight
+
+Do not change the product.
+Do not invent new features.
+Do not make the curtain lighter, thinner, smoother, or more transparent than it really is.
+Do not turn it into linen, sheer fabric, or a lightweight decorative curtain.
+
+Generate a luxurious lifestyle image showing this curtain installed in a sophisticated, high-end interior.
+Create an elegant room that feels like an expensive designer residence or a luxury suite, with refined architecture, premium materials, understated wealth, and a calm, elevated atmosphere.
+The setting should feel curated, exclusive, and timeless, as if the curtain belongs in a home where every detail is bespoke.
+
+Show the curtain hanging beautifully in front of a large window, with rich, elegant folds and a natural heavy drape.
+Use soft natural daylight entering the room in a controlled, flattering way, creating subtle contrast and realistic shadows.
+The room should feel premium and editorial, with minimalist but luxurious furniture, noble materials, and a quiet upscale ambiance.
+The curtain must remain the visual hero of the image.
+
+Style and art direction:
+- ultra photorealistic
+- luxury interior editorial photography
+- premium home decor campaign image
+- sophisticated architectural styling
+- high-end e-commerce hero image
+- clean composition
+- elegant, balanced framing
+- warm refined mood
+- visually rich but uncluttered
+- expensive, designer-level aesthetic
+
+Image format:
+- square 1:1
+- centered and premium product-focused composition
+
+No text.
+No watermark.
+No collage.

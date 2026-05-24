@@ -1,0 +1,37 @@
+Use the uploaded image as the exact product reference.
+
+Preserve the curtain exactly as shown:
+- same color
+- same premium textile
+- same blackout / insulated / padded construction
+- same fabric texture
+- same stitching quality
+- same substantial weight and drape
+- same premium product character
+
+Do not change the product.
+Do not invent a lighter or more decorative fabric.
+Do not alter the heavy, luxurious nature of the curtain.
+
+Generate a premium close-up image focused on the top of the curtain with a rod pocket heading (passe-tringle).
+Show the curtain installed with a curtain rod passing cleanly through the sewn top pocket.
+The construction must look elegant, refined, and well-made, with soft structured folds and a tailored luxury finish.
+
+The image should emphasize craftsmanship, simplicity, and upscale material quality.
+It should feel like a premium designer curtain photographed for a luxury interiors collection, with a discreet but expensive aesthetic.
+
+Style:
+- ultra photorealistic
+- luxury close-up product photography
+- elegant furnishing detail
+- high-end interior textile shot
+- soft natural or studio lighting
+- realistic shadows
+- premium editorial quality
+
+Format:
+- square 1:1
+
+No text.
+No watermark.
+    No collage.
