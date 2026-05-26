@@ -1,0 +1,242 @@
+import { v } from "convex/values";
+import { internal } from "./_generated/api";
+import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
+import type { Doc, Id } from "./_generated/dataModel";
+import { requireUserId } from "./authz";
+import { availableTypesForProduct, isImageType, renderPrompt } from "./lib";
+
+export const list = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireUserId(ctx);
+    return ctx.db.query("generationJobs").withIndex("by_created").order("desc").take(100);
+  }
+});
+
+export const get = query({
+  args: { jobId: v.id("generationJobs") },
+  handler: async (ctx, args) => {
+    await requireUserId(ctx);
+    const job = await ctx.db.get(args.jobId);
+    if (!job) return null;
+    const images = await ctx.db.query("generatedImages").withIndex("by_job", (q) => q.eq("jobId", args.jobId)).collect();
+    const products = await Promise.all(job.productIds.map((id) => ctx.db.get(id)));
+    return { job, images, products: products.filter(Boolean) };
+  }
+});
+
+export const create = mutation({
+  args: {
+    productIds: v.array(v.id("products")),
+    selectedImageTypes: v.array(v.string()),
+    forceRegenerate: v.boolean()
+  },
+  handler: async (ctx, args) => {
+    const userId = await requireUserId(ctx);
+    const selectedImageTypes = Array.from(new Set(args.selectedImageTypes.filter(isImageType)));
+    if (!args.productIds.length) throw new Error("Select at least one product.");
+    if (!selectedImageTypes.length) throw new Error("Select at least one image type.");
+
+    const products = (await Promise.all(args.productIds.map((id) => ctx.db.get(id)))).filter(Boolean) as Doc<"products">[];
+    if (!products.length) throw new Error("No products found.");
+
+    const prompts = await ctx.db.query("promptTemplates").collect();
+    const promptByType = new Map(prompts.filter((prompt) => prompt.isActive).map((prompt) => [prompt.imageType, prompt]));
+    const now = Date.now();
+    const planned: Array<{
+      product: Doc<"products">;
+      imageType: string;
+      promptUsed: string;
+      sourceImageUrl: string | null;
+    }> = [];
+
+    for (const product of products) {
+      const available = new Set(availableTypesForProduct(product.detectedFixations));
+      const existingImages = await ctx.db
+        .query("generatedImages")
+        .withIndex("by_product", (q) => q.eq("productId", product._id))
+        .collect();
+      const existingReady = new Set(
+        existingImages
+          .filter((image) => image.status === "generated" || image.status === "uploaded")
+          .map((image) => image.imageType)
+      );
+
+      for (const imageType of selectedImageTypes) {
+        if (!available.has(imageType as never)) continue;
+        if (!args.forceRegenerate && existingReady.has(imageType)) continue;
+        const template = promptByType.get(imageType);
+        if (!template) throw new Error(`No active prompt template found for ${imageType}.`);
+        const promptUsed = renderPrompt(template.content, {
+          PRODUCT_TITLE: product.title,
+          PRODUCT_HANDLE: product.handle,
+          IMAGE_TYPE: imageType,
+          FIXATION_TYPE: imageType
+        });
+        planned.push({
+          product,
+          imageType,
+          promptUsed,
+          sourceImageUrl: product.featuredImageUrl ?? product.currentShopifyImages[0]?.url ?? null
+        });
+      }
+    }
+
+    if (!planned.length) {
+      throw new Error("No generation tasks are available for the selected products and image types.");
+    }
+
+    const jobId = await ctx.db.insert("generationJobs", {
+      status: "queued",
+      mode: products.length === 1 ? "single" : "bulk",
+      productIds: products.map((product) => product._id),
+      selectedImageTypes,
+      forceRegenerate: args.forceRegenerate,
+      totalTasks: planned.length,
+      completedTasks: 0,
+      failedTasks: 0,
+      error: null,
+      createdByUserId: userId,
+      createdAt: now,
+      updatedAt: now
+    });
+
+    for (const task of planned) {
+      await ctx.db.insert("generatedImages", {
+        productId: task.product._id,
+        jobId,
+        imageType: task.imageType,
+        promptUsed: task.promptUsed,
+        sourceImageUrl: task.sourceImageUrl,
+        generatedImageUrl: null,
+        storageUrl: null,
+        status: "queued",
+        shopifyMediaId: null,
+        error: null,
+        createdAt: now,
+        updatedAt: now
+      });
+      await ctx.db.patch(task.product._id, { generationStatus: "generating", updatedAt: now });
+    }
+
+    await ctx.scheduler.runAfter(0, internal.generation.processJob, { jobId });
+    return jobId;
+  }
+});
+
+export const cancel = mutation({
+  args: { jobId: v.id("generationJobs") },
+  handler: async (ctx, args) => {
+    await requireUserId(ctx);
+    const job = await ctx.db.get(args.jobId);
+    if (!job) throw new Error("Job not found.");
+    if (job.status === "completed" || job.status === "failed") return;
+    await ctx.db.patch(args.jobId, { status: "cancelled", updatedAt: Date.now(), completedAt: Date.now() });
+  }
+});
+
+export const markRunning = internalMutation({
+  args: { jobId: v.id("generationJobs") },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.jobId, {
+      status: "running",
+      startedAt: Date.now(),
+      updatedAt: Date.now()
+    });
+  }
+});
+
+export const nextQueuedImage = internalQuery({
+  args: { jobId: v.id("generationJobs") },
+  handler: async (ctx, args) => {
+    const job = await ctx.db.get(args.jobId);
+    if (!job || job.status === "cancelled") return null;
+    return ctx.db
+      .query("generatedImages")
+      .withIndex("by_job", (q) => q.eq("jobId", args.jobId))
+      .filter((q) => q.eq(q.field("status"), "queued"))
+      .first();
+  }
+});
+
+export const completeImage = internalMutation({
+  args: {
+    imageId: v.id("generatedImages"),
+    generatedImageUrl: v.string(),
+    storageUrl: v.string()
+  },
+  handler: async (ctx, args) => {
+    const image = await ctx.db.get(args.imageId);
+    if (!image) return;
+    await ctx.db.patch(args.imageId, {
+      generatedImageUrl: args.generatedImageUrl,
+      storageUrl: args.storageUrl,
+      status: "generated",
+      error: null,
+      updatedAt: Date.now()
+    });
+    await ctx.db.patch(image.jobId, {
+      completedTasks: (await ctx.db.get(image.jobId))!.completedTasks + 1,
+      updatedAt: Date.now()
+    });
+  }
+});
+
+export const failImage = internalMutation({
+  args: {
+    imageId: v.id("generatedImages"),
+    error: v.string()
+  },
+  handler: async (ctx, args) => {
+    const image = await ctx.db.get(args.imageId);
+    if (!image) return;
+    const job = await ctx.db.get(image.jobId);
+    await ctx.db.patch(args.imageId, {
+      status: "failed",
+      error: args.error,
+      updatedAt: Date.now()
+    });
+    if (job) {
+      await ctx.db.patch(job._id, {
+        failedTasks: job.failedTasks + 1,
+        updatedAt: Date.now()
+      });
+    }
+  }
+});
+
+export const markImageGenerating = internalMutation({
+  args: { imageId: v.id("generatedImages") },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.imageId, { status: "generating", updatedAt: Date.now() });
+  }
+});
+
+export const finishJobIfDone = internalMutation({
+  args: { jobId: v.id("generationJobs") },
+  handler: async (ctx, args) => {
+    const job = await ctx.db.get(args.jobId);
+    if (!job) return false;
+    const done = job.completedTasks + job.failedTasks >= job.totalTasks;
+    if (!done) return false;
+    const status = job.failedTasks > 0 ? "failed" : "completed";
+    await ctx.db.patch(args.jobId, {
+      status,
+      error: job.failedTasks > 0 ? `${job.failedTasks} image task(s) failed.` : null,
+      completedAt: Date.now(),
+      updatedAt: Date.now()
+    });
+
+    for (const productId of job.productIds as Id<"products">[]) {
+      const images = await ctx.db.query("generatedImages").withIndex("by_product", (q) => q.eq("productId", productId)).collect();
+      const relevant = images.filter((image) => image.jobId === args.jobId);
+      const anyFailed = relevant.some((image) => image.status === "failed");
+      const anyGenerated = relevant.some((image) => image.status === "generated" || image.status === "uploaded");
+      await ctx.db.patch(productId, {
+        generationStatus: anyFailed && anyGenerated ? "partial" : anyFailed ? "failed" : "ready",
+        updatedAt: Date.now()
+      });
+    }
+    return true;
+  }
+});
