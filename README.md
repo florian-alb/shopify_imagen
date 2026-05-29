@@ -1,6 +1,6 @@
 # Shopify Image Studio
 
-Mobile-first TanStack Start + Convex app for generating Shopify curtain product imagery with OpenAI, storing generated assets in Cloudflare R2, reviewing them, and manually pushing approved images back to Shopify.
+Mobile-first TanStack Start + Convex app for generating Shopify curtain product imagery with OpenAI Images or Google's Nano Banana Pro, storing generated assets in Cloudflare R2, reviewing them, and manually pushing approved images back to Shopify.
 
 The original local CLI workflow remains in `src/` for reference, but the primary app now lives in:
 
@@ -14,6 +14,7 @@ The original local CLI workflow remains in `src/` for reference, but the primary
 - Syncs active Shopify products through the Admin GraphQL API into Convex.
 - Detects fixation types using the preserved normalization and synonym behavior.
 - Filters products by name/handle, category, collection, and generation state.
+- Selects OpenAI Images or Nano Banana Pro in settings and records the selected engine on each new job.
 - Generates selected image types in Convex background jobs with realtime progress.
 - Stores image bytes in Cloudflare R2 and stores only URLs/metadata in Convex.
 - Lets you edit/reset prompt templates in `/settings/prompts`.
@@ -73,6 +74,16 @@ OPENAI_IMAGE_REQUESTS_PER_MINUTE=5
 GENERATION_CONCURRENCY=1
 ```
 
+Nano Banana Pro image generation:
+
+```env
+GEMINI_API_KEY=
+GEMINI_IMAGE_MODEL=gemini-3-pro-image-preview
+GEMINI_IMAGE_REQUESTS_PER_MINUTE=5
+```
+
+`gemini-3-pro-image-preview` is Google's Gemini API identifier for Nano Banana Pro. Add `GEMINI_API_KEY` to the Convex deployment environment, then choose **Nano Banana Pro (Gemini)** on `/settings`. New jobs use the selected engine; existing jobs continue with the engine recorded when they were created.
+
 Shopify Admin GraphQL:
 
 ```env
@@ -100,13 +111,14 @@ R2_PUBLIC_BASE_URL=
 1. Visit `/login`.
 2. Create the first admin account, then sign in.
 3. Go to `/settings/prompts` and seed default prompts if they are not already present.
-4. Go to `/products` and click **Sync Shopify**.
-5. Select one or more products.
-6. Choose image types with checkboxes. The budget preset selects `situation`, `closeup`, `texture`, and `oeillets` when available.
-7. Start the background generation job.
-8. Watch realtime progress in `/jobs/$jobId`.
-9. Inspect generated URLs and prompt history in `/products/$productId`.
-10. Click **Push**, confirm, and optionally choose whether to replace the existing Shopify gallery.
+4. Go to `/settings` and select **OpenAI Images** or **Nano Banana Pro (Gemini)**.
+5. Go to `/products` and click **Sync Shopify**.
+6. Select one or more products.
+7. Choose image types with checkboxes. The budget preset selects `situation`, `closeup`, `texture`, and `oeillets` when available.
+8. Start the background generation job.
+9. Watch realtime progress in `/jobs/$jobId`, or stay on the product page while statuses update.
+10. Inspect generated URLs, generator labels, and prompt history in `/products/$productId`.
+11. Click **Push**, confirm, and optionally choose whether to replace the existing Shopify gallery.
 
 ## Image Type Rules
 
@@ -128,7 +140,7 @@ Bulk mode shows image types available across selected products. If a fixation ty
 
 ## Safety
 
-- Secrets are only read by Convex actions or server runtime code, never from browser bundles.
+- OpenAI and Gemini API keys are only read by Convex actions, never from browser bundles.
 - Generated image binaries are uploaded to R2, not stored in Convex.
 - Shopify prices, stock, variants, descriptions, status, and inventory are never modified.
 - Generated images are never pushed automatically after generation.
@@ -156,7 +168,7 @@ CONVEX_DEPLOY_KEY=... npx convex dev --once --typecheck enable
 3. Deploy Convex functions with `npx convex deploy`.
 4. Deploy the TanStack Start app to Vercel with `npm run build`.
 
-Keep OpenAI, Shopify, and R2 secrets out of `VITE_` variables. Only `VITE_CONVEX_URL` is browser-visible.
+Keep OpenAI, Gemini, Shopify, and R2 secrets out of `VITE_` variables. Only `VITE_CONVEX_URL` is browser-visible.
 
 ## Legacy CLI
 

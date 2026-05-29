@@ -78,6 +78,8 @@ export default defineSchema({
   generationJobs: defineTable({
     status: jobStatus,
     mode: v.union(v.literal("single"), v.literal("bulk")),
+    imageProvider: v.optional(v.union(v.literal("openai"), v.literal("gemini"))),
+    imageModel: v.optional(v.string()),
     productIds: v.array(v.id("products")),
     selectedImageTypes: v.array(v.string()),
     forceRegenerate: v.boolean(),
@@ -97,6 +99,8 @@ export default defineSchema({
     productId: v.id("products"),
     jobId: v.id("generationJobs"),
     imageType: v.string(),
+    imageProvider: v.optional(v.union(v.literal("openai"), v.literal("gemini"))),
+    imageModel: v.optional(v.string()),
     promptUsed: v.string(),
     sourceImageUrl: v.optional(v.union(v.string(), v.null())),
     generatedImageUrl: v.optional(v.union(v.string(), v.null())),

@@ -2,16 +2,17 @@ Use the uploaded image as the exact product reference.
 
 Preserve the curtain exactly as shown in the reference image:
 - same color
-- same premium fabric appearance
-- same padded / blackout / insulated construction
-- same texture and material density
+- same fabric appearance
+- same texture
+- same thickness
+- same construction
 - same stitching and finishing
-- same drape behavior
-- same overall design and proportions
-- same sense of thickness and weight
+- same overall design
+- same sense of weight and quality
 
 Do not change the product.
 Do not invent new features.
+Do not change the color.
 Do not make the curtain lighter, thinner, smoother, or more transparent than it really is.
 Do not turn it into linen, sheer fabric, or a lightweight decorative curtain.
 

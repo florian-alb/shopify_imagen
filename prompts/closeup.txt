@@ -3,12 +3,12 @@ Use the uploaded image as the exact product reference.
 Preserve the curtain exactly as shown in the reference image:
 - same color
 - same thick textile appearance
-- same padded / blackout structure
+- same fabric texture and density
 - same stitching and seam quality
-- same texture and density
 - same edge finishing
 - same premium construction
 - same overall design character
+- same substantial weight and drape
 
 Do not change the product.
 Do not simplify the material.

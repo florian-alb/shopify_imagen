@@ -1,9 +1,22 @@
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
-import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
+import { internalMutation, internalQuery, mutation, query, type MutationCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireUserId } from "./authz";
 import { availableTypesForProduct, isImageType, renderPrompt } from "./lib";
+
+type ImageProvider = "openai" | "gemini";
+
+async function currentGenerationEngine(ctx: MutationCtx) {
+  const rows = await ctx.db.query("appSettings").collect();
+  const settings = Object.fromEntries(rows.map((row: Doc<"appSettings">) => [row.key, row.value]));
+  const imageProvider: ImageProvider = settings.IMAGE_PROVIDER === "gemini" ? "gemini" : "openai";
+  const imageModel =
+    imageProvider === "gemini"
+      ? String(settings.GEMINI_IMAGE_MODEL ?? "gemini-3-pro-image-preview")
+      : String(settings.OPENAI_IMAGE_MODEL ?? "gpt-image-2-2026-04-21");
+  return { imageProvider, imageModel };
+}
 
 export const list = query({
   args: {},
@@ -40,6 +53,7 @@ export const create = mutation({
     const products = (await Promise.all(args.productIds.map((id) => ctx.db.get(id)))).filter(Boolean) as Doc<"products">[];
     if (!products.length) throw new Error("No products found.");
 
+    const { imageProvider, imageModel } = await currentGenerationEngine(ctx);
     const prompts = await ctx.db.query("promptTemplates").collect();
     const promptByType = new Map(prompts.filter((prompt) => prompt.isActive).map((prompt) => [prompt.imageType, prompt]));
     const now = Date.now();
@@ -49,6 +63,9 @@ export const create = mutation({
       promptUsed: string;
       sourceImageUrl: string | null;
     }> = [];
+
+    let anyTypeAvailable = false;
+    let anySkippedAsExisting = false;
 
     for (const product of products) {
       const available = new Set(availableTypesForProduct(product.detectedFixations));
@@ -64,7 +81,11 @@ export const create = mutation({
 
       for (const imageType of selectedImageTypes) {
         if (!available.has(imageType as never)) continue;
-        if (!args.forceRegenerate && existingReady.has(imageType)) continue;
+        anyTypeAvailable = true;
+        if (!args.forceRegenerate && existingReady.has(imageType)) {
+          anySkippedAsExisting = true;
+          continue;
+        }
         const template = promptByType.get(imageType);
         if (!template) throw new Error(`No active prompt template found for ${imageType}.`);
         const promptUsed = renderPrompt(template.content, {
@@ -83,12 +104,21 @@ export const create = mutation({
     }
 
     if (!planned.length) {
-      throw new Error("No generation tasks are available for the selected products and image types.");
+      if (anyTypeAvailable && anySkippedAsExisting) {
+        throw new Error(
+          "All selected image types already exist for these products. Enable \"Regenerate existing\" to recreate them."
+        );
+      }
+      throw new Error(
+        "None of the selected image types apply to the chosen products. Fixation types only run on products where that fixation was detected."
+      );
     }
 
     const jobId = await ctx.db.insert("generationJobs", {
       status: "queued",
       mode: products.length === 1 ? "single" : "bulk",
+      imageProvider,
+      imageModel,
       productIds: products.map((product) => product._id),
       selectedImageTypes,
       forceRegenerate: args.forceRegenerate,
@@ -106,6 +136,8 @@ export const create = mutation({
         productId: task.product._id,
         jobId,
         imageType: task.imageType,
+        imageProvider,
+        imageModel,
         promptUsed: task.promptUsed,
         sourceImageUrl: task.sourceImageUrl,
         generatedImageUrl: null,

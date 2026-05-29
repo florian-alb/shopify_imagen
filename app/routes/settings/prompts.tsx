@@ -2,7 +2,12 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery } from "convex/react";
 import { RotateCcw, Save } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Badge, Button, EmptyState, PageHeader } from "../../components/ui";
+import { BusyIcon, EmptyState, PageHeader, StateBadge } from "@/components/page";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Textarea } from "@/components/ui/textarea";
 import { api } from "../../../convex/_generated/api";
 import type { Doc, Id } from "../../../convex/_generated/dataModel";
 
@@ -66,50 +71,66 @@ function PromptSettingsPage() {
 
   return (
     <main className="page">
-      <PageHeader eyebrow="Settings" title="Prompt templates" action={<Button variant="secondary" onClick={() => void seedDefaults({})}>Seed defaults</Button>} />
+      <PageHeader
+        eyebrow="Settings"
+        title="Prompt templates"
+        action={<Button variant="outline" size="lg" onClick={() => void seedDefaults({})}>Seed defaults</Button>}
+      />
 
-      <section className="panel mb-4 p-4">
-        <div className="mb-2 text-sm font-semibold">Supported variables</div>
-        <div className="flex flex-wrap gap-2">
+      <Card className="mb-4 rounded-lg">
+        <CardHeader>
+          <CardTitle>Supported variables</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-wrap gap-2">
           {supportedVariables.map((item) => (
-            <Badge key={item}>{item}</Badge>
+            <Badge key={item} variant="outline">{item}</Badge>
           ))}
-        </div>
-      </section>
+        </CardContent>
+      </Card>
 
-      {error ? <div className="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-[var(--danger)]">{error}</div> : null}
+      {error ? (
+        <Alert variant="destructive" className="mb-4">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      ) : null}
 
       {prompts === undefined ? (
-        <EmptyState title="Loading prompts" body="Fetching prompt templates from Convex." />
+        <EmptyState loading title="Loading prompts" body="Fetching prompt templates from Convex." />
       ) : prompts.length === 0 ? (
         <EmptyState title="No prompts yet" body="Seed default prompt templates to start generating images." />
       ) : (
         <section className="grid gap-4">
           {prompts.map((prompt) => (
-            <article key={prompt._id} className="panel p-4">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <Card key={prompt._id} className="rounded-lg">
+              <CardHeader className="flex flex-row items-start justify-between gap-2">
                 <div>
-                  <h2 className="text-lg font-semibold">{prompt.label}</h2>
-                  <p className="text-sm text-[var(--muted)]">{prompt.imageType}</p>
+                  <CardTitle className="text-lg">{prompt.label}</CardTitle>
+                  <p className="text-sm text-muted-foreground">{prompt.imageType}</p>
                 </div>
-                <Badge tone={prompt.isActive ? "success" : "warning"}>{prompt.isActive ? "Active" : "Inactive"}</Badge>
-              </div>
-              <textarea
-                className="textarea"
-                value={drafts[prompt._id] ?? prompt.content}
-                onChange={(event) => setDrafts((current) => ({ ...current, [prompt._id]: event.target.value }))}
-              />
-              <div className="mt-3 flex justify-end gap-2">
-                <Button variant="secondary" onClick={() => void reset(prompt._id)} loading={busy === prompt._id}>
-                  <RotateCcw size={16} />
-                  Reset
-                </Button>
-                <Button onClick={() => void save(prompt._id)} loading={busy === prompt._id}>
-                  <Save size={16} />
-                  Save
-                </Button>
-              </div>
-            </article>
+                <StateBadge state={prompt.isActive ? "success" : "warning"}>
+                  {prompt.isActive ? "Active" : "Inactive"}
+                </StateBadge>
+              </CardHeader>
+              <CardContent>
+                <Textarea
+                  className="min-h-56 font-mono text-xs leading-relaxed"
+                  value={drafts[prompt._id] ?? prompt.content}
+                  onChange={(event) => setDrafts((current) => ({ ...current, [prompt._id]: event.target.value }))}
+                />
+                <div className="mt-3 flex justify-end gap-2">
+                  <Button variant="outline" onClick={() => void reset(prompt._id)} disabled={busy === prompt._id}>
+                    <BusyIcon busy={busy === prompt._id} />
+                    {busy !== prompt._id ? <RotateCcw data-icon="inline-start" /> : null}
+                    Reset
+                  </Button>
+                  <Button onClick={() => void save(prompt._id)} disabled={busy === prompt._id}>
+                    <BusyIcon busy={busy === prompt._id} />
+                    {busy !== prompt._id ? <Save data-icon="inline-start" /> : null}
+                    Save
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
           ))}
         </section>
       )}

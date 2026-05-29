@@ -12,6 +12,22 @@ import { ConvexReactClient } from "convex/react";
 import { Boxes, ImageIcon, ListChecks, Settings } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect } from "react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+  SidebarRail,
+  SidebarTrigger
+} from "@/components/ui/sidebar";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import appCss from "../styles.css?url";
 
 const convexUrl = import.meta.env.VITE_CONVEX_URL || "https://placeholder.convex.cloud";
@@ -34,9 +50,11 @@ function RootComponent() {
   return (
     <RootDocument>
       <ConvexAuthProvider client={convex}>
-        <AuthShell>
-          <Outlet />
-        </AuthShell>
+        <TooltipProvider>
+          <AuthShell>
+            <Outlet />
+          </AuthShell>
+        </TooltipProvider>
       </ConvexAuthProvider>
     </RootDocument>
   );
@@ -76,19 +94,19 @@ function AuthShell({ children }: { children: ReactNode }) {
   if (auth.isLoading || !auth.isAuthenticated) {
     return (
       <main className="grid min-h-screen place-items-center bg-[var(--surface)] px-4">
-        <div className="rounded-lg border border-[var(--border)] bg-white px-5 py-4 text-sm text-[var(--muted)] shadow-sm">
-          Checking session...
-        </div>
+        <Card size="sm" className="rounded-lg">
+          <CardContent className="text-sm text-muted-foreground">Checking session...</CardContent>
+        </Card>
       </main>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[var(--surface)] text-[var(--ink)]">
+    <SidebarProvider className="bg-[var(--surface)]">
       <DesktopNav />
-      <div className="pb-20 md:ml-64 md:pb-0">{children}</div>
+      <div className="min-w-0 flex-1 pb-20 md:pb-0">{children}</div>
       <MobileNav />
-    </div>
+    </SidebarProvider>
   );
 }
 
@@ -101,44 +119,58 @@ const navItems = [
 
 function DesktopNav() {
   return (
-    <aside className="fixed inset-y-0 left-0 hidden w-64 border-r border-[var(--border)] bg-white px-4 py-5 md:block">
-      <Link to="/products" className="mb-6 block">
-        <div className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Shopify</div>
-        <div className="text-xl font-semibold">Image Studio</div>
-      </Link>
-      <nav className="space-y-1">
-        {navItems.map((item) => {
-          const Icon = item.icon;
-          return (
-            <Link
-              key={item.to}
-              to={item.to}
-              className="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--ink)] [&.active]:bg-[var(--ink)] [&.active]:text-white"
-            >
-              <Icon size={18} />
-              <span>{item.label}</span>
-            </Link>
-          );
-        })}
-      </nav>
-    </aside>
+    <Sidebar collapsible="icon" className="border-r bg-white">
+      <SidebarHeader className="px-4 pb-5 pt-7 group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:px-2">
+        <div className="flex items-start justify-between gap-2 group-data-[collapsible=icon]:justify-center">
+          <Link to="/products" className="min-w-0 group-data-[collapsible=icon]:hidden">
+            <p className="text-xs font-semibold uppercase text-muted-foreground">Shopify</p>
+            <p className="mt-1 whitespace-nowrap text-xl font-semibold">Image Studio</p>
+          </Link>
+          <SidebarTrigger className="mt-0.5 shrink-0 text-muted-foreground" />
+        </div>
+      </SidebarHeader>
+      <SidebarContent className="px-3 group-data-[collapsible=icon]:px-0">
+        <SidebarGroup>
+          <SidebarGroupContent>
+            <SidebarMenu className="gap-1">
+              {navItems.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <SidebarMenuItem key={item.to}>
+                    <SidebarMenuButton
+                      asChild
+                      tooltip={item.label}
+                      className="h-11 gap-3 text-muted-foreground data-[active=true]:bg-primary data-[active=true]:text-primary-foreground"
+                    >
+                      <Link to={item.to} activeProps={{ "data-active": true }}>
+                        <Icon />
+                        <span>{item.label}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      </SidebarContent>
+      <SidebarRail />
+    </Sidebar>
   );
 }
 
 function MobileNav() {
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-4 border-t border-[var(--border)] bg-white/95 px-2 pb-[env(safe-area-inset-bottom)] pt-2 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur md:hidden">
+    <nav className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-4 border-t bg-background/95 px-2 pb-[env(safe-area-inset-bottom)] pt-2 shadow-sm backdrop-blur md:hidden">
       {navItems.map((item) => {
         const Icon = item.icon;
         return (
-          <Link
-            key={item.to}
-            to={item.to}
-            className="flex flex-col items-center gap-1 rounded-md px-2 py-2 text-[11px] font-medium text-[var(--muted)] [&.active]:bg-[var(--ink)] [&.active]:text-white"
-          >
-            <Icon size={18} />
-            <span>{item.label}</span>
-          </Link>
+          <Button key={item.to} variant="ghost" className="h-12 px-1 text-muted-foreground" asChild>
+            <Link to={item.to} className="flex flex-col gap-0.5 text-[11px] [&.active]:bg-muted [&.active]:text-foreground">
+              <Icon className="size-4" />
+              <span>{item.label}</span>
+            </Link>
+          </Button>
         );
       })}
     </nav>
@@ -149,9 +181,9 @@ function NotFound() {
   return (
     <main className="mx-auto max-w-3xl px-4 py-8">
       <h1 className="text-2xl font-semibold">Page not found</h1>
-      <Link to="/products" className="mt-4 inline-flex text-sm font-medium text-[var(--accent)]">
-        Back to products
-      </Link>
+      <Button variant="outline" className="mt-4" asChild>
+        <Link to="/products">Back to products</Link>
+      </Button>
     </main>
   );
 }

@@ -1,6 +1,8 @@
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "convex/react";
-import { Badge, EmptyState, PageHeader } from "../../components/ui";
+import { EmptyState, PageHeader, StateBadge } from "@/components/page";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
 import { api } from "../../../convex/_generated/api";
 import type { Doc } from "../../../convex/_generated/dataModel";
 
@@ -14,31 +16,35 @@ function JobsPage() {
     <main className="page">
       <PageHeader eyebrow="Jobs" title="Background generation jobs" />
       {jobs === undefined ? (
-        <EmptyState title="Loading jobs" body="Fetching recent generation work from Convex." />
+        <EmptyState loading title="Loading jobs" body="Fetching recent generation work from Convex." />
       ) : jobs.length === 0 ? (
         <EmptyState title="No jobs yet" body="Create a generation job from the products page." />
       ) : (
         <section className="grid gap-3">
           {jobs.map((job) => {
             const pct = job.totalTasks ? Math.round(((job.completedTasks + job.failedTasks) / job.totalTasks) * 100) : 0;
+            const state = job.status === "completed" ? "success" : job.status === "failed" ? "danger" : "warning";
             return (
-              <Link key={job._id} to="/jobs/$jobId" params={{ jobId: job._id }} className="panel block p-4">
-                <div className="mb-3 flex items-start justify-between gap-3">
-                  <div>
-                    <h2 className="font-semibold">{job.mode === "bulk" ? "Bulk generation" : "Single product generation"}</h2>
-                    <p className="text-sm text-[var(--muted)]">{new Date(job.createdAt).toLocaleString()}</p>
-                  </div>
-                  <Badge tone={job.status === "completed" ? "success" : job.status === "failed" ? "danger" : "warning"}>
-                    {job.status}
-                  </Badge>
-                </div>
-                <div className="progress-track">
-                  <div className="progress-fill" style={{ width: `${pct}%` }} />
-                </div>
-                <div className="mt-2 text-sm text-[var(--muted)]">
-                  {job.completedTasks} completed · {job.failedTasks} failed · {job.totalTasks} total
-                </div>
-              </Link>
+              <Card key={job._id} className="rounded-lg">
+                <Link to="/jobs/$jobId" params={{ jobId: job._id }} className="flex flex-col gap-4">
+                  <CardHeader className="flex flex-row items-start justify-between gap-3">
+                    <div>
+                      <CardTitle>{job.mode === "bulk" ? "Bulk generation" : "Single product generation"}</CardTitle>
+                      <p className="text-sm text-muted-foreground">{new Date(job.createdAt).toLocaleString()}</p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <StateBadge>{job.imageProvider === "gemini" ? "Nano Banana Pro" : "OpenAI"}</StateBadge>
+                      <StateBadge state={state}>{job.status}</StateBadge>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <Progress value={pct} className="h-2" />
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      {job.completedTasks} completed / {job.failedTasks} failed / {job.totalTasks} total
+                    </p>
+                  </CardContent>
+                </Link>
+              </Card>
             );
           })}
         </section>
