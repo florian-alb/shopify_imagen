@@ -4,6 +4,9 @@ import { requireUserId } from "./authz";
 
 const DEFAULT_SETTINGS: Record<string, unknown> = {
   IMAGE_PROVIDER: "openai",
+  GENERATION_EXECUTION_MODE: "realtime",
+  VIBE_ANALYSIS: "on",
+  VIBE_MODEL: "gemini-2.5-flash-lite",
   OPENAI_IMAGE_MODEL: "gpt-image-2-2026-04-21",
   OPENAI_IMAGE_SIZE: "1024x1024",
   OPENAI_IMAGE_QUALITY: "medium",
@@ -42,6 +45,12 @@ export const set = mutation({
     await requireUserId(ctx);
     if (args.key === "IMAGE_PROVIDER" && args.value !== "openai" && args.value !== "gemini") {
       throw new Error("IMAGE_PROVIDER must be openai or gemini.");
+    }
+    if (args.key === "GENERATION_EXECUTION_MODE" && args.value !== "realtime" && args.value !== "batch") {
+      throw new Error("GENERATION_EXECUTION_MODE must be realtime or batch.");
+    }
+    if (args.key === "VIBE_ANALYSIS" && args.value !== "on" && args.value !== "off") {
+      throw new Error("VIBE_ANALYSIS must be on or off.");
     }
     const existing = await ctx.db.query("appSettings").withIndex("by_key", (q) => q.eq("key", args.key)).unique();
     if (existing) {

@@ -72,8 +72,10 @@ function ProductsPage() {
     generationStatus: status || undefined,
   }) as Product[] | undefined;
   const facets = useQuery(api.products.facets) as ProductFacets | undefined;
+  const settings = useQuery(api.settings.list);
   const syncProducts = useAction(api.shopify.syncProducts);
   const createJob = useMutation(api.jobs.create);
+  const vibeDefault = String(settings?.VIBE_ANALYSIS ?? "on") !== "off";
 
   const selectedProducts = useMemo(
     () => (products ?? []).filter((product) => selected.has(product._id)),
@@ -118,7 +120,7 @@ function ProductsPage() {
     });
   }
 
-  async function generate(imageTypes: ImageType[], forceRegenerate: boolean) {
+  async function generate(imageTypes: ImageType[], forceRegenerate: boolean, useVibeAnalysis: boolean) {
     setCreatingJob(true);
     setError(null);
     setCreatedJobId(null);
@@ -127,6 +129,7 @@ function ProductsPage() {
         productIds: Array.from(selected),
         selectedImageTypes: imageTypes,
         forceRegenerate,
+        useVibeAnalysis,
       });
       setChooserOpen(false);
       setSelected(new Set());
@@ -300,7 +303,8 @@ function ProductsPage() {
           <ImageTypeChooser
             products={selectedProducts}
             submitting={creatingJob}
-            onGenerate={(types, force) => void generate(types, force)}
+            defaultUseVibe={vibeDefault}
+            onGenerate={(types, force, useVibe) => void generate(types, force, useVibe)}
           />
         ) : null}
       </Dialog>
@@ -422,11 +426,13 @@ function ProductRow({
 function ImageTypeChooser({
   products,
   submitting,
+  defaultUseVibe,
   onGenerate,
 }: {
   products: Product[];
   submitting: boolean;
-  onGenerate: (imageTypes: ImageType[], forceRegenerate: boolean) => void;
+  defaultUseVibe: boolean;
+  onGenerate: (imageTypes: ImageType[], forceRegenerate: boolean, useVibeAnalysis: boolean) => void;
 }) {
   const available = useMemo(
     () => getBulkAvailableImageTypes(products),
@@ -441,6 +447,7 @@ function ImageTypeChooser({
       ),
   );
   const [force, setForce] = useState(false);
+  const [useVibe, setUseVibe] = useState(defaultUseVibe);
 
   function toggle(type: ImageType) {
     setSelected((current) => {
@@ -481,6 +488,13 @@ function ImageTypeChooser({
           />
           Regenerate existing
         </Label>
+        <Label className="flex h-8 items-center gap-2 rounded-lg border px-3">
+          <Checkbox
+            checked={useVibe}
+            onCheckedChange={(checked) => setUseVibe(checked === true)}
+          />
+          Scene vibe analysis
+        </Label>
       </div>
       <div className="grid gap-2">
         {ALL_IMAGE_TYPES.filter((type) => available.includes(type)).map(
@@ -501,7 +515,7 @@ function ImageTypeChooser({
       <DialogFooter>
         <Button
           disabled={!selected.size || submitting}
-          onClick={() => onGenerate(Array.from(selected), force)}
+          onClick={() => onGenerate(Array.from(selected), force, useVibe)}
         >
           <BusyIcon busy={submitting} />
           {!submitting ? <WandSparkles data-icon="inline-start" /> : null}

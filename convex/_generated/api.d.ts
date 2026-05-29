@@ -10,10 +10,12 @@
 
 import type * as auth from "../auth.js";
 import type * as authz from "../authz.js";
+import type * as crons from "../crons.js";
 import type * as generation from "../generation.js";
 import type * as http from "../http.js";
 import type * as jobs from "../jobs.js";
 import type * as lib from "../lib.js";
+import type * as pricing from "../pricing.js";
 import type * as products from "../products.js";
 import type * as promptDefaults from "../promptDefaults.js";
 import type * as prompts from "../prompts.js";
@@ -30,10 +32,12 @@ import type {
 declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   authz: typeof authz;
+  crons: typeof crons;
   generation: typeof generation;
   http: typeof http;
   jobs: typeof jobs;
   lib: typeof lib;
+  pricing: typeof pricing;
   products: typeof products;
   promptDefaults: typeof promptDefaults;
   prompts: typeof prompts;

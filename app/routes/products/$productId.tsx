@@ -54,7 +54,11 @@ function ProductDetailPage() {
   const product = data?.product;
   const images = data?.images ?? [];
   const availableTypes = useMemo(() => getAvailableImageTypes(product?.detectedFixations ?? []), [product?.detectedFixations]);
-  const readyImages = images.filter((image) => image.status === "generated" && image.storageUrl);
+  // Include already-pushed ("uploaded") images so they can be re-pushed, e.g.
+  // after regenerating them as optimized WebP.
+  const readyImages = images.filter(
+    (image) => (image.status === "generated" || image.status === "uploaded") && image.storageUrl
+  );
 
   function openGenerate() {
     setSelectedTypes(new Set(getBudgetImageTypes(product?.detectedFixations ?? [])));

@@ -24,6 +24,7 @@ const settingFields = [
   "GEMINI_IMAGE_SIZE",
   "GEMINI_IMAGE_ASPECT_RATIO",
   "GEMINI_IMAGE_REQUESTS_PER_MINUTE",
+  "VIBE_MODEL",
   "GENERATION_CONCURRENCY"
 ] as const;
 
@@ -49,16 +50,18 @@ function SettingsPage() {
     }
   }
 
-  async function switchProvider(value: string) {
-    setSaving("IMAGE_PROVIDER");
+  async function switchSetting(key: string, value: string) {
+    setSaving(key);
     try {
-      await setSetting({ key: "IMAGE_PROVIDER", value });
+      await setSetting({ key, value });
     } finally {
       setSaving(null);
     }
   }
 
   const provider = String(settings?.IMAGE_PROVIDER ?? "openai");
+  const executionMode = String(settings?.GENERATION_EXECUTION_MODE ?? "realtime");
+  const vibeAnalysis = String(settings?.VIBE_ANALYSIS ?? "on");
 
   return (
     <main className="page">
@@ -70,7 +73,7 @@ function SettingsPage() {
             <p className="mt-1 text-sm text-muted-foreground">Applied to new background jobs.</p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
-            <Select value={provider} onValueChange={(value) => void switchProvider(value)} disabled={saving === "IMAGE_PROVIDER"}>
+            <Select value={provider} onValueChange={(value) => void switchSetting("IMAGE_PROVIDER", value)} disabled={saving === "IMAGE_PROVIDER"}>
               <SelectTrigger id="image-provider" className="h-10 min-w-64">
                 <SelectValue />
               </SelectTrigger>
@@ -82,6 +85,50 @@ function SettingsPage() {
             <BusyIcon busy={saving === "IMAGE_PROVIDER"} />
             <StateBadge state={provider === "gemini" ? "success" : "neutral"}>
               {provider === "gemini" ? "Nano Banana Pro active" : "OpenAI active"}
+            </StateBadge>
+          </div>
+          <Separator className="md:col-span-2" />
+          <div>
+            <Label htmlFor="execution-mode" className="font-medium">Execution mode</Label>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Batch is ~50% cheaper but asynchronous (results can take up to ~24h).
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <Select value={executionMode} onValueChange={(value) => void switchSetting("GENERATION_EXECUTION_MODE", value)} disabled={saving === "GENERATION_EXECUTION_MODE"}>
+              <SelectTrigger id="execution-mode" className="h-10 min-w-64">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="realtime">Real-time (instant, full price)</SelectItem>
+                <SelectItem value="batch">Batch (~50% cheaper, async)</SelectItem>
+              </SelectContent>
+            </Select>
+            <BusyIcon busy={saving === "GENERATION_EXECUTION_MODE"} />
+            <StateBadge state={executionMode === "batch" ? "success" : "neutral"}>
+              {executionMode === "batch" ? "Batch mode" : "Real-time mode"}
+            </StateBadge>
+          </div>
+          <Separator className="md:col-span-2" />
+          <div>
+            <Label htmlFor="vibe-analysis" className="font-medium">Scene vibe analysis</Label>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Analyzes the product image once with a low-cost vision model to steer the generated scene (e.g. kids room vs. living room).
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <Select value={vibeAnalysis} onValueChange={(value) => void switchSetting("VIBE_ANALYSIS", value)} disabled={saving === "VIBE_ANALYSIS"}>
+              <SelectTrigger id="vibe-analysis" className="h-10 min-w-64">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="on">On (recommended)</SelectItem>
+                <SelectItem value="off">Off</SelectItem>
+              </SelectContent>
+            </Select>
+            <BusyIcon busy={saving === "VIBE_ANALYSIS"} />
+            <StateBadge state={vibeAnalysis === "on" ? "success" : "neutral"}>
+              {vibeAnalysis === "on" ? "Vibe analysis on" : "Vibe analysis off"}
             </StateBadge>
           </div>
         </CardContent>

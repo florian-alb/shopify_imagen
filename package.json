@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "images_switch": "node --env-file=.env scripts/switch_images.js",
     "dev": "vite dev",
     "build": "vite build",
     "start": "node .output/server/index.mjs",

@@ -107,6 +107,44 @@ export function availableTypesForProduct(detectedFixations: string[]): ImageType
   return [...BASE_IMAGE_TYPES, ...FIXATION_ORDER.filter((fixation) => detected.has(fixation))];
 }
 
+// Turns any text into a clean, URL/filename-safe slug (lowercase, no accents,
+// dash-separated). Reuses normalizeText for accent/space normalization.
+export function slugify(value: string): string {
+  return normalizeText(value)
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+// Builds an SEO-friendly stored filename from the product title and image type,
+// e.g. "voilage-lin-beige-situation-lifestyle.webp". The human-readable French
+// label is preferred over the raw type code when available.
+export function buildSeoImageFilename(opts: { title: string; imageType: string; extension: string }): string {
+  const typeLabel = isImageType(opts.imageType) ? IMAGE_TYPE_LABELS[opts.imageType] : opts.imageType;
+  const slug = slugify(`${opts.title} ${typeLabel}`).slice(0, 100).replace(/-+$/g, "") || "produit";
+  return `${slug}.${opts.extension}`;
+}
+
 export function renderPrompt(template: string, variables: Record<string, string>): string {
   return template.replace(/\{\{\s*([A-Z0-9_]+)\s*\}\}/g, (_match, key: string) => variables[key] ?? "");
+}
+
+// Appends runtime directives to a rendered prompt: how to use a second
+// reference image, and the scene context inferred from the vibe analysis.
+export function augmentPrompt(
+  basePrompt: string,
+  opts: { vibe?: string | null; hasSecondReference?: boolean }
+): string {
+  const additions: string[] = [];
+  if (opts.hasSecondReference) {
+    additions.push(
+      "Reference images: the FIRST image is the exact product to reproduce faithfully; the SECOND image is a styling/ambiance reference for the surrounding scene only — never copy its product."
+    );
+  }
+  const vibe = opts.vibe?.trim();
+  if (vibe) {
+    additions.push(
+      `Scene context to honour — match this setting, audience and mood, and override any generic interior described above: ${vibe}`
+    );
+  }
+  return additions.length ? `${basePrompt}\n\n${additions.join("\n\n")}` : basePrompt;
 }

@@ -10,11 +10,37 @@ export const Route = createFileRoute("/jobs/")({
   component: JobsPage
 });
 
+function formatUsd(value: number) {
+  return `$${value.toFixed(value < 1 ? 4 : 2)}`;
+}
+
 function JobsPage() {
   const jobs = useQuery(api.jobs.list) as Doc<"generationJobs">[] | undefined;
+  const cost = useQuery(api.jobs.costSummary);
   return (
     <main className="page">
       <PageHeader eyebrow="Jobs" title="Background generation jobs" />
+      {cost ? (
+        <Card className="mb-4 rounded-lg">
+          <CardContent className="grid gap-4 pt-1 sm:grid-cols-3">
+            <div>
+              <p className="text-sm text-muted-foreground">Total spent</p>
+              <p className="text-2xl font-semibold">{formatUsd(cost.totalCost)}</p>
+              <p className="text-xs text-muted-foreground">
+                {(cost.inputTokens + cost.outputTokens).toLocaleString()} tokens · {cost.pricedImageCount} images
+              </p>
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Image generation</p>
+              <p className="text-2xl font-semibold">{formatUsd(cost.generationCost)}</p>
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Vibe analysis</p>
+              <p className="text-2xl font-semibold">{formatUsd(cost.analysisCost)}</p>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
       {jobs === undefined ? (
         <EmptyState loading title="Loading jobs" body="Fetching recent generation work from Convex." />
       ) : jobs.length === 0 ? (

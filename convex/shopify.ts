@@ -207,7 +207,11 @@ export const pushProductImages = action({
     if (!product) throw new Error("Product not found.");
     const allImages = (await ctx.runQuery(internal.shopify.generatedImagesForPush, { productId: args.productId })) as Doc<"generatedImages">[];
     const selected = args.imageIds?.length ? allImages.filter((image) => args.imageIds!.includes(image._id)) : allImages;
-    const ready = selected.filter((image) => image.storageUrl && image.status === "generated");
+    // Allow re-pushing images already marked "uploaded" (e.g. after a WebP
+    // re-generation), not just freshly "generated" ones.
+    const ready = selected.filter(
+      (image) => image.storageUrl && (image.status === "generated" || image.status === "uploaded")
+    );
     if (!ready.length) throw new Error("No approved generated images are ready to push.");
 
     const mediaInputs = ready.map((image) => ({

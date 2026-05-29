@@ -6,16 +6,30 @@ import { requireUserId } from "./authz";
 import { availableTypesForProduct, isImageType, renderPrompt } from "./lib";
 
 type ImageProvider = "openai" | "gemini";
+type ExecutionMode = "realtime" | "batch";
+
+// Reference images for a product, in priority order, de-duplicated.
+// First entry feeds the primary reference, the second (if any) is passed as a
+// staging/context reference alongside the prompt.
+function referenceImageUrls(product: Doc<"products">): string[] {
+  const candidates = [
+    product.featuredImageUrl,
+    ...product.currentShopifyImages.map((image) => (image as { url?: string } | null)?.url)
+  ].filter((url): url is string => typeof url === "string" && url.length > 0);
+  return Array.from(new Set(candidates));
+}
 
 async function currentGenerationEngine(ctx: MutationCtx) {
   const rows = await ctx.db.query("appSettings").collect();
   const settings = Object.fromEntries(rows.map((row: Doc<"appSettings">) => [row.key, row.value]));
   const imageProvider: ImageProvider = settings.IMAGE_PROVIDER === "gemini" ? "gemini" : "openai";
+  const executionMode: ExecutionMode = settings.GENERATION_EXECUTION_MODE === "batch" ? "batch" : "realtime";
   const imageModel =
     imageProvider === "gemini"
       ? String(settings.GEMINI_IMAGE_MODEL ?? "gemini-3-pro-image-preview")
       : String(settings.OPENAI_IMAGE_MODEL ?? "gpt-image-2-2026-04-21");
-  return { imageProvider, imageModel };
+  const vibeAnalysisDefault = String(settings.VIBE_ANALYSIS ?? "on") !== "off";
+  return { imageProvider, executionMode, imageModel, vibeAnalysisDefault };
 }
 
 export const list = query({
@@ -23,6 +37,27 @@ export const list = query({
   handler: async (ctx) => {
     await requireUserId(ctx);
     return ctx.db.query("generationJobs").withIndex("by_created").order("desc").take(100);
+  }
+});
+
+export const costSummary = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireUserId(ctx);
+    const images = await ctx.db.query("generatedImages").collect();
+    const products = await ctx.db.query("products").collect();
+    const generationCost = images.reduce((sum, image) => sum + (image.costUsd ?? 0), 0);
+    const inputTokens = images.reduce((sum, image) => sum + (image.inputTokens ?? 0), 0);
+    const outputTokens = images.reduce((sum, image) => sum + (image.outputTokens ?? 0), 0);
+    const analysisCost = products.reduce((sum, product) => sum + (product.vibeCostUsd ?? 0), 0);
+    return {
+      generationCost,
+      analysisCost,
+      totalCost: generationCost + analysisCost,
+      inputTokens,
+      outputTokens,
+      pricedImageCount: images.filter((image) => image.costUsd != null).length
+    };
   }
 });
 
@@ -42,7 +77,8 @@ export const create = mutation({
   args: {
     productIds: v.array(v.id("products")),
     selectedImageTypes: v.array(v.string()),
-    forceRegenerate: v.boolean()
+    forceRegenerate: v.boolean(),
+    useVibeAnalysis: v.optional(v.boolean())
   },
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
@@ -53,7 +89,8 @@ export const create = mutation({
     const products = (await Promise.all(args.productIds.map((id) => ctx.db.get(id)))).filter(Boolean) as Doc<"products">[];
     if (!products.length) throw new Error("No products found.");
 
-    const { imageProvider, imageModel } = await currentGenerationEngine(ctx);
+    const { imageProvider, executionMode, imageModel, vibeAnalysisDefault } = await currentGenerationEngine(ctx);
+    const vibeAnalysis = args.useVibeAnalysis ?? vibeAnalysisDefault;
     const prompts = await ctx.db.query("promptTemplates").collect();
     const promptByType = new Map(prompts.filter((prompt) => prompt.isActive).map((prompt) => [prompt.imageType, prompt]));
     const now = Date.now();
@@ -62,6 +99,7 @@ export const create = mutation({
       imageType: string;
       promptUsed: string;
       sourceImageUrl: string | null;
+      sourceImageUrl2: string | null;
     }> = [];
 
     let anyTypeAvailable = false;
@@ -94,11 +132,13 @@ export const create = mutation({
           IMAGE_TYPE: imageType,
           FIXATION_TYPE: imageType
         });
+        const references = referenceImageUrls(product);
         planned.push({
           product,
           imageType,
           promptUsed,
-          sourceImageUrl: product.featuredImageUrl ?? product.currentShopifyImages[0]?.url ?? null
+          sourceImageUrl: references[0] ?? null,
+          sourceImageUrl2: references[1] ?? null
         });
       }
     }
@@ -117,6 +157,9 @@ export const create = mutation({
     const jobId = await ctx.db.insert("generationJobs", {
       status: "queued",
       mode: products.length === 1 ? "single" : "bulk",
+      executionMode,
+      batchId: null,
+      vibeAnalysis,
       imageProvider,
       imageModel,
       productIds: products.map((product) => product._id),
@@ -140,6 +183,7 @@ export const create = mutation({
         imageModel,
         promptUsed: task.promptUsed,
         sourceImageUrl: task.sourceImageUrl,
+        sourceImageUrl2: task.sourceImageUrl2,
         generatedImageUrl: null,
         storageUrl: null,
         status: "queued",
@@ -151,7 +195,11 @@ export const create = mutation({
       await ctx.db.patch(task.product._id, { generationStatus: "generating", updatedAt: now });
     }
 
-    await ctx.scheduler.runAfter(0, internal.generation.processJob, { jobId });
+    await ctx.scheduler.runAfter(
+      0,
+      executionMode === "batch" ? internal.generation.submitBatch : internal.generation.processJob,
+      { jobId }
+    );
     return jobId;
   }
 });
@@ -191,11 +239,64 @@ export const nextQueuedImage = internalQuery({
   }
 });
 
+export const getJobInternal = internalQuery({
+  args: { jobId: v.id("generationJobs") },
+  handler: async (ctx, args) => {
+    return ctx.db.get(args.jobId);
+  }
+});
+
+export const imagesForJob = internalQuery({
+  args: { jobId: v.id("generationJobs") },
+  handler: async (ctx, args) => {
+    return ctx.db
+      .query("generatedImages")
+      .withIndex("by_job", (q) => q.eq("jobId", args.jobId))
+      .collect();
+  }
+});
+
+export const setBatchId = internalMutation({
+  args: { jobId: v.id("generationJobs"), batchId: v.union(v.string(), v.null()) },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.jobId, { batchId: args.batchId, updatedAt: Date.now() });
+  }
+});
+
+export const markImagesGenerating = internalMutation({
+  args: { jobId: v.id("generationJobs") },
+  handler: async (ctx, args) => {
+    const images = await ctx.db
+      .query("generatedImages")
+      .withIndex("by_job", (q) => q.eq("jobId", args.jobId))
+      .filter((q) => q.eq(q.field("status"), "queued"))
+      .collect();
+    const now = Date.now();
+    for (const image of images) {
+      await ctx.db.patch(image._id, { status: "generating", updatedAt: now });
+    }
+  }
+});
+
+export const pendingBatchJobs = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const running = await ctx.db
+      .query("generationJobs")
+      .withIndex("by_status", (q) => q.eq("status", "running"))
+      .collect();
+    return running.filter((job) => job.executionMode === "batch" && Boolean(job.batchId));
+  }
+});
+
 export const completeImage = internalMutation({
   args: {
     imageId: v.id("generatedImages"),
     generatedImageUrl: v.string(),
-    storageUrl: v.string()
+    storageUrl: v.string(),
+    inputTokens: v.optional(v.number()),
+    outputTokens: v.optional(v.number()),
+    costUsd: v.optional(v.number())
   },
   handler: async (ctx, args) => {
     const image = await ctx.db.get(args.imageId);
@@ -205,6 +306,9 @@ export const completeImage = internalMutation({
       storageUrl: args.storageUrl,
       status: "generated",
       error: null,
+      inputTokens: args.inputTokens,
+      outputTokens: args.outputTokens,
+      costUsd: args.costUsd,
       updatedAt: Date.now()
     });
     await ctx.db.patch(image.jobId, {

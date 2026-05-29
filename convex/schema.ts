@@ -58,6 +58,9 @@ export default defineSchema({
     currentShopifyImages: v.array(v.any()),
     detectedFixations: v.array(v.string()),
     generationStatus,
+    vibe: v.optional(v.union(v.string(), v.null())),
+    vibeCostUsd: v.optional(v.number()),
+    vibeAnalyzedAt: v.optional(v.number()),
     lastSyncedAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number()
@@ -78,6 +81,9 @@ export default defineSchema({
   generationJobs: defineTable({
     status: jobStatus,
     mode: v.union(v.literal("single"), v.literal("bulk")),
+    executionMode: v.optional(v.union(v.literal("realtime"), v.literal("batch"))),
+    batchId: v.optional(v.union(v.string(), v.null())),
+    vibeAnalysis: v.optional(v.boolean()),
     imageProvider: v.optional(v.union(v.literal("openai"), v.literal("gemini"))),
     imageModel: v.optional(v.string()),
     productIds: v.array(v.id("products")),
@@ -103,11 +109,15 @@ export default defineSchema({
     imageModel: v.optional(v.string()),
     promptUsed: v.string(),
     sourceImageUrl: v.optional(v.union(v.string(), v.null())),
+    sourceImageUrl2: v.optional(v.union(v.string(), v.null())),
     generatedImageUrl: v.optional(v.union(v.string(), v.null())),
     storageUrl: v.optional(v.union(v.string(), v.null())),
     status: imageStatus,
     shopifyMediaId: v.optional(v.union(v.string(), v.null())),
     error: v.optional(v.union(v.string(), v.null())),
+    inputTokens: v.optional(v.number()),
+    outputTokens: v.optional(v.number()),
+    costUsd: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number()
   })

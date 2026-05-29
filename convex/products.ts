@@ -123,6 +123,22 @@ export const upsertSynced = internalMutation({
   }
 });
 
+export const setVibe = internalMutation({
+  args: {
+    productId: v.id("products"),
+    vibe: v.string(),
+    costUsd: v.number()
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.productId, {
+      vibe: args.vibe,
+      vibeCostUsd: args.costUsd,
+      vibeAnalyzedAt: Date.now(),
+      updatedAt: Date.now()
+    });
+  }
+});
+
 export const updateGenerationStatus = internalMutation({
   args: {
     productId: v.id("products"),
