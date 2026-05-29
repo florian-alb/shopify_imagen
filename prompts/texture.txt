@@ -4,7 +4,6 @@ Preserve the curtain exactly as shown in the reference image:
 - same color
 - same fabric character
 - same thickness and density
-- same padded / blackout feel
 - same tactile texture
 - same surface structure
 - same stitching and material realism
@@ -17,14 +16,14 @@ Do not make it look cheap or synthetic.
 
 Generate a premium texture-focused macro image that showcases the curtain fabric in a highly tactile and luxurious way.
 The image should make the customer immediately understand that this is a substantial, high-quality, expensive curtain.
-Emphasize the richness of the textile, the thickness of the material, the soft but structured hand feel, and the premium blackout construction.
+Emphasize the richness of the textile, the thickness of the material, the soft but structured hand feel, and the premium construction.
 
 Show the fabric up close with elegant folds and realistic material behavior.
 The texture should feel touchable and luxurious, with visible textile depth and subtle surface detail.
 If helpful, include a discreet hand interaction or a natural grasp of the fabric to communicate softness, density, and tactile richness, while keeping the focus on the material itself.
 
-Use soft, flattering lighting and shallow depth of field to create an intimate luxury textile photograph.
-The image should feel like a premium material study for a designer furnishing brand, with a sense of craftsmanship, comfort, and exclusivity.
+Use soft, flattering lighting and shallow depth of field to create an intimate, high-quality textile photograph.
+The image should feel like a premium material study, with a sense of craftsmanship, comfort, and quality. Match the color mood to the product's intended context (see scene context below).
 
 Style and art direction:
 - ultra photorealistic

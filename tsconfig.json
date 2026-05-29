@@ -1,14 +1,19 @@
 {
   "compilerOptions": {
+    "jsx": "react-jsx",
     "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
     "strict": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
     "outDir": "dist",
-    "types": ["node"]
+    "types": ["node", "vite/client"],
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./app/*"]
+    }
   },
-  "include": ["src/**/*.ts"]
+  "include": ["app/**/*.ts", "app/**/*.tsx", "convex/**/*.ts", "src/**/*.ts", "vite.config.ts"]
 }
