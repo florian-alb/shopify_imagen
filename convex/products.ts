@@ -100,8 +100,7 @@ export const upsertSynced = internalMutation({
     variants: v.array(v.any()),
     metafields: v.array(v.any()),
     featuredImageUrl: v.optional(v.union(v.string(), v.null())),
-    currentShopifyImages: v.array(v.any()),
-    detectedFixations: v.array(v.string())
+    currentShopifyImages: v.array(v.any())
   },
   handler: async (ctx, args) => {
     const now = Date.now();

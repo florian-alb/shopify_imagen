@@ -3,7 +3,7 @@ import { internal } from "./_generated/api";
 import { internalMutation, internalQuery, mutation, query, type MutationCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireUserId } from "./authz";
-import { availableTypesForProduct, isImageType, renderPrompt } from "./lib";
+import { renderPrompt } from "./lib";
 
 type ImageProvider = "openai" | "gemini";
 type ExecutionMode = "realtime" | "batch";
@@ -82,9 +82,8 @@ export const create = mutation({
   },
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
-    const selectedImageTypes = Array.from(new Set(args.selectedImageTypes.filter(isImageType)));
     if (!args.productIds.length) throw new Error("Select at least one product.");
-    if (!selectedImageTypes.length) throw new Error("Select at least one image type.");
+    if (!args.selectedImageTypes.length) throw new Error("Select at least one image type.");
 
     const products = (await Promise.all(args.productIds.map((id) => ctx.db.get(id)))).filter(Boolean) as Doc<"products">[];
     if (!products.length) throw new Error("No products found.");
@@ -93,6 +92,10 @@ export const create = mutation({
     const vibeAnalysis = args.useVibeAnalysis ?? vibeAnalysisDefault;
     const prompts = await ctx.db.query("promptTemplates").collect();
     const promptByType = new Map(prompts.filter((prompt) => prompt.isActive).map((prompt) => [prompt.imageType, prompt]));
+    // Image types are defined by the prompt templates that exist; only keep
+    // selections that map to an active template.
+    const selectedImageTypes = Array.from(new Set(args.selectedImageTypes)).filter((type) => promptByType.has(type));
+    if (!selectedImageTypes.length) throw new Error("None of the selected image types have an active prompt template.");
     const now = Date.now();
     const planned: Array<{
       product: Doc<"products">;
@@ -102,11 +105,9 @@ export const create = mutation({
       sourceImageUrl2: string | null;
     }> = [];
 
-    let anyTypeAvailable = false;
     let anySkippedAsExisting = false;
 
     for (const product of products) {
-      const available = new Set(availableTypesForProduct(product.detectedFixations));
       const existingImages = await ctx.db
         .query("generatedImages")
         .withIndex("by_product", (q) => q.eq("productId", product._id))
@@ -118,8 +119,6 @@ export const create = mutation({
       );
 
       for (const imageType of selectedImageTypes) {
-        if (!available.has(imageType as never)) continue;
-        anyTypeAvailable = true;
         if (!args.forceRegenerate && existingReady.has(imageType)) {
           anySkippedAsExisting = true;
           continue;
@@ -129,8 +128,7 @@ export const create = mutation({
         const promptUsed = renderPrompt(template.content, {
           PRODUCT_TITLE: product.title,
           PRODUCT_HANDLE: product.handle,
-          IMAGE_TYPE: imageType,
-          FIXATION_TYPE: imageType
+          IMAGE_TYPE: imageType
         });
         const references = referenceImageUrls(product);
         planned.push({
@@ -144,14 +142,12 @@ export const create = mutation({
     }
 
     if (!planned.length) {
-      if (anyTypeAvailable && anySkippedAsExisting) {
+      if (anySkippedAsExisting) {
         throw new Error(
           "All selected image types already exist for these products. Enable \"Regenerate existing\" to recreate them."
         );
       }
-      throw new Error(
-        "None of the selected image types apply to the chosen products. Fixation types only run on products where that fixation was detected."
-      );
+      throw new Error("No image tasks could be planned for the selected products.");
     }
 
     const jobId = await ctx.db.insert("generationJobs", {

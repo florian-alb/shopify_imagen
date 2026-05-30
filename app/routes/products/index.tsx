@@ -1,14 +1,14 @@
-import { Link, createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useAction, useMutation, useQuery } from "convex/react";
+import { toast } from "sonner";
 import { ImageIcon, RefreshCw, Search, WandSparkles } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   BusyIcon,
   EmptyState,
   PageHeader,
   StatusBadge,
 } from "@/components/page";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -30,15 +30,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  getBudgetImageTypes,
-  getBulkAvailableImageTypes,
-} from "@/lib/fixationDetector";
-import {
-  ALL_IMAGE_TYPES,
-  IMAGE_TYPE_LABELS,
-  type ImageType,
-} from "@/lib/imageTypes";
 import { generationStatusLabels, type GenerationStatus } from "@/lib/status";
 import { api } from "../../../convex/_generated/api";
 import type { Doc, Id } from "../../../convex/_generated/dataModel";
@@ -62,8 +53,7 @@ function ProductsPage() {
   const [chooserOpen, setChooserOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [creatingJob, setCreatingJob] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [createdJobId, setCreatedJobId] = useState<Id<"generationJobs"> | null>(null);
+  const navigate = useNavigate();
 
   const products = useQuery(api.products.list, {
     search,
@@ -84,13 +74,13 @@ function ProductsPage() {
 
   async function runSync() {
     setSyncing(true);
-    setError(null);
     try {
       await syncProducts({ limit: 1000 });
+      toast.success("Shopify catalog synced");
     } catch (syncError) {
-      setError(
-        syncError instanceof Error ? syncError.message : String(syncError),
-      );
+      toast.error("Sync failed", {
+        description: syncError instanceof Error ? syncError.message : String(syncError),
+      });
     } finally {
       setSyncing(false);
     }
@@ -120,10 +110,8 @@ function ProductsPage() {
     });
   }
 
-  async function generate(imageTypes: ImageType[], forceRegenerate: boolean, useVibeAnalysis: boolean) {
+  async function generate(imageTypes: string[], forceRegenerate: boolean, useVibeAnalysis: boolean) {
     setCreatingJob(true);
-    setError(null);
-    setCreatedJobId(null);
     try {
       const jobId = await createJob({
         productIds: Array.from(selected),
@@ -133,9 +121,14 @@ function ProductsPage() {
       });
       setChooserOpen(false);
       setSelected(new Set());
-      setCreatedJobId(jobId);
+      toast.success("Background generation started", {
+        description: "Product states update here in real time.",
+        action: { label: "View job", onClick: () => void navigate({ to: "/jobs/$jobId", params: { jobId } }) },
+      });
     } catch (jobError) {
-      setError(jobError instanceof Error ? jobError.message : String(jobError));
+      toast.error("Failed to start generation", {
+        description: jobError instanceof Error ? jobError.message : String(jobError),
+      });
     } finally {
       setCreatingJob(false);
     }
@@ -212,22 +205,6 @@ function ProductsPage() {
         </CardContent>
       </Card>
 
-      {error ? (
-        <Alert variant="destructive" className="mb-4">
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      ) : null}
-      {createdJobId ? (
-        <Alert className="mb-4">
-          <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
-            <span>Background generation started. Product states update here in real time.</span>
-            <Button variant="outline" size="sm" asChild>
-              <Link to="/jobs/$jobId" params={{ jobId: createdJobId }}>View job</Link>
-            </Button>
-          </AlertDescription>
-        </Alert>
-      ) : null}
-
       <section className="mb-3 flex items-center justify-between gap-3">
         <Button
           variant="outline"
@@ -257,7 +234,7 @@ function ProductsPage() {
       ) : products.length === 0 ? (
         <EmptyState
           title="No products yet"
-          body="Sync Shopify to import active products and detected fixation options."
+          body="Sync Shopify to import active products."
         />
       ) : (
         <section className="grid gap-3">
@@ -401,11 +378,6 @@ function ProductRow({
           <Badge variant="outline">
             {product.productType || "No category"}
           </Badge>
-          {product.detectedFixations.slice(0, 2).map((fixation) => (
-            <Badge key={fixation} variant="outline">
-              {fixation}
-            </Badge>
-          ))}
           <Badge variant="outline">
             {product.currentShopifyImages.length} Shopify
           </Badge>
@@ -432,24 +404,31 @@ function ImageTypeChooser({
   products: Product[];
   submitting: boolean;
   defaultUseVibe: boolean;
-  onGenerate: (imageTypes: ImageType[], forceRegenerate: boolean, useVibeAnalysis: boolean) => void;
+  onGenerate: (imageTypes: string[], forceRegenerate: boolean, useVibeAnalysis: boolean) => void;
 }) {
-  const available = useMemo(
-    () => getBulkAvailableImageTypes(products),
-    [products],
+  const prompts = useQuery(api.prompts.list) as
+    | Doc<"promptTemplates">[]
+    | undefined;
+  const types = useMemo(
+    () => (prompts ?? []).filter((prompt) => prompt.isActive),
+    [prompts],
   );
-  const [selected, setSelected] = useState<Set<ImageType>>(
-    () =>
-      new Set(
-        getBudgetImageTypes(
-          products.flatMap((product) => product.detectedFixations),
-        ),
-      ),
-  );
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [touched, setTouched] = useState(false);
   const [force, setForce] = useState(false);
   const [useVibe, setUseVibe] = useState(defaultUseVibe);
 
-  function toggle(type: ImageType) {
+  // Default to the preset image types until the user changes the selection.
+  // If no template is marked as preset, fall back to selecting all of them.
+  useEffect(() => {
+    if (touched) return;
+    const presets = types.filter((type) => type.isPreset);
+    const defaults = presets.length ? presets : types;
+    setSelected(new Set(defaults.map((type) => type.imageType)));
+  }, [types, touched]);
+
+  function toggle(type: string) {
+    setTouched(true);
     setSelected((current) => {
       const next = new Set(current);
       if (next.has(type)) next.delete(type);
@@ -458,29 +437,16 @@ function ImageTypeChooser({
     });
   }
 
-  function budgetPreset() {
-    setSelected(
-      new Set(
-        getBudgetImageTypes(
-          products.flatMap((product) => product.detectedFixations),
-        ),
-      ),
-    );
-  }
-
   return (
     <DialogContent className="sm:max-w-xl">
       <DialogHeader>
         <DialogTitle>Choose image types</DialogTitle>
         <DialogDescription>
           {products.length} product{products.length === 1 ? "" : "s"} selected.
-          Fixation types only run where detected.
+          Each image type maps to a prompt template.
         </DialogDescription>
       </DialogHeader>
       <div className="flex flex-wrap items-center gap-2">
-        <Button variant="outline" onClick={budgetPreset}>
-          Budget preset
-        </Button>
         <Label className="flex h-8 items-center gap-2 rounded-lg border px-3">
           <Checkbox
             checked={force}
@@ -497,20 +463,18 @@ function ImageTypeChooser({
         </Label>
       </div>
       <div className="grid gap-2">
-        {ALL_IMAGE_TYPES.filter((type) => available.includes(type)).map(
-          (type) => (
-            <Label
-              key={type}
-              className="flex min-h-11 justify-between rounded-lg border px-3"
-            >
-              <span>{IMAGE_TYPE_LABELS[type]}</span>
-              <Checkbox
-                checked={selected.has(type)}
-                onCheckedChange={() => toggle(type)}
-              />
-            </Label>
-          ),
-        )}
+        {types.map((type) => (
+          <Label
+            key={type.imageType}
+            className="flex min-h-11 justify-between rounded-lg border px-3"
+          >
+            <span>{type.label}</span>
+            <Checkbox
+              checked={selected.has(type.imageType)}
+              onCheckedChange={() => toggle(type.imageType)}
+            />
+          </Label>
+        ))}
       </div>
       <DialogFooter>
         <Button

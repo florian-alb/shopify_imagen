@@ -3,7 +3,6 @@ import { internal } from "./_generated/api";
 import { action, internalMutation, internalQuery } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireUserId } from "./authz";
-import { detectFixations } from "./lib";
 
 type GraphQlResponse<T> = { data?: T; errors?: Array<{ message: string }> };
 
@@ -88,6 +87,33 @@ const PRODUCTS_QUERY = `#graphql
   }
 `;
 
+const PRODUCT_QUERY = `#graphql
+  query ProductForImageStudio($id: ID!) {
+    product(id: $id) {
+      id
+      title
+      handle
+      productType
+      vendor
+      tags
+      collections(first: 50) { nodes { id title handle } }
+      featuredMedia { preview { image { url altText } } }
+      options { name values }
+      variants(first: 100) { nodes { id title selectedOptions { name value } } }
+      metafields(first: 50) { nodes { id namespace key type value } }
+      media(first: 100) {
+        nodes {
+          id
+          alt
+          mediaContentType
+          preview { image { url altText } }
+          ... on MediaImage { image { url altText } }
+        }
+      }
+    }
+  }
+`;
+
 const PRODUCT_UPDATE_MEDIA_MUTATION = `#graphql
   mutation ProductUpdateWithGeneratedMedia($product: ProductUpdateInput!, $media: [CreateMediaInput!]) {
     productUpdate(product: $product, media: $media) {
@@ -141,6 +167,24 @@ function mapImages(product: any) {
   return images;
 }
 
+function mapProductForUpsert(product: any) {
+  const currentShopifyImages = mapImages(product);
+  return {
+    shopifyProductId: product.id,
+    title: product.title,
+    handle: product.handle,
+    vendor: product.vendor ?? null,
+    productType: product.productType ?? null,
+    tags: product.tags ?? [],
+    collections: product.collections?.nodes ?? [],
+    options: product.options ?? [],
+    variants: product.variants?.nodes ?? [],
+    metafields: product.metafields?.nodes ?? [],
+    featuredImageUrl: currentShopifyImages[0]?.url ?? null,
+    currentShopifyImages
+  };
+}
+
 export const syncProducts = action({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
@@ -157,30 +201,7 @@ export const syncProducts = action({
         query: env("SHOPIFY_PRODUCT_QUERY", "status:active")
       });
       for (const product of data.products.nodes) {
-        const currentShopifyImages = mapImages(product);
-        const mapped = {
-          shopifyProductId: product.id,
-          title: product.title,
-          handle: product.handle,
-          vendor: product.vendor ?? null,
-          productType: product.productType ?? null,
-          tags: product.tags ?? [],
-          collections: product.collections?.nodes ?? [],
-          options: product.options ?? [],
-          variants: product.variants?.nodes ?? [],
-          metafields: product.metafields?.nodes ?? [],
-          featuredImageUrl: currentShopifyImages[0]?.url ?? null,
-          currentShopifyImages,
-          detectedFixations: detectFixations({
-            title: product.title,
-            handle: product.handle,
-            tags: product.tags,
-            options: product.options,
-            variants: product.variants?.nodes,
-            metafields: product.metafields?.nodes
-          })
-        };
-        const id = await ctx.runMutation(internal.products.upsertSynced, mapped);
+        const id = await ctx.runMutation(internal.products.upsertSynced, mapProductForUpsert(product));
         syncedIds.push(id);
       }
       if (!data.products.pageInfo.hasNextPage) break;
@@ -188,6 +209,19 @@ export const syncProducts = action({
     }
 
     return { synced: syncedIds.length };
+  }
+});
+
+export const syncProduct = action({
+  args: { productId: v.id("products") },
+  handler: async (ctx, args): Promise<{ productId: Id<"products"> }> => {
+    await requireUserId(ctx);
+    const product = (await ctx.runQuery(internal.products.internalGet, { productId: args.productId })) as Doc<"products"> | null;
+    if (!product) throw new Error("Product not found.");
+    const data = await shopifyGraphql<{ product: any | null }>(PRODUCT_QUERY, { id: product.shopifyProductId });
+    if (!data.product) throw new Error("Product no longer exists in Shopify.");
+    const id: Id<"products"> = await ctx.runMutation(internal.products.upsertSynced, mapProductForUpsert(data.product));
+    return { productId: id };
   }
 });
 
@@ -213,6 +247,16 @@ export const pushProductImages = action({
       (image) => image.storageUrl && (image.status === "generated" || image.status === "uploaded")
     );
     if (!ready.length) throw new Error("No approved generated images are ready to push.");
+
+    // Publish in the order defined by the prompt templates in settings/prompts,
+    // so the Shopify gallery mirrors that sequence. Images whose imageType has no
+    // matching template fall back to the end, ordered by their original index.
+    const promptOrder = (await ctx.runQuery(internal.shopify.promptOrder, {})) as Record<string, number>;
+    ready.sort((a, b) => {
+      const oa = promptOrder[a.imageType] ?? Number.POSITIVE_INFINITY;
+      const ob = promptOrder[b.imageType] ?? Number.POSITIVE_INFINITY;
+      return oa - ob;
+    });
 
     const mediaInputs = ready.map((image) => ({
       originalSource: image.storageUrl!,
@@ -269,6 +313,20 @@ export const generatedImagesForPush = internalQuery({
   }
 });
 
+// Maps each prompt template's imageType to its display/publish position so
+// pushProductImages can order the Shopify gallery to match settings/prompts.
+export const promptOrder = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const prompts = await ctx.db.query("promptTemplates").collect();
+    const order: Record<string, number> = {};
+    for (const prompt of prompts) {
+      order[prompt.imageType] = prompt.position ?? Number.POSITIVE_INFINITY;
+    }
+    return order;
+  }
+});
+
 export const markImagePushed = internalMutation({
   args: {
     imageId: v.id("generatedImages"),
@@ -290,5 +348,64 @@ export const markProductPushed = internalMutation({
       generationStatus: "pushed",
       updatedAt: Date.now()
     });
+  }
+});
+
+export const internalGetImage = internalQuery({
+  args: { imageId: v.id("generatedImages") },
+  handler: async (ctx, args) => {
+    return ctx.db.get(args.imageId);
+  }
+});
+
+// Removes the image record and, if it was pushed to Shopify, drops the matching
+// entry from the product's cached gallery so the UI reflects the deletion
+// without waiting for a re-sync.
+export const deleteImageRecord = internalMutation({
+  args: { imageId: v.id("generatedImages") },
+  handler: async (ctx, args) => {
+    const image = await ctx.db.get(args.imageId);
+    if (!image) return;
+    if (image.shopifyMediaId) {
+      const product = await ctx.db.get(image.productId);
+      if (product) {
+        const remaining = product.currentShopifyImages.filter(
+          (entry: any) => (entry.mediaId ?? entry.id) !== image.shopifyMediaId
+        );
+        if (remaining.length !== product.currentShopifyImages.length) {
+          await ctx.db.patch(product._id, { currentShopifyImages: remaining, updatedAt: Date.now() });
+        }
+      }
+    }
+    await ctx.db.delete(args.imageId);
+  }
+});
+
+// Deletes a generated image everywhere: the Shopify media (if pushed), the R2
+// object backing storageUrl, and the Convex record.
+export const deleteImage = action({
+  args: { imageId: v.id("generatedImages") },
+  handler: async (ctx, args): Promise<{ deleted: true }> => {
+    await requireUserId(ctx);
+    const image = (await ctx.runQuery(internal.shopify.internalGetImage, { imageId: args.imageId })) as Doc<"generatedImages"> | null;
+    if (!image) throw new Error("Image not found.");
+
+    if (image.shopifyMediaId && image.shopifyMediaId.startsWith("gid://")) {
+      const product = (await ctx.runQuery(internal.products.internalGet, { productId: image.productId })) as Doc<"products"> | null;
+      if (product) {
+        const deleted = await shopifyGraphql<any>(PRODUCT_DELETE_MEDIA_MUTATION, {
+          productId: product.shopifyProductId,
+          mediaIds: [image.shopifyMediaId]
+        });
+        throwUserErrors(deleted.productDeleteMedia.mediaUserErrors, "Shopify product media deletion failed");
+      }
+    }
+
+    if (image.storageUrl) {
+      await ctx.runAction(internal.generation.deleteFromStorage, { storageUrl: image.storageUrl });
+    }
+
+    await ctx.runMutation(internal.shopify.deleteImageRecord, { imageId: args.imageId });
+    return { deleted: true };
   }
 });

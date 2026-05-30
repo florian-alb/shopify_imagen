@@ -56,7 +56,6 @@ export default defineSchema({
     metafields: v.array(v.any()),
     featuredImageUrl: v.optional(v.union(v.string(), v.null())),
     currentShopifyImages: v.array(v.any()),
-    detectedFixations: v.array(v.string()),
     generationStatus,
     vibe: v.optional(v.union(v.string(), v.null())),
     vibeCostUsd: v.optional(v.number()),
@@ -75,6 +74,12 @@ export default defineSchema({
     content: v.string(),
     defaultContent: v.string(),
     isActive: v.boolean(),
+    // When true, this template is pre-checked in the generation chooser.
+    // Optional so pre-existing rows default to non-preset.
+    isPreset: v.optional(v.boolean()),
+    // Display + Shopify publish order. Optional so pre-existing rows keep working;
+    // rows without a position sort after positioned ones (see prompts.list).
+    position: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number()
   }).index("by_image_type", ["imageType"]),

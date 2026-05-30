@@ -27,6 +27,7 @@ import {
   SidebarRail,
   SidebarTrigger
 } from "@/components/ui/sidebar";
+import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import appCss from "../styles.css?url";
 
@@ -68,6 +69,7 @@ function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
       </head>
       <body>
         {children}
+        <Toaster richColors closeButton />
         <Scripts />
       </body>
     </html>
