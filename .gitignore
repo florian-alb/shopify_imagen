@@ -5,6 +5,8 @@ node_modules/
 dist/
 build/
 .output/
+.vercel/
+.nitro/
 *.tsbuildinfo
 
 # Environment
