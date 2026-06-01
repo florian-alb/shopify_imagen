@@ -3,31 +3,92 @@ import { internalMutation, internalQuery, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireUserId } from "./authz";
 
-export const list = query({
-  args: {
-    search: v.optional(v.string()),
-    productType: v.optional(v.string()),
-    collection: v.optional(v.string()),
-    generationStatus: v.optional(v.string())
-  },
-  handler: async (ctx, args) => {
-    await requireUserId(ctx);
-    const products = await ctx.db.query("products").order("desc").take(500);
-    const needle = (args.search ?? "").trim().toLowerCase();
-    return products.filter((product) => {
+const productGenerationStatus = v.union(
+  v.literal("not_started"),
+  v.literal("generating"),
+  v.literal("partial"),
+  v.literal("ready"),
+  v.literal("pushed"),
+  v.literal("failed")
+);
+
+const productFilterArgs = {
+  search: v.optional(v.string()),
+  productType: v.optional(v.string()),
+  collection: v.optional(v.string()),
+  generationStatus: v.optional(productGenerationStatus)
+};
+
+type ProductFilters = {
+  search?: string;
+  productType?: string;
+  collection?: string;
+  generationStatus?: Doc<"products">["generationStatus"];
+};
+
+async function filteredProducts(ctx: { db: any }, args: ProductFilters) {
+  let products: Doc<"products">[];
+  if (args.generationStatus && args.productType) {
+    products = await ctx.db
+      .query("products")
+      .withIndex("by_generation_status_and_product_type", (q: any) =>
+        q.eq("generationStatus", args.generationStatus).eq("productType", args.productType)
+      )
+      .collect();
+  } else if (args.generationStatus) {
+    products = await ctx.db
+      .query("products")
+      .withIndex("by_generation_status", (q: any) => q.eq("generationStatus", args.generationStatus))
+      .collect();
+  } else if (args.productType) {
+    products = await ctx.db
+      .query("products")
+      .withIndex("by_product_type", (q: any) => q.eq("productType", args.productType))
+      .collect();
+  } else {
+    products = await ctx.db.query("products").collect();
+  }
+
+  const needle = (args.search ?? "").trim().toLowerCase();
+  return products
+    .filter((product) => {
       const matchesSearch =
         !needle ||
         product.title.toLowerCase().includes(needle) ||
         product.handle.toLowerCase().includes(needle);
-      const matchesType = !args.productType || product.productType === args.productType;
-      const matchesStatus = !args.generationStatus || product.generationStatus === args.generationStatus;
       const matchesCollection =
         !args.collection ||
         product.collections.some((collection: { id?: string; title?: string; handle?: string }) => {
           return collection.id === args.collection || collection.handle === args.collection || collection.title === args.collection;
         });
-      return matchesSearch && matchesType && matchesStatus && matchesCollection;
-    });
+      return matchesSearch && matchesCollection;
+    })
+    .sort((a, b) => b._creationTime - a._creationTime);
+}
+
+export const list = query({
+  args: productFilterArgs,
+  handler: async (ctx, args) => {
+    await requireUserId(ctx);
+    return filteredProducts(ctx, args);
+  }
+});
+
+export const navigation = query({
+  args: {
+    productId: v.id("products"),
+    ...productFilterArgs
+  },
+  handler: async (ctx, args) => {
+    await requireUserId(ctx);
+    const products = await filteredProducts(ctx, args);
+    const index = products.findIndex((product) => product._id === args.productId);
+    return {
+      previous: index > 0 ? products[index - 1] : null,
+      next: index >= 0 && index < products.length - 1 ? products[index + 1] : null,
+      position: index >= 0 ? index + 1 : null,
+      total: products.length
+    };
   }
 });
 
@@ -100,8 +161,7 @@ export const upsertSynced = internalMutation({
     variants: v.array(v.any()),
     metafields: v.array(v.any()),
     featuredImageUrl: v.optional(v.union(v.string(), v.null())),
-    currentShopifyImages: v.array(v.any()),
-    detectedFixations: v.array(v.string())
+    currentShopifyImages: v.array(v.any())
   },
   handler: async (ctx, args) => {
     const now = Date.now();
@@ -142,14 +202,7 @@ export const setVibe = internalMutation({
 export const updateGenerationStatus = internalMutation({
   args: {
     productId: v.id("products"),
-    generationStatus: v.union(
-      v.literal("not_started"),
-      v.literal("generating"),
-      v.literal("partial"),
-      v.literal("ready"),
-      v.literal("pushed"),
-      v.literal("failed")
-    )
+    generationStatus: productGenerationStatus
   },
   handler: async (ctx, args) => {
     await ctx.db.patch(args.productId, {

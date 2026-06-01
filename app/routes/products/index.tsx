@@ -1,14 +1,15 @@
-import { Link, createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useAction, useMutation, useQuery } from "convex/react";
+import { toast } from "sonner";
 import { ImageIcon, RefreshCw, Search, WandSparkles } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   BusyIcon,
   EmptyState,
   PageHeader,
   StatusBadge,
 } from "@/components/page";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { productFilterArgs, type ProductSearch, validateProductSearch } from "@/lib/productFilters";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -30,20 +31,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  getBudgetImageTypes,
-  getBulkAvailableImageTypes,
-} from "@/lib/fixationDetector";
-import {
-  ALL_IMAGE_TYPES,
-  IMAGE_TYPE_LABELS,
-  type ImageType,
-} from "@/lib/imageTypes";
 import { generationStatusLabels, type GenerationStatus } from "@/lib/status";
 import { api } from "../../../convex/_generated/api";
 import type { Doc, Id } from "../../../convex/_generated/dataModel";
 
 export const Route = createFileRoute("/products/")({
+  validateSearch: validateProductSearch,
   component: ProductsPage,
 });
 
@@ -54,28 +47,23 @@ type ProductFacets = {
 };
 
 function ProductsPage() {
-  const [search, setSearch] = useState("");
-  const [productType, setProductType] = useState("");
-  const [collection, setCollection] = useState("");
-  const [status, setStatus] = useState("");
+  const search = Route.useSearch();
   const [selected, setSelected] = useState<Set<Id<"products">>>(new Set());
   const [chooserOpen, setChooserOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [creatingJob, setCreatingJob] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [createdJobId, setCreatedJobId] = useState<Id<"generationJobs"> | null>(null);
+  const navigate = useNavigate();
 
-  const products = useQuery(api.products.list, {
-    search,
-    productType: productType || undefined,
-    collection: collection || undefined,
-    generationStatus: status || undefined,
-  }) as Product[] | undefined;
+  const products = useQuery(api.products.list, productFilterArgs(search)) as Product[] | undefined;
   const facets = useQuery(api.products.facets) as ProductFacets | undefined;
   const settings = useQuery(api.settings.list);
   const syncProducts = useAction(api.shopify.syncProducts);
   const createJob = useMutation(api.jobs.create);
   const vibeDefault = String(settings?.VIBE_ANALYSIS ?? "on") !== "off";
+
+  function updateSearch(patch: Partial<ProductSearch>) {
+    void navigate({ to: "/products", search: { ...search, ...patch }, replace: true });
+  }
 
   const selectedProducts = useMemo(
     () => (products ?? []).filter((product) => selected.has(product._id)),
@@ -84,13 +72,13 @@ function ProductsPage() {
 
   async function runSync() {
     setSyncing(true);
-    setError(null);
     try {
       await syncProducts({ limit: 1000 });
+      toast.success("Shopify catalog synced");
     } catch (syncError) {
-      setError(
-        syncError instanceof Error ? syncError.message : String(syncError),
-      );
+      toast.error("Sync failed", {
+        description: syncError instanceof Error ? syncError.message : String(syncError),
+      });
     } finally {
       setSyncing(false);
     }
@@ -120,10 +108,8 @@ function ProductsPage() {
     });
   }
 
-  async function generate(imageTypes: ImageType[], forceRegenerate: boolean, useVibeAnalysis: boolean) {
+  async function generate(imageTypes: string[], forceRegenerate: boolean, useVibeAnalysis: boolean) {
     setCreatingJob(true);
-    setError(null);
-    setCreatedJobId(null);
     try {
       const jobId = await createJob({
         productIds: Array.from(selected),
@@ -133,9 +119,14 @@ function ProductsPage() {
       });
       setChooserOpen(false);
       setSelected(new Set());
-      setCreatedJobId(jobId);
+      toast.success("Background generation started", {
+        description: "Product states update here in real time.",
+        action: { label: "View job", onClick: () => void navigate({ to: "/jobs/$jobId", params: { jobId } }) },
+      });
     } catch (jobError) {
-      setError(jobError instanceof Error ? jobError.message : String(jobError));
+      toast.error("Failed to start generation", {
+        description: jobError instanceof Error ? jobError.message : String(jobError),
+      });
     } finally {
       setCreatingJob(false);
     }
@@ -171,15 +162,15 @@ function ProductsPage() {
             <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               className="h-10 pl-9"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              value={search.q ?? ""}
+              onChange={(event) => updateSearch({ q: event.target.value || undefined })}
               placeholder="Search name or handle"
             />
           </Label>
           <FilterSelect
-            value={productType}
+            value={search.type ?? ""}
             placeholder="All categories"
-            onChange={setProductType}
+            onChange={(type) => updateSearch({ type: type || undefined })}
           >
             {facets?.productTypes.map((item) => (
               <SelectItem key={item} value={item}>
@@ -188,9 +179,9 @@ function ProductsPage() {
             ))}
           </FilterSelect>
           <FilterSelect
-            value={collection}
+            value={search.collection ?? ""}
             placeholder="All collections"
-            onChange={setCollection}
+            onChange={(collection) => updateSearch({ collection: collection || undefined })}
           >
             {facets?.collections.map((item) => (
               <SelectItem key={item.id} value={item.id}>
@@ -199,9 +190,9 @@ function ProductsPage() {
             ))}
           </FilterSelect>
           <FilterSelect
-            value={status}
+            value={search.status ?? ""}
             placeholder="All states"
-            onChange={setStatus}
+            onChange={(status) => updateSearch({ status: (status || undefined) as ProductSearch["status"] })}
           >
             {Object.entries(generationStatusLabels).map(([value, label]) => (
               <SelectItem key={value} value={value}>
@@ -211,22 +202,6 @@ function ProductsPage() {
           </FilterSelect>
         </CardContent>
       </Card>
-
-      {error ? (
-        <Alert variant="destructive" className="mb-4">
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      ) : null}
-      {createdJobId ? (
-        <Alert className="mb-4">
-          <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
-            <span>Background generation started. Product states update here in real time.</span>
-            <Button variant="outline" size="sm" asChild>
-              <Link to="/jobs/$jobId" params={{ jobId: createdJobId }}>View job</Link>
-            </Button>
-          </AlertDescription>
-        </Alert>
-      ) : null}
 
       <section className="mb-3 flex items-center justify-between gap-3">
         <Button
@@ -257,7 +232,7 @@ function ProductsPage() {
       ) : products.length === 0 ? (
         <EmptyState
           title="No products yet"
-          body="Sync Shopify to import active products and detected fixation options."
+          body="Sync Shopify to import active products."
         />
       ) : (
         <section className="grid gap-3">
@@ -265,6 +240,7 @@ function ProductsPage() {
             <ProductRow
               key={product._id}
               product={product}
+              search={search}
               selected={selected.has(product._id)}
               onToggle={() => toggleProduct(product._id)}
               onGenerateOne={() => {
@@ -341,11 +317,13 @@ function FilterSelect({
 
 function ProductRow({
   product,
+  search,
   selected,
   onToggle,
   onGenerateOne,
 }: {
   product: Product;
+  search: ProductSearch;
   selected: boolean;
   onToggle: () => void;
   onGenerateOne: () => void;
@@ -366,6 +344,7 @@ function ProductRow({
       <Link
         to="/products/$productId"
         params={{ productId: product._id }}
+        search={search}
         className="image-tile"
       >
         {image ? (
@@ -381,6 +360,7 @@ function ProductRow({
           <Link
             to="/products/$productId"
             params={{ productId: product._id }}
+            search={search}
             className="min-w-0"
           >
             <h2 className="truncate text-base font-medium">{product.title}</h2>
@@ -401,11 +381,6 @@ function ProductRow({
           <Badge variant="outline">
             {product.productType || "No category"}
           </Badge>
-          {product.detectedFixations.slice(0, 2).map((fixation) => (
-            <Badge key={fixation} variant="outline">
-              {fixation}
-            </Badge>
-          ))}
           <Badge variant="outline">
             {product.currentShopifyImages.length} Shopify
           </Badge>
@@ -432,24 +407,31 @@ function ImageTypeChooser({
   products: Product[];
   submitting: boolean;
   defaultUseVibe: boolean;
-  onGenerate: (imageTypes: ImageType[], forceRegenerate: boolean, useVibeAnalysis: boolean) => void;
+  onGenerate: (imageTypes: string[], forceRegenerate: boolean, useVibeAnalysis: boolean) => void;
 }) {
-  const available = useMemo(
-    () => getBulkAvailableImageTypes(products),
-    [products],
+  const prompts = useQuery(api.prompts.list) as
+    | Doc<"promptTemplates">[]
+    | undefined;
+  const types = useMemo(
+    () => (prompts ?? []).filter((prompt) => prompt.isActive),
+    [prompts],
   );
-  const [selected, setSelected] = useState<Set<ImageType>>(
-    () =>
-      new Set(
-        getBudgetImageTypes(
-          products.flatMap((product) => product.detectedFixations),
-        ),
-      ),
-  );
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [touched, setTouched] = useState(false);
   const [force, setForce] = useState(false);
   const [useVibe, setUseVibe] = useState(defaultUseVibe);
 
-  function toggle(type: ImageType) {
+  // Default to the preset image types until the user changes the selection.
+  // If no template is marked as preset, fall back to selecting all of them.
+  useEffect(() => {
+    if (touched) return;
+    const presets = types.filter((type) => type.isPreset);
+    const defaults = presets.length ? presets : types;
+    setSelected(new Set(defaults.map((type) => type.imageType)));
+  }, [types, touched]);
+
+  function toggle(type: string) {
+    setTouched(true);
     setSelected((current) => {
       const next = new Set(current);
       if (next.has(type)) next.delete(type);
@@ -458,29 +440,16 @@ function ImageTypeChooser({
     });
   }
 
-  function budgetPreset() {
-    setSelected(
-      new Set(
-        getBudgetImageTypes(
-          products.flatMap((product) => product.detectedFixations),
-        ),
-      ),
-    );
-  }
-
   return (
     <DialogContent className="sm:max-w-xl">
       <DialogHeader>
         <DialogTitle>Choose image types</DialogTitle>
         <DialogDescription>
           {products.length} product{products.length === 1 ? "" : "s"} selected.
-          Fixation types only run where detected.
+          Each image type maps to a prompt template.
         </DialogDescription>
       </DialogHeader>
       <div className="flex flex-wrap items-center gap-2">
-        <Button variant="outline" onClick={budgetPreset}>
-          Budget preset
-        </Button>
         <Label className="flex h-8 items-center gap-2 rounded-lg border px-3">
           <Checkbox
             checked={force}
@@ -497,20 +466,18 @@ function ImageTypeChooser({
         </Label>
       </div>
       <div className="grid gap-2">
-        {ALL_IMAGE_TYPES.filter((type) => available.includes(type)).map(
-          (type) => (
-            <Label
-              key={type}
-              className="flex min-h-11 justify-between rounded-lg border px-3"
-            >
-              <span>{IMAGE_TYPE_LABELS[type]}</span>
-              <Checkbox
-                checked={selected.has(type)}
-                onCheckedChange={() => toggle(type)}
-              />
-            </Label>
-          ),
-        )}
+        {types.map((type) => (
+          <Label
+            key={type.imageType}
+            className="flex min-h-11 justify-between rounded-lg border px-3"
+          >
+            <span>{type.label}</span>
+            <Checkbox
+              checked={selected.has(type.imageType)}
+              onCheckedChange={() => toggle(type.imageType)}
+            />
+          </Label>
+        ))}
       </div>
       <DialogFooter>
         <Button

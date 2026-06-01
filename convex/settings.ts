@@ -28,6 +28,18 @@ export const list = query({
   }
 });
 
+export const shopInfo = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireUserId(ctx);
+    const raw = (process.env.SHOPIFY_SHOP_DOMAIN ?? "").trim().replace(/^https?:\/\//, "").replace(/\/$/, "");
+    if (!raw) return { domain: null as string | null, storeHandle: null as string | null };
+    const domain = raw.includes(".") ? raw : `${raw}.myshopify.com`;
+    const storeHandle = domain.replace(/\.myshopify\.com$/, "");
+    return { domain, storeHandle };
+  }
+});
+
 export const internalList = internalQuery({
   args: {},
   handler: async (ctx) => {

@@ -1,178 +1,241 @@
-# Shopify Image Studio
+# 🪟 Shopify Image Studio
 
-Mobile-first TanStack Start + Convex app for generating Shopify curtain product imagery with OpenAI Images or Google's Nano Banana Pro, storing generated assets in Cloudflare R2, reviewing them, and manually pushing approved images back to Shopify.
+Application **mobile-first** pour générer automatiquement des visuels produits Shopify (rideaux & voilages) avec **OpenAI Images** ou **Google Nano Banana Pro (Gemini)**, les optimiser en **WebP**, les stocker sur **Cloudflare R2**, les relire, puis les pousser dans Shopify — manuellement et en toute sécurité.
 
-The original local CLI workflow remains in `src/` for reference, but the primary app now lives in:
+> Stack : **TanStack Start + React 19** (front) · **Convex** (backend temps réel, jobs, crons) · **Tailwind v4 + shadcn/ui** · **sharp** (traitement image) · **Shopify Admin GraphQL** · **Cloudflare R2**.
 
-- `app/` for TanStack Start routes and React UI
-- `convex/` for schema, auth, realtime queries, mutations, actions, and background jobs
-- `app/lib/` and `convex/lib.ts` for migrated image type, normalization, fixation detection, and prompt rendering behavior
+---
 
-## What It Does
+## ✨ Fonctionnalités
 
-- Login-protects app pages with Convex Auth password auth.
-- Syncs active Shopify products through the Admin GraphQL API into Convex.
-- Detects fixation types using the preserved normalization and synonym behavior.
-- Filters products by name/handle, category, collection, and generation state.
-- Selects OpenAI Images or Nano Banana Pro in settings and records the selected engine on each new job.
-- Generates selected image types in Convex background jobs with realtime progress.
-- Stores image bytes in Cloudflare R2 and stores only URLs/metadata in Convex.
-- Lets you edit/reset prompt templates in `/settings/prompts`.
-- Shows product detail pages with current Shopify images, generated images, prompts, history, errors, and detected fixations.
-- Pushes generated images to Shopify only after explicit confirmation.
-- Optionally replaces the current Shopify gallery only when the replacement checkbox is confirmed.
+- 🔐 Pages protégées par **Convex Auth** (mot de passe).
+- 🔄 Sync des produits Shopify actifs via l'**Admin GraphQL API** dans Convex.
+- 🧠 Détection automatique des **fixations** (œillets, passe-tringle, plis flamands…) par normalisation + synonymes.
+- 🎨 Génération par type d'image en **jobs background** avec progression temps réel — moteur OpenAI **ou** Gemini, au choix.
+- ⚡ Deux modes : **temps réel** (immédiat) ou **batch** (asynchrone, ~50 % moins cher).
+- 🖼️ Chaque image est convertie en **WebP optimisé**, **débarrassée de ses métadonnées** (EXIF/ICC/XMP) et **renommée SEO** (`rideau-lin-gris-situation-lifestyle.webp`).
+- ☁️ Binaires stockés sur **R2** ; Convex ne garde que les URLs et métadonnées.
+- 📤 Push vers Shopify **uniquement après confirmation explicite**, avec option de remplacement de la galerie.
+- ✏️ Édition/réinitialisation des templates de prompts dans `/settings/prompts`.
 
-## Setup
+---
+
+## 🗂️ Architecture
+
+```
+app/                TanStack Start — routes & UI React
+  routes/           /login, /products, /products/$id, /jobs, /settings…
+  components/ui/    composants shadcn/ui
+convex/             Backend Convex
+  schema.ts         tables (products, generatedImages, generationJobs…)
+  shopify.ts        sync produits + push images (actions)
+  generation.ts     génération image, optimisation WebP, upload R2, batch
+  jobs.ts           cycle de vie des jobs & images
+  crons.ts          poll des batches toutes les 2 min
+  lib.ts            normalisation, détection fixations, slug SEO
+prompts/            templates de prompts par type d'image
+scripts/            scripts de maintenance ponctuels (ex. switch_images.js)
+src/                ⚠️ ancien CLI local (legacy, conservé pour référence)
+convex.json         déclare `sharp` en external package (binaire natif)
+```
+
+---
+
+## ✅ Prérequis
+
+- **Node.js ≥ 20.6** (testé sur 25). `--env-file` natif est utilisé par certains scripts.
+- Un compte **Convex**, des clés **OpenAI** et/ou **Gemini**, une app **Shopify** (client credentials) et un bucket **Cloudflare R2** public.
+
+---
+
+## 🚀 Setup
 
 ```bash
+# 1. Dépendances
 npm install
+
+# 2. Variables d'environnement
 cp .env.example .env
-```
+#    → remplis les valeurs (voir section Environnement)
 
-Configure Convex:
-
-```bash
+# 3. Lier / créer le déploiement Convex
+#    (renseigne CONVEX_DEPLOYMENT + VITE_CONVEX_URL, pousse le schéma,
+#     les fonctions ET les crons, installe sharp côté serveur)
 npx convex dev
 ```
 
-This creates or links a Convex deployment and populates `CONVEX_DEPLOYMENT` plus `VITE_CONVEX_URL`. After Convex is configured, run:
+> 🔑 **Indispensable :** ajoute aussi les secrets serveur (`OPENAI_API_KEY`, `GEMINI_API_KEY`, `SHOPIFY_*`, `R2_*`) à **l'environnement du déploiement Convex** (dashboard Convex → Settings → Environment Variables), pas seulement dans `.env`. Les actions Convex lisent leurs clés là, jamais depuis le navigateur.
+
+---
+
+## ▶️ Lancer le projet
+
+Deux process en parallèle :
 
 ```bash
-npx convex dev
+# Terminal 1 — backend Convex (pousse le code à chaud + exécute les crons)
+npm run convex:dev
+
+# Terminal 2 — front TanStack Start / Vite
 npm run dev
 ```
 
-Open the TanStack Start URL printed by Vite, usually `http://localhost:5173`.
+Ouvre l'URL affichée par Vite, généralement **http://localhost:5173**.
 
-## Environment
+> ⚠️ **Garde `convex:dev` allumé en permanence pendant que tu travailles.** Sans lui : tes modifs de code backend ne partent pas **et les crons ne tournent pas** — les jobs batch restent alors bloqués et semblent « perdus ». Pour un déploiement ponctuel sans process persistant : `npx convex dev --once`.
 
-Required app and auth values:
+---
 
-```env
-CONVEX_DEPLOYMENT=
-CONVEX_DEPLOY_KEY=
-VITE_CONVEX_URL=
-VITE_CONVEX_SITE_URL=
-AUTH_SECRET=
-AUTH_URL=
-SITE_URL=
-JWT_PRIVATE_KEY=
-JWKS=
+## 🔐 Environnement
+
+### Convex & Auth
+| Variable | Rôle |
+|---|---|
+| `CONVEX_DEPLOYMENT`, `CONVEX_DEPLOY_KEY` | déploiement Convex (auto-renseigné par `convex dev`) |
+| `VITE_CONVEX_URL`, `VITE_CONVEX_SITE_URL` | URLs Convex côté client (seules variables `VITE_` exposées au navigateur) |
+| `AUTH_SECRET`, `AUTH_URL`, `SITE_URL` | config Convex Auth |
+| `JWT_PRIVATE_KEY`, `JWKS` | clés générées par la commande de setup Convex Auth |
+
+### OpenAI Images
+| Variable | Défaut |
+|---|---|
+| `OPENAI_API_KEY` | — |
+| `OPENAI_IMAGE_MODEL` | `gpt-image-2-2026-04-21` |
+| `OPENAI_IMAGE_SIZE` | `1024x1024` |
+| `OPENAI_IMAGE_QUALITY` | `medium` |
+| `OPENAI_IMAGE_OUTPUT_FORMAT` | `jpeg` |
+| `OPENAI_IMAGE_REQUESTS_PER_MINUTE` | `5` |
+
+### Nano Banana Pro (Gemini)
+| Variable | Défaut |
+|---|---|
+| `GEMINI_API_KEY` | — |
+| `GEMINI_IMAGE_MODEL` | `gemini-3-pro-image-preview` |
+| `GEMINI_IMAGE_SIZE` | `1K` \| `2K` \| `4K` (vide = défaut modèle) |
+| `GEMINI_IMAGE_ASPECT_RATIO` | ex. `1:1`, `4:3`, `16:9` |
+| `GEMINI_IMAGE_REQUESTS_PER_MINUTE` | `5` |
+
+### Shopify Admin GraphQL
+| Variable | Défaut |
+|---|---|
+| `SHOPIFY_SHOP_DOMAIN` | `xxx.myshopify.com` |
+| `SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET` | client credentials de l'app |
+| `SHOPIFY_API_VERSION` | `2026-04` |
+| `SHOPIFY_PRODUCT_QUERY` | `status:active` |
+
+### Cloudflare R2
+| Variable | Rôle |
+|---|---|
+| `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | credentials S3 |
+| `R2_BUCKET` | nom du bucket |
+| `R2_PUBLIC_BASE_URL` | **URL publique** du bucket (Shopify importe les images depuis ces URLs) |
+| `WEBP_QUALITY` | qualité WebP, défaut `82` (optionnel) |
+
+---
+
+## 🧭 Workflow type
+
+1. `/login` → crée le premier compte admin, puis connecte-toi.
+2. `/settings/prompts` → seed les prompts par défaut si absents.
+3. `/settings` → choisis **OpenAI Images** ou **Nano Banana Pro** + mode temps réel/batch.
+4. `/products` → **Sync Shopify**.
+5. Sélectionne des produits, coche les types d'images (preset budget : `situation`, `closeup`, `texture`, `oeillets`).
+6. Lance le job → suis la progression dans `/jobs` ou `/products/$id`.
+7. Inspecte les images générées, prompts et historique.
+8. **Push** → confirme, et coche éventuellement « Replace existing » pour remplacer la galerie.
+
+### Types d'images
+Toujours disponibles : `situation`, `closeup`, `texture`.
+Fixations (uniquement si détectées) : `multi-fonction`, `passe-tringle`, `galon-fronceur-crochets-escargot`, `oeillets`, `plis-flamands-agrafes-flamandes`.
+
+---
+
+## 🖼️ Pipeline image
+
+À l'enregistrement (avant tout push), dans `convex/generation.ts` :
+
+1. **WebP** — ré-encodage via `sharp` (qualité `WEBP_QUALITY`, défaut 82).
+2. **Strip métadonnées** — sharp ne recopie ni EXIF, ni ICC, ni XMP (`.rotate()` applique puis supprime l'orientation).
+3. **Nommage SEO** — clé R2 `generated/<handle>/<id>/<titre-produit>-<type>.webp`, le dernier segment (propre) devenant le nom du média côté Shopify.
+
+> `sharp` est un binaire natif : il est déclaré dans `convex.json` (`node.externalPackages`) pour que Convex l'installe côté serveur Linux au lieu de le bundler. Si tu retires ce fichier, le pipeline retombe sur les octets d'origine (pas de WebP).
+
+---
+
+## ⚙️ Modes de génération
+
+| Mode | Comportement |
+|---|---|
+| **Temps réel** | `generation.processJob` génère séquentiellement avec rate-limit ; résultats immédiats. |
+| **Batch** | `generation.submitBatch` soumet un lot au provider (~50 % moins cher, asynchrone). Pour Gemini, les requêtes et résultats transitent par des fichiers JSONL afin de streamer les images sans dépasser la mémoire Convex. Le cron **`poll image batches`** (`convex/crons.ts`, toutes les 2 min) récupère les résultats et termine le job. |
+
+Architecture détaillée et récupération des anciens batches Gemini inline :
+[`docs/GEMINI_BATCH.md`](docs/GEMINI_BATCH.md).
+
+Suivi des jobs batch :
+```bash
+npx convex data generationJobs          # status: running | completed | failed
+npx convex run generation:pollBatches '{}'   # forcer un poll immédiat
 ```
 
-`AUTH_SECRET` and `AUTH_URL` are kept for deployment compatibility. Convex Auth also requires `SITE_URL`, `JWT_PRIVATE_KEY`, and `JWKS`; the Convex Auth setup command can generate and set the key material for the Convex deployment.
+---
 
-OpenAI image generation:
+## 📤 Push & re-push vers Shopify
 
-```env
-OPENAI_API_KEY=
-OPENAI_IMAGE_MODEL=gpt-image-2-2026-04-21
-OPENAI_IMAGE_SIZE=1024x1024
-OPENAI_IMAGE_QUALITY=medium
-OPENAI_IMAGE_OUTPUT_FORMAT=jpeg
-OPENAI_IMAGE_REQUESTS_PER_MINUTE=5
-GENERATION_CONCURRENCY=1
-```
+- Le push (`convex/shopify.ts › pushProductImages`) envoie les images `generated` **et** `uploaded` (re-push autorisé, ex. après passage en WebP).
+- **Sans** « Replace existing » : les nouvelles images **s'ajoutent** (doublons possibles).
+- **Avec** « Replace existing » : les anciens médias (matchés par `alt`) sont remplacés.
 
-Nano Banana Pro image generation:
+Flux « tout repasser en WebP » : régénérer (force) → push avec *Replace existing*.
 
-```env
-GEMINI_API_KEY=
-GEMINI_IMAGE_MODEL=gemini-3-pro-image-preview
-GEMINI_IMAGE_REQUESTS_PER_MINUTE=5
-```
+---
 
-`gemini-3-pro-image-preview` is Google's Gemini API identifier for Nano Banana Pro. Add `GEMINI_API_KEY` to the Convex deployment environment, then choose **Nano Banana Pro (Gemini)** on `/settings`. New jobs use the selected engine; existing jobs continue with the engine recorded when they were created.
+## 🛠️ Script de maintenance
 
-Shopify Admin GraphQL:
-
-```env
-SHOPIFY_SHOP_DOMAIN=
-SHOPIFY_CLIENT_ID=
-SHOPIFY_CLIENT_SECRET=
-SHOPIFY_API_VERSION=2026-04
-SHOPIFY_PRODUCT_QUERY=status:active
-```
-
-Cloudflare R2:
-
-```env
-R2_ACCOUNT_ID=
-R2_ACCESS_KEY_ID=
-R2_SECRET_ACCESS_KEY=
-R2_BUCKET=
-R2_PUBLIC_BASE_URL=
-```
-
-`R2_PUBLIC_BASE_URL` must point at a public bucket/custom-domain base URL, because Shopify imports generated images from those URLs.
-
-## Main Flow
-
-1. Visit `/login`.
-2. Create the first admin account, then sign in.
-3. Go to `/settings/prompts` and seed default prompts if they are not already present.
-4. Go to `/settings` and select **OpenAI Images** or **Nano Banana Pro (Gemini)**.
-5. Go to `/products` and click **Sync Shopify**.
-6. Select one or more products.
-7. Choose image types with checkboxes. The budget preset selects `situation`, `closeup`, `texture`, and `oeillets` when available.
-8. Start the background generation job.
-9. Watch realtime progress in `/jobs/$jobId`, or stay on the product page while statuses update.
-10. Inspect generated URLs, generator labels, and prompt history in `/products/$productId`.
-11. Click **Push**, confirm, and optionally choose whether to replace the existing Shopify gallery.
-
-## Image Type Rules
-
-Every product offers:
-
-- `situation`
-- `closeup`
-- `texture`
-
-Fixation images are offered only when detected:
-
-- `multi-fonction`
-- `passe-tringle`
-- `galon-fronceur-crochets-escargot`
-- `oeillets`
-- `plis-flamands-agrafes-flamandes`
-
-Bulk mode shows image types available across selected products. If a fixation type is selected, the job creates that task only for products that actually have that fixation.
-
-## Safety
-
-- OpenAI and Gemini API keys are only read by Convex actions, never from browser bundles.
-- Generated image binaries are uploaded to R2, not stored in Convex.
-- Shopify prices, stock, variants, descriptions, status, and inventory are never modified.
-- Generated images are never pushed automatically after generation.
-- Existing Shopify images are not deleted unless the user explicitly confirms gallery replacement during push.
-
-## Validation
+`scripts/switch_images.js` — inverse la première et la dernière image des produits « voilage » via l'Admin GraphQL.
 
 ```bash
-npm run typecheck
+npm run images_switch     # charge .env via `node --env-file`
+```
+
+---
+
+## 🧯 Dépannage
+
+| Symptôme | Cause / solution |
+|---|---|
+| `Variable d'environnement manquante` dans un script | le `.env` n'est pas chargé → lancer via `node --env-file=.env …` (déjà câblé dans `images_switch`). |
+| `Could not find MIME for Buffer` à la génération | ancien code (jimp, sans codec WebP) encore déployé → relancer `convex:dev` / `npx convex dev --once`. |
+| Image stockée en `.jpg` au lieu de `.webp` | `sharp` n'a pas chargé côté Convex → vérifier `convex.json` puis redéployer. |
+| Jobs batch bloqués en `running` / « perdus » | Vérifier que `convex:dev` tourne, puis lancer `npx convex run generation:pollBatches '{}'`. Les anciens batches Gemini inline sont récupérés progressivement ; voir [`docs/GEMINI_BATCH.md`](docs/GEMINI_BATCH.md). |
+
+---
+
+## 🔎 Validation
+
+```bash
+npm run typecheck                 # tsc app + review-ui
+npx tsc --noEmit -p convex/tsconfig.json   # fonctions Convex
 npm run build
+npx convex dev --once             # régénère _generated, typecheck & push Convex
 ```
 
-Convex validation requires a linked deployment or deploy key:
+---
 
-```bash
-CONVEX_DEPLOY_KEY=... npx convex dev --once --typecheck enable
-```
+## ☁️ Déploiement (Vercel + Convex)
 
-`convex dev --once` regenerates `convex/_generated`, typechecks Convex functions, and pushes them to the configured dev deployment.
+1. Crée/lie le déploiement Convex.
+2. Renseigne les variables sur Vercel **et** dans l'environnement Convex (secrets côté Convex uniquement).
+3. `npx convex deploy` pour pousser les fonctions et les crons.
+4. `npm run build` puis déploie l'app sur Vercel.
 
-## Deploy On Vercel
+> Garde OpenAI / Gemini / Shopify / R2 **hors** des variables `VITE_`. Seul `VITE_CONVEX_URL` est visible côté navigateur.
 
-1. Create/link the Convex deployment.
-2. Add the environment variables above to Vercel and Convex as appropriate.
-3. Deploy Convex functions with `npx convex deploy`.
-4. Deploy the TanStack Start app to Vercel with `npm run build`.
+---
 
-Keep OpenAI, Gemini, Shopify, and R2 secrets out of `VITE_` variables. Only `VITE_CONVEX_URL` is browser-visible.
+## 📦 Legacy CLI
 
-## Legacy CLI
-
-The older local automation commands still exist:
+L'ancienne automatisation locale reste dans `src/` pour référence :
 
 ```bash
 npm run dry-run -- --limit=1
@@ -182,4 +245,13 @@ npm run attach-images -- --limit=10
 npm run review -- --limit=10
 ```
 
-They are retained for comparison while the deployed app becomes the main workflow.
+---
+
+## 🔒 Sécurité
+
+- Les clés OpenAI/Gemini/Shopify/R2 ne sont lues que par les actions Convex, jamais dans le bundle navigateur.
+- Prix, stock, variantes, descriptions et statut Shopify ne sont **jamais** modifiés.
+- Aucune image n'est poussée automatiquement après génération.
+- Les images Shopify existantes ne sont supprimées **que** sur confirmation explicite du remplacement.
+</content>
+</invoke>

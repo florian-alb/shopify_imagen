@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery } from "convex/react";
+import { toast } from "sonner";
 import { useState } from "react";
 import { BusyIcon, PageHeader, StateBadge } from "@/components/page";
 import { Button } from "@/components/ui/button";
@@ -45,6 +46,11 @@ function SettingsPage() {
         delete next[key];
         return next;
       });
+      toast.success(`${key} saved`);
+    } catch (saveError) {
+      toast.error(`Failed to save ${key}`, {
+        description: saveError instanceof Error ? saveError.message : String(saveError)
+      });
     } finally {
       setSaving(null);
     }
@@ -54,6 +60,11 @@ function SettingsPage() {
     setSaving(key);
     try {
       await setSetting({ key, value });
+      toast.success(`${key} updated`);
+    } catch (switchError) {
+      toast.error(`Failed to update ${key}`, {
+        description: switchError instanceof Error ? switchError.message : String(switchError)
+      });
     } finally {
       setSaving(null);
     }
