@@ -862,7 +862,7 @@ async function ingestGeminiStream(
   let index = 0;
   await consume(async (raw) => {
     const { key, result } = geminiBatchItem(raw);
-    const image = (key ? byId.get(key) : undefined) ?? pending[index];
+    const image = key ? byId.get(key) : pending[index];
     index += 1;
     if (!image || seen.has(image._id)) return;
     seen.add(image._id);
@@ -937,6 +937,13 @@ async function processTerminalBatch(
       await ctx.runMutation(internal.jobs.finishJobIfDone, { jobId: job._id });
       await cleanupGeminiBatchFiles(job);
       return { state: "failed" as const, error: poll.error };
+    }
+
+    if (!pending.length) {
+      await ctx.runMutation(internal.jobs.finishJobIfDone, { jobId: job._id });
+      await cleanupGeminiBatchFiles(job);
+      log("batch", "job done", { jobId: job._id, ingested: 0, failed: 0 });
+      return { state: "done" as const, ingested: 0, failed: 0 };
     }
 
     log("batch", "ingesting", { jobId: job._id, batchId: job.batchId, source: poll.source.kind, pending: pending.length });
