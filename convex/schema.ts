@@ -55,6 +55,7 @@ export default defineSchema({
     handle: v.string(),
     vendor: v.optional(v.union(v.string(), v.null())),
     productType: v.optional(v.union(v.string(), v.null())),
+    shopifyStatus: v.optional(v.union(v.string(), v.null())),
     tags: v.array(v.string()),
     collections: v.array(v.any()),
     options: v.array(v.any()),

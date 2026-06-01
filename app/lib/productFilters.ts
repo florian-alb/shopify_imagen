@@ -4,6 +4,7 @@ export type ProductSearch = {
   q?: string;
   type?: string;
   collection?: string;
+  shopifyStatus?: string;
   status?: GenerationStatus;
 };
 
@@ -19,6 +20,7 @@ export function validateProductSearch(search: Record<string, unknown>): ProductS
     q: typeof search.q === "string" && search.q ? search.q : undefined,
     type: optionalString(search.type),
     collection: optionalString(search.collection),
+    shopifyStatus: optionalString(search.shopifyStatus)?.toUpperCase(),
     status: status && status in generationStatusLabels ? (status as GenerationStatus) : undefined
   };
 }
@@ -28,6 +30,7 @@ export function productFilterArgs(search: ProductSearch) {
     search: search.q,
     productType: search.type,
     collection: search.collection,
+    shopifyStatus: search.shopifyStatus,
     generationStatus: search.status
   };
 }

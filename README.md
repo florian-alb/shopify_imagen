@@ -121,7 +121,7 @@ Ouvre l'URL affichée par Vite, généralement **http://localhost:5173**.
 | `SHOPIFY_SHOP_DOMAIN` | `xxx.myshopify.com` |
 | `SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET` | client credentials de l'app |
 | `SHOPIFY_API_VERSION` | `2026-04` |
-| `SHOPIFY_PRODUCT_QUERY` | `status:active` |
+| `SHOPIFY_PRODUCT_QUERY` | `status:active,draft,archived` (ex. `status:active` pour restreindre) |
 
 ### Cloudflare R2
 | Variable | Rôle |

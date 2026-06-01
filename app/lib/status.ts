@@ -15,3 +15,8 @@ export function statusTone(status: GenerationStatus): "default" | "success" | "w
   if (status === "failed") return "danger";
   return "default";
 }
+
+export function shopifyStatusLabel(status?: string | null) {
+  if (!status) return "Unknown Shopify status";
+  return status.charAt(0) + status.slice(1).toLowerCase();
+}

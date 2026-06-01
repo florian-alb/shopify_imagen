@@ -65,6 +65,7 @@ const PRODUCTS_QUERY = `#graphql
         id
         title
         handle
+        status
         productType
         vendor
         tags
@@ -93,6 +94,7 @@ const PRODUCT_QUERY = `#graphql
       id
       title
       handle
+      status
       productType
       vendor
       tags
@@ -175,6 +177,7 @@ function mapProductForUpsert(product: any) {
     handle: product.handle,
     vendor: product.vendor ?? null,
     productType: product.productType ?? null,
+    shopifyStatus: product.status ?? null,
     tags: product.tags ?? [],
     collections: product.collections?.nodes ?? [],
     options: product.options ?? [],
@@ -198,7 +201,7 @@ export const syncProducts = action({
       const data: ProductsResponse = await shopifyGraphql<ProductsResponse>(PRODUCTS_QUERY, {
         first,
         after,
-        query: env("SHOPIFY_PRODUCT_QUERY", "status:active")
+        query: env("SHOPIFY_PRODUCT_QUERY", "status:active,draft,archived")
       });
       for (const product of data.products.nodes) {
         const id = await ctx.runMutation(internal.products.upsertSynced, mapProductForUpsert(product));

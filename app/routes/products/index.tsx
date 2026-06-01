@@ -1,7 +1,7 @@
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
-import { ImageIcon, RefreshCw, Search, WandSparkles } from "lucide-react";
+import { Check, ImageIcon, RefreshCw, Search, WandSparkles } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
   BusyIcon,
@@ -31,7 +31,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { generationStatusLabels, type GenerationStatus } from "@/lib/status";
+import { generationStatusLabels, shopifyStatusLabel, type GenerationStatus } from "@/lib/status";
 import { api } from "../../../convex/_generated/api";
 import type { Doc, Id } from "../../../convex/_generated/dataModel";
 
@@ -43,6 +43,7 @@ export const Route = createFileRoute("/products/")({
 type Product = Doc<"products">;
 type ProductFacets = {
   productTypes: string[];
+  shopifyStatuses: string[];
   collections: Array<{ id: string; title: string; handle?: string }>;
 };
 
@@ -157,7 +158,7 @@ function ProductsPage() {
       />
 
       <Card className="mb-4 rounded-lg py-3">
-        <CardContent className="grid gap-3 px-3 md:grid-cols-[1.5fr_1fr_1fr_1fr]">
+        <CardContent className="grid gap-3 px-3 md:grid-cols-[1.5fr_1fr_1fr_1fr_1fr]">
           <Label className="relative block">
             <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -190,8 +191,19 @@ function ProductsPage() {
             ))}
           </FilterSelect>
           <FilterSelect
+            value={search.shopifyStatus ?? ""}
+            placeholder="All Shopify states"
+            onChange={(shopifyStatus) => updateSearch({ shopifyStatus: shopifyStatus || undefined })}
+          >
+            {facets?.shopifyStatuses.map((item) => (
+              <SelectItem key={item} value={item}>
+                {shopifyStatusLabel(item)}
+              </SelectItem>
+            ))}
+          </FilterSelect>
+          <FilterSelect
             value={search.status ?? ""}
-            placeholder="All states"
+            placeholder="All generation states"
             onChange={(status) => updateSearch({ status: (status || undefined) as ProductSearch["status"] })}
           >
             {Object.entries(generationStatusLabels).map(([value, label]) => (
@@ -210,7 +222,9 @@ function ProductsPage() {
           onClick={toggleVisible}
           disabled={!products?.length}
         >
-          <Checkbox checked={allVisibleSelected} aria-hidden tabIndex={-1} />
+          <span className="grid size-4 place-items-center rounded border border-input bg-background" aria-hidden>
+            {allVisibleSelected ? <Check className="size-3" /> : null}
+          </span>
           {selected.size} selected
         </Button>
         <Button
@@ -381,6 +395,7 @@ function ProductRow({
           <Badge variant="outline">
             {product.productType || "No category"}
           </Badge>
+          {product.shopifyStatus ? <Badge variant="outline">{shopifyStatusLabel(product.shopifyStatus)}</Badge> : null}
           <Badge variant="outline">
             {product.currentShopifyImages.length} Shopify
           </Badge>

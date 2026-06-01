@@ -25,7 +25,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { productFilterArgs, type ProductSearch, validateProductSearch } from "@/lib/productFilters";
-import { generationStatusLabels, type GenerationStatus } from "@/lib/status";
+import { generationStatusLabels, shopifyStatusLabel, type GenerationStatus } from "@/lib/status";
 import { api } from "../../../convex/_generated/api";
 import type { Doc, Id } from "../../../convex/_generated/dataModel";
 
@@ -216,6 +216,7 @@ function ProductDetailPage() {
               label={generationStatusLabels[product.generationStatus as GenerationStatus]}
             />
             <Badge variant="outline">{product.productType || "No category"}</Badge>
+            {product.shopifyStatus ? <Badge variant="outline">{shopifyStatusLabel(product.shopifyStatus)}</Badge> : null}
             {product.vendor ? <Badge variant="outline">{product.vendor}</Badge> : null}
           </div>
           <h1 className="truncate text-2xl font-semibold sm:text-3xl">{product.title}</h1>
@@ -310,10 +311,12 @@ function ProductDetailPage() {
             label={generationStatusLabels[product.generationStatus as GenerationStatus]}
           />
           <Badge variant="outline">{product.productType || "No category"}</Badge>
+          {product.shopifyStatus ? <Badge variant="outline">{shopifyStatusLabel(product.shopifyStatus)}</Badge> : null}
           {product.vendor ? <Badge variant="outline">{product.vendor}</Badge> : null}
         </div>
         <dl className="grid gap-x-10 gap-y-4 text-sm sm:grid-cols-2">
           <Fact label="Collections" value={product.collections.map((collection: any) => collection.title).join(", ") || "None"} />
+          <Fact label="Shopify status" value={shopifyStatusLabel(product.shopifyStatus)} />
           <Fact label="Last synced" value={product.lastSyncedAt ? new Date(product.lastSyncedAt).toLocaleString() : "Never"} />
           <Fact label="Generated history" value={`${images.length} image records`} />
         </dl>

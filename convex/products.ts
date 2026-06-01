@@ -16,6 +16,7 @@ const productFilterArgs = {
   search: v.optional(v.string()),
   productType: v.optional(v.string()),
   collection: v.optional(v.string()),
+  shopifyStatus: v.optional(v.string()),
   generationStatus: v.optional(productGenerationStatus)
 };
 
@@ -23,6 +24,7 @@ type ProductFilters = {
   search?: string;
   productType?: string;
   collection?: string;
+  shopifyStatus?: string;
   generationStatus?: Doc<"products">["generationStatus"];
 };
 
@@ -61,7 +63,8 @@ async function filteredProducts(ctx: { db: any }, args: ProductFilters) {
         product.collections.some((collection: { id?: string; title?: string; handle?: string }) => {
           return collection.id === args.collection || collection.handle === args.collection || collection.title === args.collection;
         });
-      return matchesSearch && matchesCollection;
+      const matchesShopifyStatus = !args.shopifyStatus || product.shopifyStatus === args.shopifyStatus;
+      return matchesSearch && matchesCollection && matchesShopifyStatus;
     })
     .sort((a, b) => b._creationTime - a._creationTime);
 }
@@ -98,6 +101,7 @@ export const facets = query({
     await requireUserId(ctx);
     const products = await ctx.db.query("products").collect();
     const productTypes = Array.from(new Set(products.map((product) => product.productType).filter(Boolean) as string[])).sort();
+    const shopifyStatuses = Array.from(new Set(products.map((product) => product.shopifyStatus).filter(Boolean) as string[])).sort();
     const collections = new Map<string, { id: string; title: string; handle?: string }>();
     products.forEach((product) => {
       product.collections.forEach((collection: { id?: string; title?: string; handle?: string }) => {
@@ -105,7 +109,7 @@ export const facets = query({
         if (id && collection.title) collections.set(id, { id, title: collection.title, handle: collection.handle });
       });
     });
-    return { productTypes, collections: Array.from(collections.values()).sort((a, b) => a.title.localeCompare(b.title)) };
+    return { productTypes, shopifyStatuses, collections: Array.from(collections.values()).sort((a, b) => a.title.localeCompare(b.title)) };
   }
 });
 
@@ -155,6 +159,7 @@ export const upsertSynced = internalMutation({
     handle: v.string(),
     vendor: v.optional(v.union(v.string(), v.null())),
     productType: v.optional(v.union(v.string(), v.null())),
+    shopifyStatus: v.optional(v.union(v.string(), v.null())),
     tags: v.array(v.string()),
     collections: v.array(v.any()),
     options: v.array(v.any()),
