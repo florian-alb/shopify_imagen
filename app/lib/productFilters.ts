@@ -1,0 +1,33 @@
+import { generationStatusLabels, type GenerationStatus } from "@/lib/status";
+
+export type ProductSearch = {
+  q?: string;
+  type?: string;
+  collection?: string;
+  status?: GenerationStatus;
+};
+
+function optionalString(value: unknown) {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+export function validateProductSearch(search: Record<string, unknown>): ProductSearch {
+  const status = optionalString(search.status);
+  return {
+    q: typeof search.q === "string" && search.q ? search.q : undefined,
+    type: optionalString(search.type),
+    collection: optionalString(search.collection),
+    status: status && status in generationStatusLabels ? (status as GenerationStatus) : undefined
+  };
+}
+
+export function productFilterArgs(search: ProductSearch) {
+  return {
+    search: search.q,
+    productType: search.type,
+    collection: search.collection,
+    generationStatus: search.status
+  };
+}

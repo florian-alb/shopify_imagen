@@ -36,7 +36,27 @@ export const list = query({
   args: {},
   handler: async (ctx) => {
     await requireUserId(ctx);
-    return ctx.db.query("generationJobs").withIndex("by_created").order("desc").take(100);
+    const jobs = await ctx.db.query("generationJobs").withIndex("by_created").order("desc").take(100);
+    return Promise.all(
+      jobs.map(async (job) => {
+        const images = await ctx.db
+          .query("generatedImages")
+          .withIndex("by_job", (q) => q.eq("jobId", job._id))
+          .collect();
+        const reviewable = images.filter(
+          (image) => image.storageUrl && (image.status === "generated" || image.status === "uploaded")
+        );
+        return {
+          ...job,
+          reviewSummary: {
+            total: reviewable.length,
+            pending: reviewable.filter((image) => (image.reviewStatus ?? "pending") === "pending").length,
+            approved: reviewable.filter((image) => image.reviewStatus === "approved").length,
+            rejected: reviewable.filter((image) => image.reviewStatus === "rejected").length
+          }
+        };
+      })
+    );
   }
 });
 
@@ -155,6 +175,8 @@ export const create = mutation({
       mode: products.length === 1 ? "single" : "bulk",
       executionMode,
       batchId: null,
+      batchInputFileName: null,
+      batchIngestionStartedAt: null,
       vibeAnalysis,
       imageProvider,
       imageModel,
@@ -183,6 +205,7 @@ export const create = mutation({
         generatedImageUrl: null,
         storageUrl: null,
         status: "queued",
+        reviewStatus: "pending",
         shopifyMediaId: null,
         error: null,
         createdAt: now,
@@ -252,10 +275,19 @@ export const imagesForJob = internalQuery({
   }
 });
 
-export const setBatchId = internalMutation({
-  args: { jobId: v.id("generationJobs"), batchId: v.union(v.string(), v.null()) },
+export const setBatchInfo = internalMutation({
+  args: {
+    jobId: v.id("generationJobs"),
+    batchId: v.union(v.string(), v.null()),
+    batchInputFileName: v.optional(v.union(v.string(), v.null()))
+  },
   handler: async (ctx, args) => {
-    await ctx.db.patch(args.jobId, { batchId: args.batchId, updatedAt: Date.now() });
+    await ctx.db.patch(args.jobId, {
+      batchId: args.batchId,
+      batchInputFileName: args.batchInputFileName ?? null,
+      batchIngestionStartedAt: null,
+      updatedAt: Date.now()
+    });
   }
 });
 
@@ -281,7 +313,32 @@ export const pendingBatchJobs = internalQuery({
       .query("generationJobs")
       .withIndex("by_status", (q) => q.eq("status", "running"))
       .collect();
-    return running.filter((job) => job.executionMode === "batch" && Boolean(job.batchId));
+    return running.filter((job) => job.executionMode === "batch");
+  }
+});
+
+// Convex Node actions time out after 10 minutes. Keep a short buffer so a
+// killed action releases naturally without allowing overlapping ingestion.
+const BATCH_INGESTION_LEASE_MS = 11 * 60 * 1000;
+
+export const acquireBatchIngestion = internalMutation({
+  args: { jobId: v.id("generationJobs") },
+  handler: async (ctx, args) => {
+    const job = await ctx.db.get(args.jobId);
+    if (!job || job.status !== "running") return false;
+    const now = Date.now();
+    if (job.batchIngestionStartedAt && now - job.batchIngestionStartedAt < BATCH_INGESTION_LEASE_MS) return false;
+    await ctx.db.patch(args.jobId, { batchIngestionStartedAt: now, updatedAt: now });
+    return true;
+  }
+});
+
+export const releaseBatchIngestion = internalMutation({
+  args: { jobId: v.id("generationJobs") },
+  handler: async (ctx, args) => {
+    const job = await ctx.db.get(args.jobId);
+    if (!job) return;
+    await ctx.db.patch(args.jobId, { batchIngestionStartedAt: null, updatedAt: Date.now() });
   }
 });
 
@@ -296,11 +353,14 @@ export const completeImage = internalMutation({
   },
   handler: async (ctx, args) => {
     const image = await ctx.db.get(args.imageId);
-    if (!image) return;
+    if (!image || image.status === "generated" || image.status === "uploaded" || image.status === "failed") return false;
     await ctx.db.patch(args.imageId, {
       generatedImageUrl: args.generatedImageUrl,
       storageUrl: args.storageUrl,
       status: "generated",
+      reviewStatus: "pending",
+      reviewedAt: undefined,
+      reviewedByUserId: undefined,
       error: null,
       inputTokens: args.inputTokens,
       outputTokens: args.outputTokens,
@@ -311,6 +371,7 @@ export const completeImage = internalMutation({
       completedTasks: (await ctx.db.get(image.jobId))!.completedTasks + 1,
       updatedAt: Date.now()
     });
+    return true;
   }
 });
 
@@ -321,7 +382,7 @@ export const failImage = internalMutation({
   },
   handler: async (ctx, args) => {
     const image = await ctx.db.get(args.imageId);
-    if (!image) return;
+    if (!image || image.status === "generated" || image.status === "uploaded" || image.status === "failed") return false;
     const job = await ctx.db.get(image.jobId);
     await ctx.db.patch(args.imageId, {
       status: "failed",
@@ -334,6 +395,7 @@ export const failImage = internalMutation({
         updatedAt: Date.now()
       });
     }
+    return true;
   }
 });
 
@@ -341,6 +403,126 @@ export const markImageGenerating = internalMutation({
   args: { imageId: v.id("generatedImages") },
   handler: async (ctx, args) => {
     await ctx.db.patch(args.imageId, { status: "generating", updatedAt: Date.now() });
+  }
+});
+
+export const reviewImages = mutation({
+  args: {
+    imageIds: v.array(v.id("generatedImages")),
+    reviewStatus: v.union(v.literal("approved"), v.literal("rejected"))
+  },
+  handler: async (ctx, args) => {
+    const userId = await requireUserId(ctx);
+    const now = Date.now();
+    let updated = 0;
+    for (const imageId of Array.from(new Set(args.imageIds))) {
+      const image = await ctx.db.get(imageId);
+      if (!image || !image.storageUrl || (image.status !== "generated" && image.status !== "uploaded")) continue;
+      await ctx.db.patch(imageId, {
+        reviewStatus: args.reviewStatus,
+        reviewedAt: now,
+        reviewedByUserId: userId,
+        updatedAt: now
+      });
+      updated += 1;
+    }
+    return { updated };
+  }
+});
+
+export const retry = mutation({
+  args: { jobId: v.id("generationJobs") },
+  handler: async (ctx, args) => {
+    await requireUserId(ctx);
+    const job = await ctx.db.get(args.jobId);
+    if (!job) throw new Error("Job not found.");
+    if (job.status !== "failed" && job.status !== "cancelled") throw new Error("Only failed or cancelled jobs can be retried.");
+
+    const images = await ctx.db
+      .query("generatedImages")
+      .withIndex("by_job", (q) => q.eq("jobId", args.jobId))
+      .collect();
+
+    const toRetry = images.filter((img) => img.status === "failed" || img.status === "queued" || img.status === "generating");
+    if (!toRetry.length) throw new Error("No failed images to retry.");
+
+    const now = Date.now();
+
+    // Cancel any stuck images from OTHER jobs on the same products so they
+    // don't show as phantom "generating"/"queued" entries on the product page.
+    const retryImageTypes = new Set(toRetry.map((img) => img.imageType));
+    for (const productId of job.productIds as Id<"products">[]) {
+      const otherImages = await ctx.db
+        .query("generatedImages")
+        .withIndex("by_product", (q) => q.eq("productId", productId))
+        .collect();
+      for (const img of otherImages) {
+        if (img.jobId === args.jobId) continue;
+        if (!retryImageTypes.has(img.imageType)) continue;
+        if (img.status === "generating" || img.status === "queued") {
+          await ctx.db.patch(img._id, { status: "failed", error: "Superseded by retry.", updatedAt: now });
+        }
+      }
+    }
+
+    for (const img of toRetry) {
+      await ctx.db.patch(img._id, {
+        status: "queued",
+        reviewStatus: "pending",
+        reviewedAt: undefined,
+        reviewedByUserId: undefined,
+        error: null,
+        updatedAt: now
+      });
+      await ctx.db.patch(img.productId, { generationStatus: "generating", updatedAt: now });
+    }
+
+    const kept = images.filter((img) => img.status === "generated" || img.status === "uploaded");
+    await ctx.db.patch(args.jobId, {
+      status: "queued",
+      batchId: null,
+      batchInputFileName: null,
+      batchIngestionStartedAt: null,
+      error: null,
+      totalTasks: toRetry.length + kept.length,
+      failedTasks: 0,
+      completedTasks: kept.length,
+      completedAt: undefined,
+      updatedAt: now
+    });
+
+    await ctx.scheduler.runAfter(
+      0,
+      job.executionMode === "batch" ? internal.generation.submitBatch : internal.generation.processJob,
+      { jobId: args.jobId }
+    );
+  }
+});
+
+export const failStuckJob = internalMutation({
+  args: { jobId: v.id("generationJobs"), error: v.string() },
+  handler: async (ctx, args) => {
+    const job = await ctx.db.get(args.jobId);
+    if (!job || job.status !== "running") return;
+    const images = await ctx.db
+      .query("generatedImages")
+      .withIndex("by_job", (q) => q.eq("jobId", args.jobId))
+      .collect();
+    const stuck = images.filter((img) => img.status === "queued" || img.status === "generating");
+    const now = Date.now();
+    for (const img of stuck) {
+      await ctx.db.patch(img._id, { status: "failed", error: args.error, updatedAt: now });
+    }
+    await ctx.db.patch(args.jobId, {
+      status: "failed",
+      error: args.error,
+      failedTasks: job.failedTasks + stuck.length,
+      completedAt: now,
+      updatedAt: now
+    });
+    for (const productId of job.productIds as Id<"products">[]) {
+      await ctx.db.patch(productId, { generationStatus: "failed", updatedAt: now });
+    }
   }
 });
 

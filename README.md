@@ -167,7 +167,10 @@ Fixations (uniquement si détectées) : `multi-fonction`, `passe-tringle`, `galo
 | Mode | Comportement |
 |---|---|
 | **Temps réel** | `generation.processJob` génère séquentiellement avec rate-limit ; résultats immédiats. |
-| **Batch** | `generation.submitBatch` soumet un lot au provider (~50 % moins cher, asynchrone). Le cron **`poll image batches`** (`convex/crons.ts`, toutes les 2 min) récupère les résultats et termine le job. |
+| **Batch** | `generation.submitBatch` soumet un lot au provider (~50 % moins cher, asynchrone). Pour Gemini, les requêtes et résultats transitent par des fichiers JSONL afin de streamer les images sans dépasser la mémoire Convex. Le cron **`poll image batches`** (`convex/crons.ts`, toutes les 2 min) récupère les résultats et termine le job. |
+
+Architecture détaillée et récupération des anciens batches Gemini inline :
+[`docs/GEMINI_BATCH.md`](docs/GEMINI_BATCH.md).
 
 Suivi des jobs batch :
 ```bash
@@ -204,7 +207,7 @@ npm run images_switch     # charge .env via `node --env-file`
 | `Variable d'environnement manquante` dans un script | le `.env` n'est pas chargé → lancer via `node --env-file=.env …` (déjà câblé dans `images_switch`). |
 | `Could not find MIME for Buffer` à la génération | ancien code (jimp, sans codec WebP) encore déployé → relancer `convex:dev` / `npx convex dev --once`. |
 | Image stockée en `.jpg` au lieu de `.webp` | `sharp` n'a pas chargé côté Convex → vérifier `convex.json` puis redéployer. |
-| Jobs batch bloqués en `running` / « perdus » | `convex:dev` n'était pas lancé (donc pas de cron). Le relancer, puis `npx convex run generation:pollBatches '{}'`. |
+| Jobs batch bloqués en `running` / « perdus » | Vérifier que `convex:dev` tourne, puis lancer `npx convex run generation:pollBatches '{}'`. Les anciens batches Gemini inline sont récupérés progressivement ; voir [`docs/GEMINI_BATCH.md`](docs/GEMINI_BATCH.md). |
 
 ---
 

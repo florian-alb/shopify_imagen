@@ -27,6 +27,12 @@ const imageStatus = v.union(
   v.literal("failed")
 );
 
+const reviewStatus = v.union(
+  v.literal("pending"),
+  v.literal("approved"),
+  v.literal("rejected")
+);
+
 export default defineSchema({
   ...authTables,
   users: defineTable({
@@ -67,6 +73,8 @@ export default defineSchema({
     .index("by_shopify_product_id", ["shopifyProductId"])
     .index("by_handle", ["handle"])
     .index("by_generation_status", ["generationStatus"])
+    .index("by_product_type", ["productType"])
+    .index("by_generation_status_and_product_type", ["generationStatus", "productType"])
     .searchIndex("search_products", { searchField: "title", filterFields: ["generationStatus"] }),
   promptTemplates: defineTable({
     imageType: v.string(),
@@ -88,6 +96,8 @@ export default defineSchema({
     mode: v.union(v.literal("single"), v.literal("bulk")),
     executionMode: v.optional(v.union(v.literal("realtime"), v.literal("batch"))),
     batchId: v.optional(v.union(v.string(), v.null())),
+    batchInputFileName: v.optional(v.union(v.string(), v.null())),
+    batchIngestionStartedAt: v.optional(v.union(v.number(), v.null())),
     vibeAnalysis: v.optional(v.boolean()),
     imageProvider: v.optional(v.union(v.literal("openai"), v.literal("gemini"))),
     imageModel: v.optional(v.string()),
@@ -118,6 +128,9 @@ export default defineSchema({
     generatedImageUrl: v.optional(v.union(v.string(), v.null())),
     storageUrl: v.optional(v.union(v.string(), v.null())),
     status: imageStatus,
+    reviewStatus: v.optional(reviewStatus),
+    reviewedAt: v.optional(v.number()),
+    reviewedByUserId: v.optional(v.id("users")),
     shopifyMediaId: v.optional(v.union(v.string(), v.null())),
     error: v.optional(v.union(v.string(), v.null())),
     inputTokens: v.optional(v.number()),

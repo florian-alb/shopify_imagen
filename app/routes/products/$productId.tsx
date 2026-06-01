@@ -24,11 +24,13 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { productFilterArgs, type ProductSearch, validateProductSearch } from "@/lib/productFilters";
 import { generationStatusLabels, type GenerationStatus } from "@/lib/status";
 import { api } from "../../../convex/_generated/api";
 import type { Doc, Id } from "../../../convex/_generated/dataModel";
 
 export const Route = createFileRoute("/products/$productId")({
+  validateSearch: validateProductSearch,
   component: ProductDetailPage
 });
 
@@ -39,8 +41,13 @@ type ProductDetail = {
 
 function ProductDetailPage() {
   const { productId } = Route.useParams();
+  const search = Route.useSearch();
   const navigate = useNavigate();
   const data = useQuery(api.products.getWithImages, { productId: productId as Id<"products"> }) as ProductDetail | undefined;
+  const productNavigation = useQuery(api.products.navigation, {
+    productId: productId as Id<"products">,
+    ...productFilterArgs(search)
+  });
   const prompts = useQuery(api.prompts.list) as Doc<"promptTemplates">[] | undefined;
   const shopInfo = useQuery(api.settings.shopInfo);
   const createJob = useMutation(api.jobs.create);
@@ -63,6 +70,7 @@ function ProductDetailPage() {
 
   const product = data?.product;
   const images = data?.images ?? [];
+  const latestJobId = images[0]?.jobId;
   const shopifyAdminUrl = useMemo(() => {
     if (!product || !shopInfo?.storeHandle) return null;
     const numericId = product.shopifyProductId.split("/").pop();
@@ -192,7 +200,7 @@ function ProductDetailPage() {
               <BreadcrumbList>
                 <BreadcrumbItem>
                   <Button variant="ghost" size="sm" asChild className="-ml-2 text-muted-foreground">
-                    <Link to="/products">
+                    <Link to="/products" search={search}>
                       <ArrowLeft data-icon="inline-start" />
                       Products
                     </Link>
@@ -211,8 +219,23 @@ function ProductDetailPage() {
             {product.vendor ? <Badge variant="outline">{product.vendor}</Badge> : null}
           </div>
           <h1 className="truncate text-2xl font-semibold sm:text-3xl">{product.title}</h1>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <ProductNavigationButton direction="previous" product={productNavigation?.previous} search={search} />
+            <span className="text-xs text-muted-foreground">
+              {productNavigation?.position ? `${productNavigation.position} / ${productNavigation.total}` : `${productNavigation?.total ?? 0} products`}
+            </span>
+            <ProductNavigationButton direction="next" product={productNavigation?.next} search={search} />
+          </div>
         </div>
         <div className="flex items-center gap-2">
+          {latestJobId ? (
+            <Button size="lg" variant="outline" asChild>
+              <Link to="/jobs/$jobId" params={{ jobId: latestJobId }}>
+                <ArrowLeft data-icon="inline-start" />
+                Back to job
+              </Link>
+            </Button>
+          ) : null}
           <Button size="lg" variant="outline" onClick={() => void sync()} disabled={busy === "sync"}>
             <BusyIcon busy={busy === "sync"} />
             {busy !== "sync" ? <RefreshCw data-icon="inline-start" /> : null}
@@ -256,8 +279,16 @@ function ProductDetailPage() {
       </section>
 
       <Card className="mb-4 rounded-lg">
-        <CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between gap-3">
           <CardTitle className="text-lg">Prompt and image history</CardTitle>
+          {latestJobId ? (
+            <Button variant="outline" size="sm" asChild>
+              <Link to="/jobs/$jobId" params={{ jobId: latestJobId }}>
+                View job
+                <ChevronRight data-icon="inline-end" />
+              </Link>
+            </Button>
+          ) : null}
         </CardHeader>
         <CardContent>
           {images.length ? (
@@ -411,6 +442,37 @@ function ProductDetailPage() {
         </AlertDialogContent>
       </AlertDialog>
     </main>
+  );
+}
+
+function ProductNavigationButton({
+  direction,
+  product,
+  search
+}: {
+  direction: "previous" | "next";
+  product: Doc<"products"> | null | undefined;
+  search: ProductSearch;
+}) {
+  const label = direction === "previous" ? "Previous" : "Next";
+  const icon = direction === "previous" ? <ChevronLeft data-icon="inline-start" /> : <ChevronRight data-icon="inline-end" />;
+  if (!product) {
+    return (
+      <Button variant="outline" size="sm" disabled>
+        {direction === "previous" ? icon : null}
+        {label}
+        {direction === "next" ? icon : null}
+      </Button>
+    );
+  }
+  return (
+    <Button variant="outline" size="sm" asChild>
+      <Link to="/products/$productId" params={{ productId: product._id }} search={search} title={product.title}>
+        {direction === "previous" ? icon : null}
+        {label}
+        {direction === "next" ? icon : null}
+      </Link>
+    </Button>
   );
 }
 

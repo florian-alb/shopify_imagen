@@ -68,9 +68,9 @@ Production Deploy Key**. Copy it.
 ## 3. Create the Vercel project
 
 1. Import this Git repo in Vercel.
-2. **Framework Preset:** "Other" (the build command in `vercel.json` already
-   handles everything; the output is the Vercel Build Output API format that
-   Nitro emits automatically).
+2. **Framework Preset:** "TanStack Start" (also pinned in `vercel.json`).
+   The output directory is pinned to `.vercel/output`, the Vercel Build Output
+   API format that Nitro emits automatically.
 3. **Environment Variables** → add (Production scope):
    ```
    CONVEX_DEPLOY_KEY = <the production deploy key from step 2>

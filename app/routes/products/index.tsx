@@ -9,6 +9,7 @@ import {
   PageHeader,
   StatusBadge,
 } from "@/components/page";
+import { productFilterArgs, type ProductSearch, validateProductSearch } from "@/lib/productFilters";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -35,6 +36,7 @@ import { api } from "../../../convex/_generated/api";
 import type { Doc, Id } from "../../../convex/_generated/dataModel";
 
 export const Route = createFileRoute("/products/")({
+  validateSearch: validateProductSearch,
   component: ProductsPage,
 });
 
@@ -45,27 +47,23 @@ type ProductFacets = {
 };
 
 function ProductsPage() {
-  const [search, setSearch] = useState("");
-  const [productType, setProductType] = useState("");
-  const [collection, setCollection] = useState("");
-  const [status, setStatus] = useState("");
+  const search = Route.useSearch();
   const [selected, setSelected] = useState<Set<Id<"products">>>(new Set());
   const [chooserOpen, setChooserOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [creatingJob, setCreatingJob] = useState(false);
   const navigate = useNavigate();
 
-  const products = useQuery(api.products.list, {
-    search,
-    productType: productType || undefined,
-    collection: collection || undefined,
-    generationStatus: status || undefined,
-  }) as Product[] | undefined;
+  const products = useQuery(api.products.list, productFilterArgs(search)) as Product[] | undefined;
   const facets = useQuery(api.products.facets) as ProductFacets | undefined;
   const settings = useQuery(api.settings.list);
   const syncProducts = useAction(api.shopify.syncProducts);
   const createJob = useMutation(api.jobs.create);
   const vibeDefault = String(settings?.VIBE_ANALYSIS ?? "on") !== "off";
+
+  function updateSearch(patch: Partial<ProductSearch>) {
+    void navigate({ to: "/products", search: { ...search, ...patch }, replace: true });
+  }
 
   const selectedProducts = useMemo(
     () => (products ?? []).filter((product) => selected.has(product._id)),
@@ -164,15 +162,15 @@ function ProductsPage() {
             <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               className="h-10 pl-9"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              value={search.q ?? ""}
+              onChange={(event) => updateSearch({ q: event.target.value || undefined })}
               placeholder="Search name or handle"
             />
           </Label>
           <FilterSelect
-            value={productType}
+            value={search.type ?? ""}
             placeholder="All categories"
-            onChange={setProductType}
+            onChange={(type) => updateSearch({ type: type || undefined })}
           >
             {facets?.productTypes.map((item) => (
               <SelectItem key={item} value={item}>
@@ -181,9 +179,9 @@ function ProductsPage() {
             ))}
           </FilterSelect>
           <FilterSelect
-            value={collection}
+            value={search.collection ?? ""}
             placeholder="All collections"
-            onChange={setCollection}
+            onChange={(collection) => updateSearch({ collection: collection || undefined })}
           >
             {facets?.collections.map((item) => (
               <SelectItem key={item.id} value={item.id}>
@@ -192,9 +190,9 @@ function ProductsPage() {
             ))}
           </FilterSelect>
           <FilterSelect
-            value={status}
+            value={search.status ?? ""}
             placeholder="All states"
-            onChange={setStatus}
+            onChange={(status) => updateSearch({ status: (status || undefined) as ProductSearch["status"] })}
           >
             {Object.entries(generationStatusLabels).map(([value, label]) => (
               <SelectItem key={value} value={value}>
@@ -242,6 +240,7 @@ function ProductsPage() {
             <ProductRow
               key={product._id}
               product={product}
+              search={search}
               selected={selected.has(product._id)}
               onToggle={() => toggleProduct(product._id)}
               onGenerateOne={() => {
@@ -318,11 +317,13 @@ function FilterSelect({
 
 function ProductRow({
   product,
+  search,
   selected,
   onToggle,
   onGenerateOne,
 }: {
   product: Product;
+  search: ProductSearch;
   selected: boolean;
   onToggle: () => void;
   onGenerateOne: () => void;
@@ -343,6 +344,7 @@ function ProductRow({
       <Link
         to="/products/$productId"
         params={{ productId: product._id }}
+        search={search}
         className="image-tile"
       >
         {image ? (
@@ -358,6 +360,7 @@ function ProductRow({
           <Link
             to="/products/$productId"
             params={{ productId: product._id }}
+            search={search}
             className="min-w-0"
           >
             <h2 className="truncate text-base font-medium">{product.title}</h2>
