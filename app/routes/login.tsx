@@ -11,9 +11,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "../../convex/_generated/api";
 
+function safeRedirect(value: unknown) {
+  return typeof value === "string" && value.startsWith("/") && !value.startsWith("//") ? value : "/products";
+}
+
 export const Route = createFileRoute("/login")({
   validateSearch: (search: Record<string, unknown>) => ({
-    redirect: typeof search.redirect === "string" ? search.redirect : "/products"
+    redirect: safeRedirect(search.redirect)
   }),
   component: LoginPage
 });
@@ -26,6 +30,7 @@ function LoginPage() {
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
+  const [setupSecret, setSetupSecret] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const isFirstUser = hasUsers === false;
@@ -39,9 +44,10 @@ function LoginPage() {
         email,
         name: name || email,
         password,
+        setupSecret,
         flow: isFirstUser ? "signUp" : "signIn"
       });
-      await navigate({ to: redirect || "/products" });
+      await navigate({ to: redirect });
     } catch (loginError) {
       setError(loginError instanceof Error ? loginError.message : String(loginError));
     } finally {
@@ -70,10 +76,23 @@ function LoginPage() {
             </Alert>
             <div className="space-y-4">
               {isFirstUser ? (
-                <div className="space-y-2">
-                  <Label htmlFor="login-name">Name</Label>
-                  <Input id="login-name" value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" />
-                </div>
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="login-name">Name</Label>
+                    <Input id="login-name" value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="login-setup-secret">Setup secret</Label>
+                    <Input
+                      id="login-setup-secret"
+                      type="password"
+                      value={setupSecret}
+                      onChange={(event) => setSetupSecret(event.target.value)}
+                      autoComplete="off"
+                      required
+                    />
+                  </div>
+                </>
               ) : null}
               <div className="space-y-2">
                 <Label htmlFor="login-email">Email</Label>

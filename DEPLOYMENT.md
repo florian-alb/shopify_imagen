@@ -39,7 +39,7 @@ R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET,
 R2_PUBLIC_BASE_URL, R2_TOKEN
 
 # Auth (Convex Auth)
-JWT_PRIVATE_KEY, JWKS, SITE_URL
+JWT_PRIVATE_KEY, JWKS, SITE_URL, AUTH_ADMIN_EMAIL, AUTH_SETUP_SECRET
 ```
 
 Set them from the dashboard (Settings → Environment Variables) or via CLI, e.g.:
@@ -99,9 +99,28 @@ the production `VITE_CONVEX_URL` baked in.
 
 ## 5. First login
 
-The app uses Convex Auth with email/password. On first visit go to `/login` and
-register — the profile is created with `role: "admin"`. Default prompt templates
-auto-seed on first load of the Prompts page.
+The app uses Convex Auth with email/password and permits exactly one admin
+identity. Set `AUTH_ADMIN_EMAIL` to your email and `AUTH_SETUP_SECRET` to a long,
+random one-time value in the Convex production environment. On first visit go
+to `/login` and register with that email and setup secret. The profile is
+created with `role: "admin"`. Default prompt templates auto-seed on first load
+of the Prompts page.
+
+After the first account exists, remove `AUTH_SETUP_SECRET` from the Convex
+production environment. The existing admin can still sign in, while further
+registration attempts are rejected server-side.
+
+## 6. Production hardening
+
+- In Vercel, open **Settings → Deployment Protection** and protect all
+  deployments with Vercel Authentication when your plan allows it. The Convex
+  single-admin checks remain required because the API is hosted separately.
+- Use a custom domain for `R2_PUBLIC_BASE_URL`, not an `r2.dev` URL. Shopify
+  needs to fetch generated images, so those objects remain internet-accessible;
+  disable the `r2.dev` development URL and apply Cloudflare access controls on
+  the custom domain if the image URLs must be restricted further.
+- Keep `AUTH_ADMIN_EMAIL`, Shopify, AI provider, R2, and JWT values only in the
+  Convex production environment. Never create `VITE_` variants for secrets.
 
 ---
 

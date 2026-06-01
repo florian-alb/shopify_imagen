@@ -6,6 +6,7 @@ import sharp from "sharp";
 import { internal } from "./_generated/api";
 import { action, internalAction, type ActionCtx } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
+import { requireUserId } from "./authz";
 import { augmentPrompt, buildSeoImageFilename } from "./lib";
 import { estimateCostUsd, type TokenUsage } from "./pricing";
 
@@ -993,6 +994,7 @@ export const pollBatches = internalAction({
 export const pollJob = action({
   args: { jobId: v.id("generationJobs") },
   handler: async (ctx, args): Promise<ManualPollResult> => {
+    await requireUserId(ctx);
     const job = (await ctx.runQuery(internal.jobs.getJobInternal, { jobId: args.jobId })) as Doc<"generationJobs"> | null;
     if (!job) throw new Error("Job not found.");
     if (job.status !== "running") throw new Error("Job is not running.");
