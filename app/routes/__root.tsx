@@ -1,4 +1,4 @@
-import { ConvexAuthProvider, useConvexAuth } from "@convex-dev/auth/react";
+import { ConvexAuthProvider, useAuthActions, useConvexAuth } from "@convex-dev/auth/react";
 import {
   HeadContent,
   Link,
@@ -9,14 +9,15 @@ import {
   useNavigate
 } from "@tanstack/react-router";
 import { ConvexReactClient } from "convex/react";
-import { Boxes, ImageIcon, ListChecks, Settings } from "lucide-react";
+import { Boxes, ImageIcon, ListChecks, LogOut, Settings } from "lucide-react";
 import type { ReactNode } from "react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarHeader,
@@ -156,6 +157,13 @@ function DesktopNav() {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
+      <SidebarFooter className="px-3 pb-4 group-data-[collapsible=icon]:px-0">
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <LogoutButton desktop />
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarFooter>
       <SidebarRail />
     </Sidebar>
   );
@@ -163,7 +171,7 @@ function DesktopNav() {
 
 function MobileNav() {
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-4 border-t bg-background/95 px-2 pb-[env(safe-area-inset-bottom)] pt-2 shadow-sm backdrop-blur md:hidden">
+    <nav className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-5 border-t bg-background/95 px-2 pb-[env(safe-area-inset-bottom)] pt-2 shadow-sm backdrop-blur md:hidden">
       {navItems.map((item) => {
         const Icon = item.icon;
         return (
@@ -175,7 +183,50 @@ function MobileNav() {
           </Button>
         );
       })}
+      <LogoutButton />
     </nav>
+  );
+}
+
+function LogoutButton({ desktop = false }: { desktop?: boolean }) {
+  const { signOut } = useAuthActions();
+  const [signingOut, setSigningOut] = useState(false);
+
+  async function logout() {
+    setSigningOut(true);
+    try {
+      await signOut();
+    } finally {
+      setSigningOut(false);
+    }
+  }
+
+  if (desktop) {
+    return (
+      <SidebarMenuButton
+        tooltip="Log out"
+        className="h-11 gap-3 text-muted-foreground hover:text-destructive"
+        disabled={signingOut}
+        onClick={() => void logout()}
+      >
+        <LogOut />
+        <span>{signingOut ? "Logging out..." : "Log out"}</span>
+      </SidebarMenuButton>
+    );
+  }
+
+  return (
+    <Button
+      variant="ghost"
+      className="h-12 px-1 text-muted-foreground hover:text-destructive"
+      disabled={signingOut}
+      onClick={() => void logout()}
+    >
+      <span className="flex flex-col items-center gap-0.5 text-[11px]">
+        <LogOut className="size-4" />
+        {signingOut ? "Logging out..." : "Log out"}
+      </span>
+    </Button>
   );
 }
 
