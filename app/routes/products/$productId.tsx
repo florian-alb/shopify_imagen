@@ -1,8 +1,8 @@
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
-import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, RefreshCw, Send, Trash2, WandSparkles, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, GripVertical, RefreshCw, Send, Trash2, WandSparkles, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import { BusyIcon, EmptyState, StateBadge, StatusBadge } from "@/components/page";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
@@ -39,6 +39,17 @@ type ProductDetail = {
   images: Doc<"generatedImages">[];
 } | null;
 
+type ShopifyGalleryImage = {
+  id?: string | null;
+  mediaId?: string | null;
+  url: string;
+  altText?: string | null;
+};
+
+function shopifyMediaId(image: ShopifyGalleryImage) {
+  return image.mediaId ?? image.id ?? "";
+}
+
 function ProductDetailPage() {
   const { productId } = Route.useParams();
   const search = Route.useSearch();
@@ -54,6 +65,7 @@ function ProductDetailPage() {
   const pushImages = useAction(api.shopify.pushProductImages);
   const syncProduct = useAction(api.shopify.syncProduct);
   const deleteImage = useAction(api.shopify.deleteImage);
+  const reorderProductImages = useAction(api.shopify.reorderProductImages);
   const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set());
   const [force, setForce] = useState(false);
   const [generateOpen, setGenerateOpen] = useState(false);
@@ -63,6 +75,10 @@ function ProductDetailPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<{ images: LightboxImage[]; index: number } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Doc<"generatedImages"> | null>(null);
+  const [shopifyReorderBusy, setShopifyReorderBusy] = useState(false);
+  const [dragShopifyMediaId, setDragShopifyMediaId] = useState<string | null>(null);
+  const dragShopifyMediaIdRef = useRef<string | null>(null);
+  const [localShopifyOrder, setLocalShopifyOrder] = useState<{ productId: string; images: ShopifyGalleryImage[] } | null>(null);
 
   const openLightbox = useCallback((images: LightboxImage[], index: number) => {
     if (images.length) setLightbox({ images, index });
@@ -70,6 +86,9 @@ function ProductDetailPage() {
 
   const product = data?.product;
   const images = data?.images ?? [];
+  const serverShopifyImages = (product?.currentShopifyImages ?? []) as ShopifyGalleryImage[];
+  const shopifyImages = localShopifyOrder?.productId === productId ? localShopifyOrder.images : serverShopifyImages;
+  const canReorderShopifyImages = shopifyImages.length > 1 && shopifyImages.every((image) => shopifyMediaId(image));
   const latestJobId = images[0]?.jobId;
   const shopifyAdminUrl = useMemo(() => {
     if (!product || !shopInfo?.storeHandle) return null;
@@ -83,6 +102,15 @@ function ProductDetailPage() {
   const readyImages = images.filter(
     (image) => (image.status === "generated" || image.status === "uploaded") && image.storageUrl
   );
+
+  useEffect(() => {
+    if (!localShopifyOrder || localShopifyOrder.productId !== productId) return;
+    const localIds = localShopifyOrder.images.map(shopifyMediaId);
+    const serverIds = serverShopifyImages.map(shopifyMediaId);
+    if (localIds.length === serverIds.length && localIds.every((id, index) => id === serverIds[index])) {
+      setLocalShopifyOrder(null);
+    }
+  }, [localShopifyOrder, productId, serverShopifyImages]);
 
   function openGenerate() {
     // Pre-check preset templates; fall back to all if none are marked preset.
@@ -151,6 +179,48 @@ function ProductDetailPage() {
       });
     } finally {
       setBusy(null);
+    }
+  }
+
+  function startShopifyImageReorder(mediaId: string) {
+    dragShopifyMediaIdRef.current = mediaId;
+    setDragShopifyMediaId(mediaId);
+  }
+
+  function reorderShopifyImageOver(overMediaId: string) {
+    const draggedMediaId = dragShopifyMediaIdRef.current;
+    if (!draggedMediaId || draggedMediaId === overMediaId) return;
+    const from = shopifyImages.findIndex((image) => shopifyMediaId(image) === draggedMediaId);
+    const to = shopifyImages.findIndex((image) => shopifyMediaId(image) === overMediaId);
+    if (from === -1 || to === -1) return;
+    const next = [...shopifyImages];
+    const [draggedImage] = next.splice(from, 1);
+    next.splice(to, 0, draggedImage);
+    setLocalShopifyOrder({ productId, images: next });
+  }
+
+  async function commitShopifyImageReorder() {
+    if (!product || !dragShopifyMediaIdRef.current) return;
+    dragShopifyMediaIdRef.current = null;
+    setDragShopifyMediaId(null);
+    if (!localShopifyOrder || localShopifyOrder.productId !== productId) return;
+
+    setShopifyReorderBusy(true);
+    try {
+      const result = await reorderProductImages({
+        productId: product._id,
+        orderedMediaIds: localShopifyOrder.images.map(shopifyMediaId)
+      });
+      toast.success(result.pending ? "Shopify image reorder queued" : "Shopify image order saved", {
+        description: result.pending ? "Shopify is still applying the new gallery order." : "Prompt references now follow this gallery order."
+      });
+    } catch (reorderError) {
+      setLocalShopifyOrder(null);
+      toast.error("Failed to reorder Shopify images", {
+        description: reorderError instanceof Error ? reorderError.message : String(reorderError)
+      });
+    } finally {
+      setShopifyReorderBusy(false);
     }
   }
 
@@ -260,9 +330,25 @@ function ProductDetailPage() {
       <section className="mb-4 grid gap-4 lg:grid-cols-2">
         <Gallery
           title="Current Shopify images"
-          items={product.currentShopifyImages.map((image: any) => ({ url: image.url, label: image.altText ?? "Shopify product" }))}
+          description="Drag images to reorder them in Shopify. Image 1 is the exact product reference for prompts; image 2 can guide the scene."
+          items={shopifyImages.map((image) => ({
+            id: shopifyMediaId(image),
+            url: image.url,
+            label: image.altText ?? "Shopify product"
+          }))}
           emptyText="No images found."
           onZoom={openLightbox}
+          reorder={
+            canReorderShopifyImages
+              ? {
+                  dragId: dragShopifyMediaId,
+                  disabled: shopifyReorderBusy,
+                  onDragStart: startShopifyImageReorder,
+                  onDragOver: reorderShopifyImageOver,
+                  onCommit: commitShopifyImageReorder
+                }
+              : undefined
+          }
         />
         <Gallery
           title="Generated images"
@@ -641,52 +727,102 @@ function Fact({ label, value }: { label: string; value: string }) {
   );
 }
 
-type GalleryItem = { url: string; label?: string; caption?: string; onDelete?: () => void };
+type GalleryItem = { id?: string; url: string; label?: string; caption?: string; onDelete?: () => void };
+
+type GalleryReorder = {
+  dragId: string | null;
+  disabled: boolean;
+  onDragStart: (id: string) => void;
+  onDragOver: (id: string) => void;
+  onCommit: () => void;
+};
 
 function Gallery({
   title,
+  description,
   items,
   emptyText,
-  onZoom
+  onZoom,
+  reorder
 }: {
   title: string;
+  description?: string;
   items: GalleryItem[];
   emptyText: string;
   onZoom: (images: LightboxImage[], index: number) => void;
+  reorder?: GalleryReorder;
 }) {
   const lightboxImages = items.map((item) => ({ url: item.url, label: item.label }));
   return (
     <Card className="min-h-72 rounded-lg">
       <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle className="text-lg">{title}</CardTitle>
-        <StateBadge>{items.length}</StateBadge>
+        <div className="flex items-center gap-2">
+          {reorder?.disabled ? <BusyIcon busy /> : null}
+          <StateBadge>{items.length}</StateBadge>
+        </div>
       </CardHeader>
       <CardContent>
+        {description ? <p className="mb-3 text-xs text-muted-foreground">{description}</p> : null}
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
           {items.length ? (
-            items.map((item, index) => (
-              <figure key={`${item.url}-${index}`} className="group relative overflow-hidden rounded-lg ring-1 ring-border">
-                <button
-                  type="button"
-                  onClick={() => onZoom(lightboxImages, index)}
-                  className="image-tile w-full cursor-zoom-in rounded-none transition hover:opacity-90"
+            items.map((item, index) => {
+              const canDrag = Boolean(reorder && item.id && !reorder.disabled);
+              return (
+                <figure
+                  key={item.id ?? `${item.url}-${index}`}
+                  draggable={canDrag}
+                  onDragStart={(event) => {
+                    if (!item.id || !reorder) return;
+                    event.dataTransfer.effectAllowed = "move";
+                    reorder.onDragStart(item.id);
+                  }}
+                  onDragOver={(event) => {
+                    if (!canDrag || !item.id || !reorder) return;
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = "move";
+                    reorder.onDragOver(item.id);
+                  }}
+                  onDrop={(event) => {
+                    if (!canDrag || !reorder) return;
+                    event.preventDefault();
+                    void reorder.onCommit();
+                  }}
+                  onDragEnd={() => reorder && void reorder.onCommit()}
+                  data-dragging={reorder?.dragId === item.id ? "" : undefined}
+                  data-testid={reorder ? `shopify-image-${index + 1}` : undefined}
+                  className={`group relative overflow-hidden rounded-lg ring-1 ring-border transition data-dragging:opacity-50${
+                    canDrag ? " cursor-grab active:cursor-grabbing" : ""
+                  }`}
                 >
-                  <img src={item.url} alt={item.label ?? title} />
-                </button>
-                {item.onDelete ? (
-                  <Button
-                    variant="destructive"
-                    size="icon-sm"
-                    aria-label="Delete image"
-                    onClick={item.onDelete}
-                    className="absolute top-1.5 right-1.5 bg-background/80 opacity-0 backdrop-blur-sm transition group-hover:opacity-100 focus-visible:opacity-100"
+                  <button
+                    type="button"
+                    onClick={() => onZoom(lightboxImages, index)}
+                    className="image-tile w-full cursor-zoom-in rounded-none transition hover:opacity-90"
                   >
-                    <Trash2 />
-                  </Button>
-                ) : null}
-                {item.caption ? <figcaption className="px-2 py-2 text-xs font-medium">{item.caption}</figcaption> : null}
-              </figure>
-            ))
+                    <img src={item.url} alt={item.label ?? title} draggable={false} />
+                  </button>
+                  {reorder && item.id ? (
+                    <span className="pointer-events-none absolute top-1.5 left-1.5 flex items-center gap-1 rounded-md bg-background/85 px-1.5 py-1 text-xs font-medium shadow-sm backdrop-blur-sm">
+                      <GripVertical className="size-3.5" />
+                      {index + 1}
+                    </span>
+                  ) : null}
+                  {item.onDelete ? (
+                    <Button
+                      variant="destructive"
+                      size="icon-sm"
+                      aria-label="Delete image"
+                      onClick={item.onDelete}
+                      className="absolute top-1.5 right-1.5 bg-background/80 opacity-0 backdrop-blur-sm transition group-hover:opacity-100 focus-visible:opacity-100"
+                    >
+                      <Trash2 />
+                    </Button>
+                  ) : null}
+                  {item.caption ? <figcaption className="px-2 py-2 text-xs font-medium">{item.caption}</figcaption> : null}
+                </figure>
+              );
+            })
           ) : (
             <p className="col-span-2 text-sm text-muted-foreground">{emptyText}</p>
           )}

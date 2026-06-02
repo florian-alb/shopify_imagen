@@ -38,10 +38,10 @@ async function getAccessToken() {
   return payload.access_token;
 }
 
-async function shopifyGraphql<T>(query: string, variables: Record<string, unknown>) {
+async function shopifyGraphql<T>(query: string, variables: Record<string, unknown>, accessToken?: string) {
   const domain = normalizeShopDomain(env("SHOPIFY_SHOP_DOMAIN"));
   const version = env("SHOPIFY_API_VERSION", "2026-04");
-  const token = await getAccessToken();
+  const token = accessToken ?? await getAccessToken();
   const response = await fetch(`https://${domain}/admin/api/${version}/graphql.json`, {
     method: "POST",
     headers: {
@@ -140,6 +140,21 @@ const PRODUCT_DELETE_MEDIA_MUTATION = `#graphql
   }
 `;
 
+const PRODUCT_REORDER_MEDIA_MUTATION = `#graphql
+  mutation ProductReorderMedia($id: ID!, $moves: [MoveInput!]!) {
+    productReorderMedia(id: $id, moves: $moves) {
+      job { id }
+      mediaUserErrors { field message }
+    }
+  }
+`;
+
+const SHOPIFY_JOB_QUERY = `#graphql
+  query ShopifyJob($id: ID!) {
+    job(id: $id) { id done }
+  }
+`;
+
 type ProductsResponse = {
   products: {
     pageInfo: { hasNextPage: boolean; endCursor: string | null };
@@ -231,6 +246,87 @@ export const syncProduct = action({
 function throwUserErrors(errors: Array<{ message: string }>, label: string) {
   if (errors.length) throw new Error(`${label}: ${errors.map((error) => error.message).join("; ")}`);
 }
+
+function sameIds(left: string[], right: string[]) {
+  return left.length === right.length && left.every((id) => right.includes(id)) && new Set(right).size === right.length;
+}
+
+function buildMediaMoves(mediaNodes: Array<{ id: string; mediaContentType: string }>, orderedImageIds: string[]) {
+  const desiredImages = [...orderedImageIds];
+  const targetIds = mediaNodes.map((media) => (media.mediaContentType === "IMAGE" ? desiredImages.shift()! : media.id));
+  const workingIds = mediaNodes.map((media) => media.id);
+  const moves: Array<{ id: string; newPosition: string }> = [];
+
+  targetIds.forEach((id, targetIndex) => {
+    const currentIndex = workingIds.indexOf(id);
+    if (currentIndex === targetIndex) return;
+    moves.push({ id, newPosition: String(targetIndex) });
+    workingIds.splice(currentIndex, 1);
+    workingIds.splice(targetIndex, 0, id);
+  });
+
+  return moves;
+}
+
+async function waitForShopifyJob(jobId: string, accessToken: string) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const data = await shopifyGraphql<{ job: { done: boolean } | null }>(SHOPIFY_JOB_QUERY, { id: jobId }, accessToken);
+    if (data.job?.done) return true;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  return false;
+}
+
+// Reorders the existing Shopify gallery immediately after a drag-and-drop. The
+// Shopify mutation accepts sequential moves rather than a final array, and may
+// include non-image media, so the target keeps those entries in their slots.
+export const reorderProductImages = action({
+  args: {
+    productId: v.id("products"),
+    orderedMediaIds: v.array(v.string())
+  },
+  handler: async (ctx, args): Promise<{ reordered: number; pending: boolean }> => {
+    await requireUserId(ctx);
+    const product = (await ctx.runQuery(internal.products.internalGet, { productId: args.productId })) as Doc<"products"> | null;
+    if (!product) throw new Error("Product not found.");
+
+    const accessToken = await getAccessToken();
+    const before = await shopifyGraphql<{ product: any | null }>(PRODUCT_QUERY, { id: product.shopifyProductId }, accessToken);
+    if (!before.product) throw new Error("Product no longer exists in Shopify.");
+    const mediaNodes = (before.product.media?.nodes ?? []) as Array<{ id: string; mediaContentType: string }>;
+    const currentImageIds = mediaNodes.filter((media) => media.mediaContentType === "IMAGE").map((media) => media.id);
+    if (!sameIds(currentImageIds, args.orderedMediaIds)) {
+      throw new Error("The Shopify gallery changed since the last sync. Sync the product and try again.");
+    }
+
+    const moves = buildMediaMoves(mediaNodes, args.orderedMediaIds);
+    if (!moves.length) return { reordered: 0, pending: false };
+
+    const data = await shopifyGraphql<any>(
+      PRODUCT_REORDER_MEDIA_MUTATION,
+      {
+        id: product.shopifyProductId,
+        moves
+      },
+      accessToken
+    );
+    throwUserErrors(data.productReorderMedia.mediaUserErrors, "Shopify product media reorder failed");
+
+    await ctx.runMutation(internal.shopify.cacheProductImageOrder, {
+      productId: product._id,
+      orderedMediaIds: args.orderedMediaIds
+    });
+
+    const jobId = data.productReorderMedia.job?.id as string | undefined;
+    const completed = jobId ? await waitForShopifyJob(jobId, accessToken) : true;
+    if (completed) {
+      const after = await shopifyGraphql<{ product: any | null }>(PRODUCT_QUERY, { id: product.shopifyProductId }, accessToken);
+      if (after.product) await ctx.runMutation(internal.products.upsertSynced, mapProductForUpsert(after.product));
+    }
+
+    return { reordered: moves.length, pending: !completed };
+  }
+});
 
 export const pushProductImages = action({
   args: {
@@ -349,6 +445,27 @@ export const markProductPushed = internalMutation({
   handler: async (ctx, args) => {
     await ctx.db.patch(args.productId, {
       generationStatus: "pushed",
+      updatedAt: Date.now()
+    });
+  }
+});
+
+export const cacheProductImageOrder = internalMutation({
+  args: {
+    productId: v.id("products"),
+    orderedMediaIds: v.array(v.string())
+  },
+  handler: async (ctx, args) => {
+    const product = await ctx.db.get(args.productId);
+    if (!product) return;
+    const imagesById = new Map(
+      product.currentShopifyImages.map((image: any) => [String(image.mediaId ?? image.id), image])
+    );
+    const orderedImages = args.orderedMediaIds.map((mediaId) => imagesById.get(mediaId)).filter(Boolean);
+    if (orderedImages.length !== product.currentShopifyImages.length) return;
+    await ctx.db.patch(product._id, {
+      currentShopifyImages: orderedImages,
+      featuredImageUrl: (orderedImages[0] as any)?.url ?? null,
       updatedAt: Date.now()
     });
   }
