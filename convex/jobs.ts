@@ -8,6 +8,17 @@ import { renderPrompt } from "./lib";
 type ImageProvider = "openai" | "gemini";
 type ExecutionMode = "realtime" | "batch";
 
+function appendRegenerationInstructions(prompt: string, instructions?: string) {
+  const correction = instructions?.trim();
+  if (!correction) return prompt;
+  return `${prompt}
+
+IMPORTANT CORRECTION FOR THIS REGENERATION:
+${correction}
+
+Apply this correction with priority while preserving all other product details from the reference image and the instructions above.`;
+}
+
 // Reference images for a product, in priority order, de-duplicated.
 // First entry feeds the primary reference, the second (if any) is passed as a
 // staging/context reference alongside the prompt.
@@ -98,12 +109,16 @@ export const create = mutation({
     productIds: v.array(v.id("products")),
     selectedImageTypes: v.array(v.string()),
     forceRegenerate: v.boolean(),
-    useVibeAnalysis: v.optional(v.boolean())
+    useVibeAnalysis: v.optional(v.boolean()),
+    regenerationInstructions: v.optional(v.string())
   },
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
     if (!args.productIds.length) throw new Error("Select at least one product.");
     if (!args.selectedImageTypes.length) throw new Error("Select at least one image type.");
+    if (args.regenerationInstructions && args.regenerationInstructions.trim().length > 2000) {
+      throw new Error("Regeneration instructions must be 2000 characters or fewer.");
+    }
 
     const products = (await Promise.all(args.productIds.map((id) => ctx.db.get(id)))).filter(Boolean) as Doc<"products">[];
     if (!products.length) throw new Error("No products found.");
@@ -145,11 +160,14 @@ export const create = mutation({
         }
         const template = promptByType.get(imageType);
         if (!template) throw new Error(`No active prompt template found for ${imageType}.`);
-        const promptUsed = renderPrompt(template.content, {
-          PRODUCT_TITLE: product.title,
-          PRODUCT_HANDLE: product.handle,
-          IMAGE_TYPE: imageType
-        });
+        const promptUsed = appendRegenerationInstructions(
+          renderPrompt(template.content, {
+            PRODUCT_TITLE: product.title,
+            PRODUCT_HANDLE: product.handle,
+            IMAGE_TYPE: imageType
+          }),
+          args.regenerationInstructions
+        );
         const references = referenceImageUrls(product);
         planned.push({
           product,
@@ -177,6 +195,7 @@ export const create = mutation({
       batchId: null,
       batchInputFileName: null,
       batchIngestionStartedAt: null,
+      batchResultOffset: 0,
       vibeAnalysis,
       imageProvider,
       imageModel,
@@ -286,6 +305,7 @@ export const setBatchInfo = internalMutation({
       batchId: args.batchId,
       batchInputFileName: args.batchInputFileName ?? null,
       batchIngestionStartedAt: null,
+      batchResultOffset: 0,
       updatedAt: Date.now()
     });
   }
@@ -339,6 +359,13 @@ export const releaseBatchIngestion = internalMutation({
     const job = await ctx.db.get(args.jobId);
     if (!job) return;
     await ctx.db.patch(args.jobId, { batchIngestionStartedAt: null, updatedAt: Date.now() });
+  }
+});
+
+export const setBatchResultOffset = internalMutation({
+  args: { jobId: v.id("generationJobs"), offset: v.number() },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.jobId, { batchResultOffset: args.offset, updatedAt: Date.now() });
   }
 });
 
@@ -483,6 +510,7 @@ export const retry = mutation({
       batchId: null,
       batchInputFileName: null,
       batchIngestionStartedAt: null,
+      batchResultOffset: 0,
       error: null,
       totalTasks: toRetry.length + kept.length,
       failedTasks: 0,

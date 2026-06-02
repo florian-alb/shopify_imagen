@@ -35,6 +35,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
+import { Textarea } from "@/components/ui/textarea";
 import { api } from "../../../convex/_generated/api";
 import type { Doc, Id } from "../../../convex/_generated/dataModel";
 
@@ -100,6 +101,8 @@ function JobDetailPage() {
   const [polling, setPolling] = useState(false);
   const [reviewing, setReviewing] = useState(false);
   const [regeneratingId, setRegeneratingId] = useState<Id<"generatedImages"> | null>(null);
+  const [regenerationTarget, setRegenerationTarget] = useState<Doc<"generatedImages"> | null>(null);
+  const [regenerationInstructions, setRegenerationInstructions] = useState("");
   const [previewId, setPreviewId] = useState<Id<"generatedImages"> | null>(null);
   const [pushOpen, setPushOpen] = useState(false);
   const [replaceExisting, setReplaceExisting] = useState(false);
@@ -157,6 +160,8 @@ function JobDetailPage() {
         toast.info("Batch results are already being ingested.");
       } else if (result.state === "failed") {
         toast.error(`Batch failed: ${result.error}`);
+      } else if (result.state === "partial") {
+        toast.success(`Progress: ${result.ingested} image(s) ingested, ${result.failed} failed. The next chunk will continue automatically.`);
       } else {
         toast.success(`Done: ${result.ingested} image(s) ingested, ${result.failed} failed.`);
       }
@@ -179,15 +184,26 @@ function JobDetailPage() {
     }
   }
 
-  async function regenerate(image: Doc<"generatedImages">) {
+  function openRegeneration(image: Doc<"generatedImages">) {
+    setPreviewId(null);
+    setRegenerationInstructions("");
+    setRegenerationTarget(image);
+  }
+
+  async function regenerate() {
+    if (!regenerationTarget) return;
+    const image = regenerationTarget;
     setRegeneratingId(image._id);
     try {
       const nextJobId = await createJob({
         productIds: [image.productId],
         selectedImageTypes: [image.imageType],
-        forceRegenerate: true
+        forceRegenerate: true,
+        regenerationInstructions: regenerationInstructions.trim() || undefined
       });
       await reviewImages({ imageIds: [image._id], reviewStatus: "rejected" });
+      setRegenerationTarget(null);
+      setRegenerationInstructions("");
       toast.success(`${image.imageType} regeneration started`, {
         action: { label: "View job", onClick: () => void navigate({ to: "/jobs/$jobId", params: { jobId: nextJobId } }) }
       });
@@ -338,7 +354,7 @@ function JobDetailPage() {
               regeneratingId={regeneratingId}
               onPreview={setPreviewId}
               onReview={(imageIds, reviewStatus) => void setReview(imageIds, reviewStatus)}
-              onRegenerate={(image) => void regenerate(image)}
+              onRegenerate={openRegeneration}
             />
           ))}
         </section>
@@ -398,7 +414,18 @@ function JobDetailPage() {
         onClose={() => setPreviewId(null)}
         onMove={movePreview}
         onReview={(reviewStatus) => previewImage && void setReview([previewImage._id], reviewStatus)}
-        onRegenerate={() => previewImage && void regenerate(previewImage)}
+        onRegenerate={() => previewImage && openRegeneration(previewImage)}
+      />
+
+      <RegenerateDialog
+        image={regenerationTarget}
+        instructions={regenerationInstructions}
+        regenerating={regenerationTarget?._id === regeneratingId}
+        onInstructionsChange={setRegenerationInstructions}
+        onClose={() => {
+          if (!regeneratingId) setRegenerationTarget(null);
+        }}
+        onRegenerate={() => void regenerate()}
       />
 
       <AlertDialog open={pushOpen} onOpenChange={(open) => !pushing && setPushOpen(open)}>
@@ -442,6 +469,57 @@ function JobDetailPage() {
         </AlertDialogContent>
       </AlertDialog>
     </main>
+  );
+}
+
+function RegenerateDialog({
+  image,
+  instructions,
+  regenerating,
+  onInstructionsChange,
+  onClose,
+  onRegenerate
+}: {
+  image: Doc<"generatedImages"> | null;
+  instructions: string;
+  regenerating: boolean;
+  onInstructionsChange: (value: string) => void;
+  onClose: () => void;
+  onRegenerate: () => void;
+}) {
+  return (
+    <Dialog open={image !== null} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Regenerate {image?.imageType}</DialogTitle>
+          <DialogDescription>
+            Add a correction to the existing prompt so the next image fixes what was wrong. Leave the field empty to regenerate with the original prompt.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-2">
+          <Label htmlFor="regeneration-instructions">Correction instructions</Label>
+          <Textarea
+            id="regeneration-instructions"
+            value={instructions}
+            disabled={regenerating}
+            maxLength={2000}
+            rows={5}
+            placeholder="Example: The curtain must be much more opaque. Do not show sunlight, the window frame, or any background through the fabric."
+            onChange={(event) => onInstructionsChange(event.target.value)}
+          />
+          <p className="text-xs text-muted-foreground">{instructions.length} / 2000 characters</p>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" disabled={regenerating} onClick={onClose}>
+            Cancel
+          </Button>
+          <Button disabled={regenerating} onClick={onRegenerate}>
+            {regenerating ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <RotateCcw data-icon="inline-start" />}
+            Regenerate
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

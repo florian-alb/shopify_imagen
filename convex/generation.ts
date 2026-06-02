@@ -381,6 +381,7 @@ async function optimizeForStorage(
 type BatchImage = Doc<"generatedImages">;
 type BatchItem = { bytes?: Buffer; contentType?: string; error?: string; usage?: TokenUsage };
 type BatchIngestCounts = { ingested: number; failed: number };
+type BatchIngestResult = BatchIngestCounts & { complete: boolean };
 type BatchResultSource =
   | { kind: "items"; results: Map<string, BatchItem> }
   | { kind: "gemini-file"; fileName: string }
@@ -392,6 +393,7 @@ type BatchPollResult =
 type TerminalBatchResult =
   | { state: "busy" }
   | { state: "failed"; error: string }
+  | ({ state: "partial" } & BatchIngestCounts)
   | ({ state: "done" } & BatchIngestCounts);
 type ManualPollResult = { state: "pending" } | TerminalBatchResult;
 
@@ -758,28 +760,52 @@ function geminiBatchItem(raw: any): { key?: string; result: BatchItem } {
   };
 }
 
-async function consumeJsonLines(response: Response, onLine: (line: string) => Promise<void>) {
+function concatBytes(left: Uint8Array, right: Uint8Array) {
+  const merged = new Uint8Array(left.length + right.length);
+  merged.set(left);
+  merged.set(right, left.length);
+  return merged;
+}
+
+async function consumeJsonLines(
+  response: Response,
+  startOffset: number,
+  onLine: (line: string) => Promise<boolean>,
+  onOffset: (offset: number) => Promise<void>
+) {
   if (!response.body) throw new Error("Gemini result file returned no response body.");
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
-  let buffered = "";
+  let buffered = new Uint8Array();
+  let offset = startOffset;
   while (true) {
     const { done, value } = await reader.read();
-    buffered += decoder.decode(value, { stream: !done });
-    let newline = buffered.indexOf("\n");
+    if (value) buffered = concatBytes(buffered, value);
+    let newline = buffered.indexOf(10);
     while (newline >= 0) {
-      const line = buffered.slice(0, newline).trim();
+      const line = decoder.decode(buffered.slice(0, newline)).trim();
       buffered = buffered.slice(newline + 1);
-      if (line) await onLine(line);
-      newline = buffered.indexOf("\n");
+      offset += newline + 1;
+      if (line && !(await onLine(line))) {
+        await onOffset(offset);
+        await reader.cancel();
+        return false;
+      }
+      await onOffset(offset);
+      newline = buffered.indexOf(10);
     }
     if (done) break;
   }
-  const tail = buffered.trim();
-  if (tail) await onLine(tail);
+  const tail = decoder.decode(buffered).trim();
+  if (tail && !(await onLine(tail))) {
+    await onOffset(offset + buffered.length);
+    return false;
+  }
+  if (buffered.length) await onOffset(offset + buffered.length);
+  return true;
 }
 
-async function consumeFirstInlineResponseArray(response: Response, onItem: (item: unknown) => Promise<void>) {
+async function consumeFirstInlineResponseArray(response: Response, onItem: (item: unknown) => Promise<boolean>) {
   if (!response.body) throw new Error("Gemini inline batch returned no response body.");
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -790,6 +816,7 @@ async function consumeFirstInlineResponseArray(response: Response, onItem: (item
   let depth = 0;
   let inString = false;
   let escaped = false;
+  let stopped = false;
 
   const consume = async (text: string) => {
     let segmentStart = depth > 0 ? 0 : -1;
@@ -814,7 +841,10 @@ async function consumeFirstInlineResponseArray(response: Response, onItem: (item
         depth -= 1;
         if (depth === 0) {
           itemParts.push(text.slice(segmentStart, index + 1));
-          await onItem(JSON.parse(itemParts.join("")));
+          if (!(await onItem(JSON.parse(itemParts.join(""))))) {
+            stopped = true;
+            return true;
+          }
           itemParts = [];
           segmentStart = -1;
         }
@@ -836,47 +866,56 @@ async function consumeFirstInlineResponseArray(response: Response, onItem: (item
         search = "";
         if (complete) {
           await reader.cancel();
-          return;
+          return !stopped;
         }
       } else {
         search = search.slice(-64);
       }
     } else if (await consume(text)) {
       await reader.cancel();
-      return;
+      return !stopped;
     }
     if (done) break;
   }
-  throw new Error("Gemini legacy inline batch response array was not found.");
+  if (!foundArray) throw new Error("Gemini legacy inline batch response array was not found.");
+  return true;
 }
+
+const GEMINI_INGEST_CHUNK_SIZE = 2;
 
 async function ingestGeminiStream(
   ctx: ActionCtx,
   job: Doc<"generationJobs">,
   pending: Doc<"generatedImages">[],
-  consume: (onItem: (item: unknown) => Promise<void>) => Promise<void>
-): Promise<BatchIngestCounts> {
+  consume: (onItem: (item: unknown) => Promise<boolean>) => Promise<boolean>
+): Promise<BatchIngestResult> {
   const byId = new Map(pending.map((image) => [image._id as string, image]));
   const seen = new Set<string>();
   let ingested = 0;
   let failed = 0;
   let index = 0;
-  await consume(async (raw) => {
-    const { key, result } = geminiBatchItem(raw);
+  let processed = 0;
+  const complete = await consume(async (raw: any) => {
+    const key: string | undefined = raw?.metadata?.key ?? raw?.key;
     const image = key ? byId.get(key) : pending[index];
     index += 1;
-    if (!image || seen.has(image._id)) return;
+    if (!image || seen.has(image._id)) return true;
     seen.add(image._id);
+    const { result } = geminiBatchItem(raw);
     const count = await ingestBatchItem(ctx, job, image, result);
     ingested += count.ingested;
     failed += count.failed;
+    processed += 1;
+    return processed < GEMINI_INGEST_CHUNK_SIZE;
   });
-  for (const image of pending) {
-    if (seen.has(image._id)) continue;
-    const count = await ingestBatchItem(ctx, job, image, undefined);
-    failed += count.failed;
+  if (complete) {
+    for (const image of pending) {
+      if (seen.has(image._id)) continue;
+      const count = await ingestBatchItem(ctx, job, image, undefined);
+      failed += count.failed;
+    }
   }
-  return { ingested, failed };
+  return { ingested, failed, complete };
 }
 
 async function ingestBatchResults(
@@ -884,20 +923,37 @@ async function ingestBatchResults(
   job: Doc<"generationJobs">,
   pending: Doc<"generatedImages">[],
   source: BatchResultSource
-): Promise<BatchIngestCounts> {
+): Promise<BatchIngestResult> {
   if (source.kind === "items") {
     const counts = await mapConcurrent(pending, 5, (image) => ingestBatchItem(ctx, job, image, source.results.get(image._id)));
-    return counts.reduce((acc, count) => ({ ingested: acc.ingested + count.ingested, failed: acc.failed + count.failed }), { ingested: 0, failed: 0 });
+    const total = counts.reduce((acc, count) => ({ ingested: acc.ingested + count.ingested, failed: acc.failed + count.failed }), { ingested: 0, failed: 0 });
+    return { ...total, complete: true };
   }
   const apiKey = env("GEMINI_API_KEY");
   if (!apiKey) throw new Error("GEMINI_API_KEY is required.");
   if (source.kind === "gemini-file") {
+    const requestedOffset = job.batchResultOffset ?? 0;
     const response = await fetch(`https://generativelanguage.googleapis.com/download/v1beta/${source.fileName}:download?alt=media`, {
-      headers: { "x-goog-api-key": apiKey }
+      headers: {
+        "x-goog-api-key": apiKey,
+        ...(requestedOffset ? { Range: `bytes=${requestedOffset}-` } : {})
+      }
     });
     if (!response.ok) throw new Error(`Gemini result file download failed (${response.status}).`);
+    const startOffset = requestedOffset && response.status === 206 ? requestedOffset : 0;
+    if (startOffset !== requestedOffset) {
+      log("batch", "Gemini result file ignored range request, restarting cursor", { jobId: job._id, requestedOffset });
+      await ctx.runMutation(internal.jobs.setBatchResultOffset, { jobId: job._id, offset: 0 });
+    }
     return ingestGeminiStream(ctx, job, pending, (onItem) =>
-      consumeJsonLines(response, async (line) => onItem(JSON.parse(line)))
+      consumeJsonLines(
+        response,
+        startOffset,
+        async (line) => onItem(JSON.parse(line)),
+        async (offset) => {
+          await ctx.runMutation(internal.jobs.setBatchResultOffset, { jobId: job._id, offset });
+        }
+      )
     );
   }
   const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/${source.batchName}`, {
@@ -948,7 +1004,11 @@ async function processTerminalBatch(
     }
 
     log("batch", "ingesting", { jobId: job._id, batchId: job.batchId, source: poll.source.kind, pending: pending.length });
-    const { ingested, failed } = await ingestBatchResults(ctx, job, pending, poll.source);
+    const { ingested, failed, complete } = await ingestBatchResults(ctx, job, pending, poll.source);
+    if (!complete) {
+      log("batch", "chunk done", { jobId: job._id, ingested, failed });
+      return { state: "partial" as const, ingested, failed };
+    }
     await ctx.runMutation(internal.jobs.finishJobIfDone, { jobId: job._id });
     await cleanupGeminiBatchFiles(job);
     log("batch", "job done", { jobId: job._id, ingested, failed });

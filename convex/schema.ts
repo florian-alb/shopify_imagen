@@ -99,6 +99,7 @@ export default defineSchema({
     batchId: v.optional(v.union(v.string(), v.null())),
     batchInputFileName: v.optional(v.union(v.string(), v.null())),
     batchIngestionStartedAt: v.optional(v.union(v.number(), v.null())),
+    batchResultOffset: v.optional(v.number()),
     vibeAnalysis: v.optional(v.boolean()),
     imageProvider: v.optional(v.union(v.literal("openai"), v.literal("gemini"))),
     imageModel: v.optional(v.string()),
