@@ -73,7 +73,19 @@ export const list = query({
   args: productFilterArgs,
   handler: async (ctx, args) => {
     await requireUserId(ctx);
-    return filteredProducts(ctx, args);
+    const products = await filteredProducts(ctx, args);
+    return Promise.all(
+      products.map(async (product) => {
+        const images = await ctx.db
+          .query("generatedImages")
+          .withIndex("by_product", (q) => q.eq("productId", product._id))
+          .collect();
+        return {
+          ...product,
+          generatedImageCount: images.filter((image) => image.storageUrl).length
+        };
+      })
+    );
   }
 });
 

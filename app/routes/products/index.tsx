@@ -40,7 +40,9 @@ export const Route = createFileRoute("/products/")({
   component: ProductsPage,
 });
 
-type Product = Doc<"products">;
+type Product = Doc<"products"> & {
+  generatedImageCount?: number;
+};
 type ProductFacets = {
   productTypes: string[];
   shopifyStatuses: string[];
@@ -398,6 +400,9 @@ function ProductRow({
           {product.shopifyStatus ? <Badge variant="outline">{shopifyStatusLabel(product.shopifyStatus)}</Badge> : null}
           <Badge variant="outline">
             {product.currentShopifyImages.length} Shopify
+          </Badge>
+          <Badge variant="outline">
+            {product.generatedImageCount ?? 0} Generated
           </Badge>
         </div>
       </div>
