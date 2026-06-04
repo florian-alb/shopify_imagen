@@ -80,6 +80,14 @@ function formatUsd(value: number) {
   return `$${value.toFixed(value < 1 ? 4 : 2)}`;
 }
 
+function executionModeLabel(mode?: "realtime" | "batch") {
+  return mode === "batch" ? "Batch" : "Real-time";
+}
+
+function executionModeRateLabel(mode?: "realtime" | "batch") {
+  return mode === "batch" ? "50% rate" : "Full rate";
+}
+
 function getShopifyAdminUrl(product: Doc<"products">, storeHandle?: string | null) {
   if (!storeHandle) return null;
   const numericId = product.shopifyProductId.split("/").pop();
@@ -263,6 +271,7 @@ function JobDetailPage() {
         title={`Job ${job._id.slice(-6)}`}
         action={
           <div className="flex flex-wrap items-center gap-2">
+            <StateBadge state={job.executionMode === "batch" ? "success" : "neutral"}>{executionModeLabel(job.executionMode)}</StateBadge>
             <StateBadge>{job.imageProvider === "gemini" ? "Nano Banana Pro" : "OpenAI"}</StateBadge>
             <StateBadge state={jobState}>{job.status}</StateBadge>
             {job.status === "running" && job.batchId ? (
@@ -286,7 +295,7 @@ function JobDetailPage() {
           <div className="mb-3 flex flex-wrap justify-between gap-2 text-sm">
             <span>{pct}% complete</span>
             <span className="text-muted-foreground">
-              {job.completedTasks} done / {job.failedTasks} failed / {job.totalTasks} total · {formatUsd(jobCost)}
+              {job.completedTasks} done / {job.failedTasks} failed / {job.totalTasks} total · {formatUsd(jobCost)} · {executionModeRateLabel(job.executionMode)}
             </span>
           </div>
           <Progress value={pct} className="h-2" />
@@ -301,7 +310,7 @@ function JobDetailPage() {
       <section className="mb-4">
         <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <p className="mb-1 text-xs font-medium uppercase text-muted-foreground">Batch review</p>
+            <p className="mb-1 text-xs font-medium uppercase text-muted-foreground">{executionModeLabel(job.executionMode)} review</p>
             <h2 className="text-xl font-semibold">Review generated images</h2>
             <p className="mt-1 text-sm text-muted-foreground">Approve the images you want to publish. Rejected images stay available for reference.</p>
           </div>
@@ -373,6 +382,28 @@ function JobDetailPage() {
                   {image.status} · Created {new Date(image.createdAt).toLocaleString()}
                   {image.costUsd != null ? ` · ${formatUsd(image.costUsd)} (${((image.inputTokens ?? 0) + (image.outputTokens ?? 0)).toLocaleString()} tok)` : ""}
                 </p>
+                {image.providerBatchId || image.providerRequestId || image.providerResponseId ? (
+                  <dl className="mt-2 grid gap-1 text-xs text-muted-foreground">
+                    {image.providerBatchId ? (
+                      <div className="grid gap-1 md:grid-cols-[8rem_1fr]">
+                        <dt>Batch ID</dt>
+                        <dd className="truncate font-mono">{image.providerBatchId}</dd>
+                      </div>
+                    ) : null}
+                    {image.providerRequestId ? (
+                      <div className="grid gap-1 md:grid-cols-[8rem_1fr]">
+                        <dt>Request ID</dt>
+                        <dd className="truncate font-mono">{image.providerRequestId}</dd>
+                      </div>
+                    ) : null}
+                    {image.providerResponseId ? (
+                      <div className="grid gap-1 md:grid-cols-[8rem_1fr]">
+                        <dt>Response ID</dt>
+                        <dd className="truncate font-mono">{image.providerResponseId}</dd>
+                      </div>
+                    ) : null}
+                  </dl>
+                ) : null}
                 {image.error ? <p className="mt-1 text-sm text-destructive">{image.error}</p> : null}
                 {image.storageUrl ? (
                   <a className="mt-1 block truncate text-xs underline underline-offset-4" href={image.storageUrl} target="_blank" rel="noreferrer">

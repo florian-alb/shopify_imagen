@@ -23,6 +23,12 @@ export type PricedModel = {
   imageInputPerMillion?: number;
 };
 
+type CostOptions = {
+  batch?: boolean;
+};
+
+export const BATCH_PRICE_MULTIPLIER = 0.5;
+
 // Keyed by a substring matched against the model id.
 export const MODEL_PRICING: Array<{ match: string; pricing: PricedModel }> = [
   // Gemini 3 Pro Image ("Nano Banana Pro"): $2 input, $120 image output per 1M.
@@ -41,11 +47,12 @@ export function pricingForModel(model: string): PricedModel | null {
 }
 
 // Returns the cost in USD for a single API call, or 0 when the model/usage is unknown.
-export function estimateCostUsd(model: string, usage: TokenUsage): number {
+export function estimateCostUsd(model: string, usage: TokenUsage, options: CostOptions = {}): number {
   const pricing = pricingForModel(model);
   if (!pricing) return 0;
   const output = usage.outputTokens ?? 0;
   const totalInput = usage.inputTokens ?? 0;
+  const multiplier = options.batch ? BATCH_PRICE_MULTIPLIER : 1;
 
   if (pricing.imageInputPerMillion != null) {
     // OpenAI: split text vs image input tokens at their respective rates.
@@ -53,9 +60,10 @@ export function estimateCostUsd(model: string, usage: TokenUsage): number {
     const textInput = usage.inputTextTokens ?? Math.max(0, totalInput - imageInput);
     return (
       (textInput * pricing.inputPerMillion + imageInput * pricing.imageInputPerMillion + output * pricing.outputPerMillion) /
-      PER_MILLION
+      PER_MILLION *
+      multiplier
     );
   }
 
-  return (totalInput * pricing.inputPerMillion + output * pricing.outputPerMillion) / PER_MILLION;
+  return ((totalInput * pricing.inputPerMillion + output * pricing.outputPerMillion) / PER_MILLION) * multiplier;
 }

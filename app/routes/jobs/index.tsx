@@ -27,6 +27,14 @@ function formatUsd(value: number) {
   return `$${value.toFixed(value < 1 ? 4 : 2)}`;
 }
 
+function executionModeLabel(mode?: "realtime" | "batch") {
+  return mode === "batch" ? "Batch" : "Real-time";
+}
+
+function executionModeRateLabel(mode?: "realtime" | "batch") {
+  return mode === "batch" ? "50% rate" : "Full rate";
+}
+
 function JobsPage() {
   const jobs = useQuery(api.jobs.list) as ListedJob[] | undefined;
   const cost = useQuery(api.jobs.costSummary);
@@ -46,6 +54,12 @@ function JobsPage() {
             <div>
               <p className="text-sm text-muted-foreground">Image generation</p>
               <p className="text-2xl font-semibold">{formatUsd(cost.generationCost)}</p>
+              <p className="text-xs text-muted-foreground">
+                Real-time {formatUsd(cost.realtimeGenerationCost)} · Batch {formatUsd(cost.batchGenerationCost)}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {cost.realtimeImageCount} real-time / {cost.batchImageCount} batch images
+              </p>
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Vibe analysis</p>
@@ -80,6 +94,7 @@ function JobsPage() {
                       <p className="text-sm text-muted-foreground">{new Date(job.createdAt).toLocaleString()}</p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
+                      <StateBadge state={job.executionMode === "batch" ? "success" : "neutral"}>{executionModeLabel(job.executionMode)}</StateBadge>
                       <StateBadge>{job.imageProvider === "gemini" ? "Nano Banana Pro" : "OpenAI"}</StateBadge>
                       <StateBadge state={state}>{job.status}</StateBadge>
                       <StateBadge state={reviewState}>{reviewLabel}</StateBadge>
@@ -88,7 +103,7 @@ function JobsPage() {
                   <CardContent>
                     <Progress value={pct} className="h-2" />
                     <p className="mt-2 text-sm text-muted-foreground">
-                      {job.completedTasks} completed / {job.failedTasks} failed / {job.totalTasks} total
+                      {job.completedTasks} completed / {job.failedTasks} failed / {job.totalTasks} total · {executionModeRateLabel(job.executionMode)}
                     </p>
                     {reviewSummary.total > 0 ? (
                       <p className="mt-1 text-sm text-muted-foreground">

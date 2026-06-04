@@ -69,7 +69,37 @@ async function normalizeReferenceImage(sourceUrl: string) {
     .toBuffer();
 }
 
-type GeneratedImage = { bytes: Buffer; contentType: string; extension: string; usage: TokenUsage };
+type ProviderIds = {
+  providerBatchId?: string | null;
+  providerRequestId?: string | null;
+  providerResponseId?: string | null;
+};
+type GeneratedImage = { bytes: Buffer; contentType: string; extension: string; usage: TokenUsage } & ProviderIds;
+
+function providerIdsFromResponse(response: Response, payload?: unknown): ProviderIds {
+  // OpenAI reliably exposes x-request-id. Google APIs vary by surface, so keep
+  // the first request/trace header available for support correlation.
+  const providerRequestId =
+    response.headers.get("x-request-id") ??
+    response.headers.get("x-goog-request-id") ??
+    response.headers.get("x-google-request-id") ??
+    response.headers.get("x-cloud-trace-context") ??
+    null;
+  const body = payload as { id?: string; responseId?: string; response_id?: string } | null | undefined;
+  return {
+    providerRequestId,
+    providerResponseId: body?.id ?? body?.responseId ?? body?.response_id ?? null
+  };
+}
+
+class ProviderGenerationError extends Error {
+  providerIds: ProviderIds;
+
+  constructor(message: string, providerIds: ProviderIds) {
+    super(message);
+    this.providerIds = providerIds;
+  }
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function geminiUsage(meta: any): TokenUsage {
@@ -133,16 +163,20 @@ async function generateWithOpenAi(args: {
   } | null;
 
   if (!response.ok) {
-    throw new Error(`OpenAI image generation failed (${response.status}): ${payload?.error?.message ?? "Unknown error."}`);
+    throw new ProviderGenerationError(
+      `OpenAI image generation failed (${response.status}): ${payload?.error?.message ?? "Unknown error."}`,
+      providerIdsFromResponse(response, payload)
+    );
   }
 
   const usage = openAiUsage(payload?.usage);
   const image = payload?.data?.[0];
-  if (image?.b64_json) return { bytes: Buffer.from(image.b64_json, "base64"), ...mime, usage };
+  const providerIds = providerIdsFromResponse(response, payload);
+  if (image?.b64_json) return { bytes: Buffer.from(image.b64_json, "base64"), ...mime, usage, ...providerIds };
   if (image?.url) {
     const download = await fetch(image.url);
     if (!download.ok) throw new Error(`OpenAI returned a URL, but image download failed with ${download.status}.`);
-    return { bytes: Buffer.from(await download.arrayBuffer()), ...mime, usage };
+    return { bytes: Buffer.from(await download.arrayBuffer()), ...mime, usage, ...providerIds };
   }
   throw new Error("OpenAI image generation returned no image data.");
 }
@@ -285,7 +319,10 @@ async function generateWithGemini(args: {
   } | null;
 
   if (!response.ok) {
-    throw new Error(`Gemini image generation failed (${response.status}): ${payload?.error?.message ?? "Unknown error."}`);
+    throw new ProviderGenerationError(
+      `Gemini image generation failed (${response.status}): ${payload?.error?.message ?? "Unknown error."}`,
+      providerIdsFromResponse(response, payload)
+    );
   }
 
   const parts = payload?.candidates?.[0]?.content?.parts ?? [];
@@ -298,7 +335,8 @@ async function generateWithGemini(args: {
     bytes: Buffer.from(base64, "base64"),
     contentType,
     extension: mimeToExtension(contentType),
-    usage: geminiUsage(payload?.usageMetadata)
+    usage: geminiUsage(payload?.usageMetadata),
+    ...providerIdsFromResponse(response, payload)
   };
 }
 
@@ -379,7 +417,7 @@ async function optimizeForStorage(
 // Batch generation (asynchronous, ~50% cheaper than real-time)
 // ---------------------------------------------------------------------------
 type BatchImage = Doc<"generatedImages">;
-type BatchItem = { bytes?: Buffer; contentType?: string; error?: string; usage?: TokenUsage };
+type BatchItem = { bytes?: Buffer; contentType?: string; error?: string; usage?: TokenUsage } & ProviderIds;
 type BatchIngestCounts = { ingested: number; failed: number };
 type BatchIngestResult = BatchIngestCounts & { complete: boolean };
 type BatchResultSource =
@@ -396,6 +434,10 @@ type TerminalBatchResult =
   | ({ state: "partial" } & BatchIngestCounts)
   | ({ state: "done" } & BatchIngestCounts);
 type ManualPollResult = { state: "pending" } | TerminalBatchResult;
+
+function isTransientPollStatus(status: number): boolean {
+  return status === 408 || status === 409 || status === 429 || status >= 500;
+}
 
 async function uploadGeminiFile(args: { apiKey: string; body: string; displayName: string }) {
   const bytes = Buffer.from(args.body);
@@ -492,6 +534,9 @@ async function pollGeminiBatch(batchName: string, inputFileName?: string | null)
   });
   const payload = (await response.json().catch(() => null)) as { done?: boolean; error?: { message?: string } } | null;
   if (!response.ok) {
+    if (isTransientPollStatus(response.status)) {
+      throw new Error(`Gemini batch poll failed (${response.status}): ${payload?.error?.message ?? "unknown error."}`);
+    }
     return { state: "failed", error: `Gemini batch poll failed (${response.status}): ${payload?.error?.message ?? "unknown error."}` };
   }
   if (payload?.error) return { state: "failed", error: `Gemini batch failed: ${payload.error.message ?? "unknown error."}` };
@@ -505,9 +550,13 @@ async function pollGeminiBatch(batchName: string, inputFileName?: string | null)
     headers: { "x-goog-api-key": apiKey }
   });
   const detailsPayload = (await details.json().catch(() => null)) as { response?: { responsesFile?: string }; error?: { message?: string } } | null;
-  if (!details.ok || detailsPayload?.error) {
+  if (!details.ok) {
+    if (isTransientPollStatus(details.status)) {
+      throw new Error(`Gemini batch result lookup failed (${details.status}): ${detailsPayload?.error?.message ?? "unknown error."}`);
+    }
     return { state: "failed", error: `Gemini batch result lookup failed (${details.status}): ${detailsPayload?.error?.message ?? "unknown error."}` };
   }
+  if (detailsPayload?.error) return { state: "failed", error: `Gemini batch result lookup failed (${details.status}): ${detailsPayload.error.message ?? "unknown error."}` };
   const fileName = detailsPayload?.response?.responsesFile;
   if (!fileName) return { state: "failed", error: "Gemini batch completed without a response file." };
   return { state: "done", source: { kind: "gemini-file", fileName } };
@@ -587,6 +636,9 @@ async function pollOpenAiBatch(batchId: string, settings: Record<string, unknown
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const payload = (await response.json().catch(() => null)) as any;
   if (!response.ok) {
+    if (isTransientPollStatus(response.status)) {
+      throw new Error(`OpenAI batch poll failed (${response.status}): ${payload?.error?.message ?? "unknown error."}`);
+    }
     return { state: "failed", error: `OpenAI batch poll failed (${response.status}): ${payload?.error?.message ?? "unknown error."}` };
   }
   const status: string = payload?.status ?? "";
@@ -627,6 +679,8 @@ async function pollOpenAiBatch(batchId: string, settings: Record<string, unknown
       if (!key) continue;
       if (parsed?.error || (parsed?.response?.status_code ?? 200) >= 400) {
         results.set(key, {
+          providerRequestId: parsed?.id ?? parsed?.response?.request_id ?? null,
+          providerResponseId: parsed?.response?.body?.id ?? null,
           error: parsed?.error?.message ?? parsed?.response?.body?.error?.message ?? "OpenAI batch item failed."
         });
         continue;
@@ -636,7 +690,13 @@ async function pollOpenAiBatch(batchId: string, settings: Record<string, unknown
         results.set(key, { error: "OpenAI batch returned no image data." });
         continue;
       }
-      results.set(key, { bytes: Buffer.from(b64, "base64"), ...mime, usage: openAiUsage(parsed?.response?.body?.usage) });
+      results.set(key, {
+        bytes: Buffer.from(b64, "base64"),
+        ...mime,
+        usage: openAiUsage(parsed?.response?.body?.usage),
+        providerRequestId: parsed?.id ?? parsed?.response?.request_id ?? null,
+        providerResponseId: parsed?.response?.body?.id ?? null
+      });
     }
   };
   await ingest(payload?.output_file_id);
@@ -688,7 +748,7 @@ export const submitBatch = internalAction({
         batchId: submitted.batchId,
         batchInputFileName: submitted.inputFileName
       });
-      await ctx.runMutation(internal.jobs.markImagesGenerating, { jobId: args.jobId });
+      await ctx.runMutation(internal.jobs.markImagesGenerating, { jobId: args.jobId, providerBatchId: submitted.batchId });
       log("batch", "submitted", { jobId: args.jobId, batchId: submitted.batchId, count: images.length });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -714,7 +774,13 @@ async function ingestBatchItem(
   if (!result || result.error || !result.bytes) {
     const error = result?.error ?? "No batch result returned for this image.";
     log("batch", "image failed", { jobId: job._id, type: image.imageType, error });
-    const changed: boolean = await ctx.runMutation(internal.jobs.failImage, { imageId: image._id, error });
+    const changed: boolean = await ctx.runMutation(internal.jobs.failImage, {
+      imageId: image._id,
+      error,
+      providerBatchId: job.batchId,
+      providerRequestId: result?.providerRequestId,
+      providerResponseId: result?.providerResponseId
+    });
     return { ingested: 0, failed: changed ? 1 : 0 };
   }
   try {
@@ -725,11 +791,14 @@ async function ingestBatchItem(
     const key = `generated/${safeHandle}/${Date.now().toString(36)}/${filename}`;
     const storageUrl = await uploadToR2({ bytes: optimized.bytes, key, contentType: optimized.contentType });
     const usage = result.usage ?? {};
-    const costUsd = estimateCostUsd(job.imageModel ?? "", usage);
+    const costUsd = estimateCostUsd(job.imageModel ?? "", usage, { batch: job.executionMode === "batch" });
     const changed: boolean = await ctx.runMutation(internal.jobs.completeImage, {
       imageId: image._id,
       generatedImageUrl: storageUrl,
       storageUrl,
+      providerBatchId: job.batchId,
+      providerRequestId: result.providerRequestId,
+      providerResponseId: result.providerResponseId,
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
       costUsd
@@ -739,7 +808,7 @@ async function ingestBatchItem(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     log("batch", "image failed", { jobId: job._id, type: image.imageType, error: message });
-    const changed: boolean = await ctx.runMutation(internal.jobs.failImage, { imageId: image._id, error: message });
+    const changed: boolean = await ctx.runMutation(internal.jobs.failImage, { imageId: image._id, error: message, providerBatchId: job.batchId });
     return { ingested: 0, failed: changed ? 1 : 0 };
   }
 }
@@ -747,16 +816,24 @@ async function ingestBatchItem(
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function geminiBatchItem(raw: any): { key?: string; result: BatchItem } {
   const key: string | undefined = raw?.metadata?.key ?? raw?.key;
-  if (raw?.error) return { key, result: { error: raw.error.message ?? "Gemini batch item failed." } };
+  const providerRequestId = raw?.id ?? raw?.metadata?.requestId ?? raw?.metadata?.request_id ?? null;
+  const providerResponseId = raw?.response?.id ?? raw?.response?.responseId ?? raw?.response?.response_id ?? null;
+  if (raw?.error) return { key, result: { error: raw.error.message ?? "Gemini batch item failed.", providerRequestId, providerResponseId } };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const parts: any[] = raw?.response?.candidates?.[0]?.content?.parts ?? [];
   const data = parts.find((part) => part?.inlineData?.data || part?.inline_data?.data);
   const base64 = data?.inlineData?.data ?? data?.inline_data?.data;
-  if (!base64) return { key, result: { error: "Gemini batch returned no image data." } };
+  if (!base64) return { key, result: { error: "Gemini batch returned no image data.", providerRequestId, providerResponseId } };
   const contentType = data?.inlineData?.mimeType ?? data?.inline_data?.mime_type ?? "image/png";
   return {
     key,
-    result: { bytes: Buffer.from(base64, "base64"), contentType, usage: geminiUsage(raw?.response?.usageMetadata) }
+    result: {
+      bytes: Buffer.from(base64, "base64"),
+      contentType,
+      usage: geminiUsage(raw?.response?.usageMetadata),
+      providerRequestId,
+      providerResponseId
+    }
   };
 }
 
@@ -1145,6 +1222,8 @@ export const processJob = internalAction({
           imageId: image._id,
           generatedImageUrl: storageUrl,
           storageUrl,
+          providerRequestId: result.providerRequestId,
+          providerResponseId: result.providerResponseId,
           inputTokens: result.usage.inputTokens,
           outputTokens: result.usage.outputTokens,
           costUsd
@@ -1155,7 +1234,13 @@ export const processJob = internalAction({
         const message = error instanceof Error ? error.message : String(error);
         failed += 1;
         log("realtime", "failed", { type: image.imageType, error: message });
-        await ctx.runMutation(internal.jobs.failImage, { imageId: image._id, error: message });
+        const providerIds = error instanceof ProviderGenerationError ? error.providerIds : {};
+        await ctx.runMutation(internal.jobs.failImage, {
+          imageId: image._id,
+          error: message,
+          providerRequestId: providerIds.providerRequestId,
+          providerResponseId: providerIds.providerResponseId
+        });
       }
       await sleep(minimumIntervalMs);
     }

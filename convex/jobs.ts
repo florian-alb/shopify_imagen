@@ -76,17 +76,27 @@ export const costSummary = query({
   handler: async (ctx) => {
     await requireUserId(ctx);
     const images = await ctx.db.query("generatedImages").collect();
+    const jobs = await ctx.db.query("generationJobs").collect();
     const products = await ctx.db.query("products").collect();
+    const jobById = new Map(jobs.map((job) => [job._id, job]));
     const generationCost = images.reduce((sum, image) => sum + (image.costUsd ?? 0), 0);
+    const realtimeImages = images.filter((image) => jobById.get(image.jobId)?.executionMode !== "batch");
+    const batchImages = images.filter((image) => jobById.get(image.jobId)?.executionMode === "batch");
+    const realtimeGenerationCost = realtimeImages.reduce((sum, image) => sum + (image.costUsd ?? 0), 0);
+    const batchGenerationCost = batchImages.reduce((sum, image) => sum + (image.costUsd ?? 0), 0);
     const inputTokens = images.reduce((sum, image) => sum + (image.inputTokens ?? 0), 0);
     const outputTokens = images.reduce((sum, image) => sum + (image.outputTokens ?? 0), 0);
     const analysisCost = products.reduce((sum, product) => sum + (product.vibeCostUsd ?? 0), 0);
     return {
       generationCost,
+      realtimeGenerationCost,
+      batchGenerationCost,
       analysisCost,
       totalCost: generationCost + analysisCost,
       inputTokens,
       outputTokens,
+      realtimeImageCount: realtimeImages.filter((image) => image.costUsd != null).length,
+      batchImageCount: batchImages.filter((image) => image.costUsd != null).length,
       pricedImageCount: images.filter((image) => image.costUsd != null).length
     };
   }
@@ -312,7 +322,10 @@ export const setBatchInfo = internalMutation({
 });
 
 export const markImagesGenerating = internalMutation({
-  args: { jobId: v.id("generationJobs") },
+  args: {
+    jobId: v.id("generationJobs"),
+    providerBatchId: v.optional(v.union(v.string(), v.null()))
+  },
   handler: async (ctx, args) => {
     const images = await ctx.db
       .query("generatedImages")
@@ -321,7 +334,11 @@ export const markImagesGenerating = internalMutation({
       .collect();
     const now = Date.now();
     for (const image of images) {
-      await ctx.db.patch(image._id, { status: "generating", updatedAt: now });
+      await ctx.db.patch(image._id, {
+        status: "generating",
+        providerBatchId: args.providerBatchId,
+        updatedAt: now
+      });
     }
   }
 });
@@ -374,6 +391,9 @@ export const completeImage = internalMutation({
     imageId: v.id("generatedImages"),
     generatedImageUrl: v.string(),
     storageUrl: v.string(),
+    providerBatchId: v.optional(v.union(v.string(), v.null())),
+    providerRequestId: v.optional(v.union(v.string(), v.null())),
+    providerResponseId: v.optional(v.union(v.string(), v.null())),
     inputTokens: v.optional(v.number()),
     outputTokens: v.optional(v.number()),
     costUsd: v.optional(v.number())
@@ -384,6 +404,9 @@ export const completeImage = internalMutation({
     await ctx.db.patch(args.imageId, {
       generatedImageUrl: args.generatedImageUrl,
       storageUrl: args.storageUrl,
+      providerBatchId: args.providerBatchId,
+      providerRequestId: args.providerRequestId,
+      providerResponseId: args.providerResponseId,
       status: "generated",
       reviewStatus: "pending",
       reviewedAt: undefined,
@@ -405,7 +428,10 @@ export const completeImage = internalMutation({
 export const failImage = internalMutation({
   args: {
     imageId: v.id("generatedImages"),
-    error: v.string()
+    error: v.string(),
+    providerBatchId: v.optional(v.union(v.string(), v.null())),
+    providerRequestId: v.optional(v.union(v.string(), v.null())),
+    providerResponseId: v.optional(v.union(v.string(), v.null()))
   },
   handler: async (ctx, args) => {
     const image = await ctx.db.get(args.imageId);
@@ -414,6 +440,9 @@ export const failImage = internalMutation({
     await ctx.db.patch(args.imageId, {
       status: "failed",
       error: args.error,
+      providerBatchId: args.providerBatchId,
+      providerRequestId: args.providerRequestId,
+      providerResponseId: args.providerResponseId,
       updatedAt: Date.now()
     });
     if (job) {
