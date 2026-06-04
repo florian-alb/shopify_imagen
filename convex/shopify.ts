@@ -3,6 +3,7 @@ import { internal } from "./_generated/api";
 import { action, internalMutation, internalQuery } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireUserId } from "./authz";
+import { recalculateProductStatus } from "./products";
 
 type GraphQlResponse<T> = { data?: T; errors?: Array<{ message: string }> };
 
@@ -343,7 +344,10 @@ export const pushProductImages = action({
     // Allow re-pushing images already marked "uploaded" (e.g. after a WebP
     // re-generation), not just freshly "generated" ones.
     const ready = selected.filter(
-      (image) => image.storageUrl && (image.status === "generated" || image.status === "uploaded")
+      (image) =>
+        image.storageUrl &&
+        (image.status === "generated" || image.status === "uploaded") &&
+        image.reviewStatus === "approved"
     );
     if (!ready.length) throw new Error("No approved generated images are ready to push.");
 
@@ -444,7 +448,7 @@ export const markProductPushed = internalMutation({
   args: { productId: v.id("products") },
   handler: async (ctx, args) => {
     await ctx.db.patch(args.productId, {
-      generationStatus: "pushed",
+      generationStatus: await recalculateProductStatus(ctx, args.productId),
       updatedAt: Date.now()
     });
   }

@@ -8,7 +8,7 @@ import { action, internalAction, type ActionCtx } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { requireUserId } from "./authz";
 import { augmentPrompt, buildSeoImageFilename } from "./lib";
-import { estimateCostUsd, type TokenUsage } from "./pricing";
+import { BATCH_PRICE_MULTIPLIER, estimateCostUsd, type TokenUsage } from "./pricing";
 
 function env(name: string, fallback = "") {
   return process.env[name] ?? fallback;
@@ -801,7 +801,8 @@ async function ingestBatchItem(
       providerResponseId: result.providerResponseId,
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
-      costUsd
+      costUsd,
+      costRateMultiplier: job.executionMode === "batch" ? BATCH_PRICE_MULTIPLIER : 1
     });
     log("batch", "stored", { jobId: job._id, handle: safeHandle, type: image.imageType, file: filename, kb: Math.round(optimized.bytes.length / 1024), costUsd });
     return { ingested: changed ? 1 : 0, failed: 0 };
@@ -1226,7 +1227,8 @@ export const processJob = internalAction({
           providerResponseId: result.providerResponseId,
           inputTokens: result.usage.inputTokens,
           outputTokens: result.usage.outputTokens,
-          costUsd
+          costUsd,
+          costRateMultiplier: 1
         });
         done += 1;
         log("realtime", "stored", { handle: product.handle, type: image.imageType, file: filename, kb: Math.round(optimized.bytes.length / 1024), costUsd });

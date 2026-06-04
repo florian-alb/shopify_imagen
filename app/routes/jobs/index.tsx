@@ -1,14 +1,20 @@
-import { Link, createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "convex/react";
+import { useMemo, type ReactNode } from "react";
 import { EmptyState, PageHeader, StateBadge } from "@/components/page";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { api } from "../../../convex/_generated/api";
 import type { Doc } from "../../../convex/_generated/dataModel";
-
-export const Route = createFileRoute("/jobs/")({
-  component: JobsPage
-});
 
 type ReviewSummary = {
   total: number;
@@ -17,11 +23,54 @@ type ReviewSummary = {
   rejected: number;
 };
 
+type JobCostSummary = {
+  generationCost: number;
+  inputTokens: number;
+  outputTokens: number;
+  pricedImageCount: number;
+};
+
 type ListedJob = Doc<"generationJobs"> & {
+  costSummary?: JobCostSummary;
   reviewSummary?: ReviewSummary;
 };
 
+type JobStatusFilter = "all" | "queued" | "running" | "completed" | "failed" | "cancelled";
+type ExecutionModeFilter = "all" | "realtime" | "batch";
+type ProviderFilter = "all" | "openai" | "gemini";
+type ReviewState = "none" | "pending" | "approved" | "partial" | "rejected";
+type ReviewFilter = "all" | "to-review" | "approved" | "partial" | "rejected" | "no-review";
+type JobSearch = {
+  status?: Exclude<JobStatusFilter, "all">;
+  executionMode?: Exclude<ExecutionModeFilter, "all">;
+  provider?: Exclude<ProviderFilter, "all">;
+  review?: Exclude<ReviewFilter, "all">;
+};
+
 const emptyReviewSummary: ReviewSummary = { total: 0, pending: 0, approved: 0, rejected: 0 };
+const emptyJobCostSummary: JobCostSummary = { generationCost: 0, inputTokens: 0, outputTokens: 0, pricedImageCount: 0 };
+const jobStatuses = ["queued", "running", "completed", "failed", "cancelled"] as const;
+const executionModes = ["realtime", "batch"] as const;
+const providers = ["openai", "gemini"] as const;
+const reviewFilters = ["to-review", "approved", "partial", "rejected", "no-review"] as const;
+
+export const Route = createFileRoute("/jobs/")({
+  validateSearch: validateJobSearch,
+  component: JobsPage
+});
+
+function optionalEnum<T extends readonly string[]>(value: unknown, allowed: T): T[number] | undefined {
+  return typeof value === "string" && (allowed as readonly string[]).includes(value) ? value : undefined;
+}
+
+function validateJobSearch(search: Record<string, unknown>): JobSearch {
+  return {
+    status: optionalEnum(search.status, jobStatuses),
+    executionMode: optionalEnum(search.executionMode, executionModes),
+    provider: optionalEnum(search.provider, providers),
+    review: optionalEnum(search.review, reviewFilters)
+  };
+}
 
 function formatUsd(value: number) {
   return `$${value.toFixed(value < 1 ? 4 : 2)}`;
@@ -35,15 +84,92 @@ function executionModeRateLabel(mode?: "realtime" | "batch") {
   return mode === "batch" ? "50% rate" : "Full rate";
 }
 
+function reviewMatchesFilter(reviewSummary: ReviewSummary, filter: ReviewFilter) {
+  if (filter === "all") return true;
+  const state = getReviewState(reviewSummary);
+  if (filter === "to-review") return state === "pending";
+  if (filter === "no-review") return state === "none";
+  return state === filter;
+}
+
+function getReviewState(reviewSummary: ReviewSummary): ReviewState {
+  if (reviewSummary.total === 0) return "none";
+  if (reviewSummary.pending > 0) return "pending";
+  if (reviewSummary.rejected === reviewSummary.total) return "rejected";
+  if (reviewSummary.approved === reviewSummary.total) return "approved";
+  return "partial";
+}
+
+function reviewBadge(reviewSummary: ReviewSummary) {
+  const state = getReviewState(reviewSummary);
+  if (state === "pending") return { tone: "warning" as const, label: `${reviewSummary.pending} to review` };
+  if (state === "approved") return { tone: "success" as const, label: "Approved" };
+  if (state === "partial") return { tone: "warning" as const, label: "Partial" };
+  if (state === "rejected") return { tone: "danger" as const, label: "Rejected" };
+  return { tone: "neutral" as const, label: "No images to review" };
+}
+
 function JobsPage() {
+  const search = Route.useSearch();
+  const navigate = useNavigate();
   const jobs = useQuery(api.jobs.list) as ListedJob[] | undefined;
   const cost = useQuery(api.jobs.costSummary);
+  const statusFilter: JobStatusFilter = search.status ?? "all";
+  const executionModeFilter: ExecutionModeFilter = search.executionMode ?? "all";
+  const providerFilter: ProviderFilter = search.provider ?? "all";
+  const reviewFilter: ReviewFilter = search.review ?? "all";
+
+  function updateSearch(patch: Partial<JobSearch>) {
+    void navigate({ to: "/jobs", search: { ...search, ...patch }, replace: true });
+  }
+
+  const filteredJobs = useMemo(() => {
+    if (!jobs) return undefined;
+    return jobs.filter((job) => {
+      const effectiveExecutionMode = job.executionMode ?? "realtime";
+      const reviewSummary = job.reviewSummary ?? emptyReviewSummary;
+      if (statusFilter !== "all" && job.status !== statusFilter) return false;
+      if (executionModeFilter !== "all" && effectiveExecutionMode !== executionModeFilter) return false;
+      if (providerFilter !== "all" && job.imageProvider !== providerFilter) return false;
+      return reviewMatchesFilter(reviewSummary, reviewFilter);
+    });
+  }, [executionModeFilter, jobs, providerFilter, reviewFilter, statusFilter]);
+
+  const filteredCostSummary = useMemo(() => {
+    return (filteredJobs ?? []).reduce(
+      (summary, job) => {
+        const jobCost = job.costSummary ?? emptyJobCostSummary;
+        summary.generationCost += jobCost.generationCost;
+        summary.inputTokens += jobCost.inputTokens;
+        summary.outputTokens += jobCost.outputTokens;
+        summary.pricedImageCount += jobCost.pricedImageCount;
+        return summary;
+      },
+      { ...emptyJobCostSummary },
+    );
+  }, [filteredJobs]);
+
+  const hasActiveFilters =
+    statusFilter !== "all" ||
+    executionModeFilter !== "all" ||
+    providerFilter !== "all" ||
+    reviewFilter !== "all";
+
+  const clearFilters = () => {
+    updateSearch({
+      status: undefined,
+      executionMode: undefined,
+      provider: undefined,
+      review: undefined
+    });
+  };
+
   return (
     <main className="page">
       <PageHeader eyebrow="Jobs" title="Background generation jobs" />
       {cost ? (
         <Card className="mb-4 rounded-lg">
-          <CardContent className="grid gap-4 pt-1 sm:grid-cols-3">
+          <CardContent className={cn("grid gap-4 pt-1 sm:grid-cols-3", jobs?.length ? "lg:grid-cols-4" : null)}>
             <div>
               <p className="text-sm text-muted-foreground">Total spent</p>
               <p className="text-2xl font-semibold">{formatUsd(cost.totalCost)}</p>
@@ -65,6 +191,18 @@ function JobsPage() {
               <p className="text-sm text-muted-foreground">Vibe analysis</p>
               <p className="text-2xl font-semibold">{formatUsd(cost.analysisCost)}</p>
             </div>
+            {jobs?.length ? (
+              <div>
+                <p className="text-sm text-muted-foreground">Filtered result</p>
+                <p className="text-2xl font-semibold">{formatUsd(filteredCostSummary.generationCost)}</p>
+                <p className="text-xs text-muted-foreground">
+                  {(filteredJobs?.length ?? 0).toLocaleString()} / {jobs.length.toLocaleString()} jobs
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {(filteredCostSummary.inputTokens + filteredCostSummary.outputTokens).toLocaleString()} tokens · {filteredCostSummary.pricedImageCount} images
+                </p>
+              </div>
+            ) : null}
           </CardContent>
         </Card>
       ) : null}
@@ -73,50 +211,131 @@ function JobsPage() {
       ) : jobs.length === 0 ? (
         <EmptyState title="No jobs yet" body="Create a generation job from the products page." />
       ) : (
-        <section className="grid gap-3">
-          {jobs.map((job) => {
-            const pct = job.totalTasks ? Math.round(((job.completedTasks + job.failedTasks) / job.totalTasks) * 100) : 0;
-            const state = job.status === "completed" ? "success" : job.status === "failed" ? "danger" : "warning";
-            const reviewSummary = job.reviewSummary ?? emptyReviewSummary;
-            const reviewState = reviewSummary.pending > 0 ? "warning" : reviewSummary.total > 0 ? "success" : "neutral";
-            const reviewLabel =
-              reviewSummary.pending > 0
-                ? `${reviewSummary.pending} to review`
-                : reviewSummary.total > 0
-                  ? "Review complete"
-                  : "No images to review";
-            return (
-              <Card key={job._id} className="rounded-lg">
-                <Link to="/jobs/$jobId" params={{ jobId: job._id }} className="flex flex-col gap-4">
-                  <CardHeader className="flex flex-row items-start justify-between gap-3">
-                    <div>
-                      <CardTitle>{job.mode === "bulk" ? "Bulk generation" : "Single product generation"}</CardTitle>
-                      <p className="text-sm text-muted-foreground">{new Date(job.createdAt).toLocaleString()}</p>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <StateBadge state={job.executionMode === "batch" ? "success" : "neutral"}>{executionModeLabel(job.executionMode)}</StateBadge>
-                      <StateBadge>{job.imageProvider === "gemini" ? "Nano Banana Pro" : "OpenAI"}</StateBadge>
-                      <StateBadge state={state}>{job.status}</StateBadge>
-                      <StateBadge state={reviewState}>{reviewLabel}</StateBadge>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    <Progress value={pct} className="h-2" />
-                    <p className="mt-2 text-sm text-muted-foreground">
-                      {job.completedTasks} completed / {job.failedTasks} failed / {job.totalTasks} total · {executionModeRateLabel(job.executionMode)}
-                    </p>
-                    {reviewSummary.total > 0 ? (
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        Review: {reviewSummary.approved} approved / {reviewSummary.pending} to review / {reviewSummary.rejected} rejected
-                      </p>
-                    ) : null}
-                  </CardContent>
-                </Link>
-              </Card>
-            );
-          })}
-        </section>
+        <>
+          <Card className="mb-4 rounded-lg py-3">
+            <CardContent className="grid gap-3 px-3 md:grid-cols-[1fr_1fr_1fr_1fr_auto]">
+              <FilterSelect
+                value={statusFilter}
+                placeholder="All states"
+                onChange={(value) => updateSearch({ status: value === "all" ? undefined : value as JobSearch["status"] })}
+              >
+                <SelectItem value="queued">Queued</SelectItem>
+                <SelectItem value="running">Running</SelectItem>
+                <SelectItem value="completed">Completed</SelectItem>
+                <SelectItem value="failed">Failed</SelectItem>
+                <SelectItem value="cancelled">Cancelled</SelectItem>
+              </FilterSelect>
+              <FilterSelect
+                value={executionModeFilter}
+                placeholder="Batch + realtime"
+                onChange={(value) => updateSearch({ executionMode: value === "all" ? undefined : value as JobSearch["executionMode"] })}
+              >
+                <SelectItem value="realtime">Real-time</SelectItem>
+                <SelectItem value="batch">Batch</SelectItem>
+              </FilterSelect>
+              <FilterSelect
+                value={reviewFilter}
+                placeholder="All review states"
+                onChange={(value) => updateSearch({ review: value === "all" ? undefined : value as JobSearch["review"] })}
+              >
+                <SelectItem value="to-review">To review</SelectItem>
+                <SelectItem value="approved">Approved</SelectItem>
+                <SelectItem value="partial">Partial</SelectItem>
+                <SelectItem value="rejected">Rejected</SelectItem>
+                <SelectItem value="no-review">No images to review</SelectItem>
+              </FilterSelect>
+              <FilterSelect
+                value={providerFilter}
+                placeholder="All providers"
+                onChange={(value) => updateSearch({ provider: value === "all" ? undefined : value as JobSearch["provider"] })}
+              >
+                <SelectItem value="gemini">Nano Banana Pro</SelectItem>
+                <SelectItem value="openai">OpenAI</SelectItem>
+              </FilterSelect>
+              <div className="flex items-center justify-between gap-3 md:justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={!hasActiveFilters}
+                  onClick={clearFilters}
+                >
+                  Reset
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          {filteredJobs?.length === 0 ? (
+            <EmptyState title="No matching jobs" body="Adjust the filters to show more generation jobs." />
+          ) : (
+            <section className="grid gap-3">
+              {filteredJobs?.map((job) => {
+                const pct = job.totalTasks ? Math.round(((job.completedTasks + job.failedTasks) / job.totalTasks) * 100) : 0;
+                const state = job.status === "completed" ? "success" : job.status === "failed" ? "danger" : "warning";
+                const reviewSummary = job.reviewSummary ?? emptyReviewSummary;
+                const jobCostSummary = job.costSummary ?? emptyJobCostSummary;
+                const review = reviewBadge(reviewSummary);
+                return (
+                  <Card key={job._id} className="rounded-lg">
+                    <Link to="/jobs/$jobId" params={{ jobId: job._id }} className="flex flex-col gap-4">
+                      <CardHeader className="flex flex-row items-start justify-between gap-3">
+                        <div>
+                          <CardTitle>{job.mode === "bulk" ? "Bulk generation" : "Single product generation"}</CardTitle>
+                          <p className="text-sm text-muted-foreground">{new Date(job.createdAt).toLocaleString()}</p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <StateBadge state={job.executionMode === "batch" ? "success" : "neutral"}>{executionModeLabel(job.executionMode)}</StateBadge>
+                          <StateBadge>{job.imageProvider === "gemini" ? "Nano Banana Pro" : "OpenAI"}</StateBadge>
+                          <StateBadge state={state}>{job.status}</StateBadge>
+                          <StateBadge state={review.tone}>{review.label}</StateBadge>
+                        </div>
+                      </CardHeader>
+                      <CardContent>
+                        <Progress value={pct} className="h-2" />
+                        <p className="mt-2 text-sm text-muted-foreground">
+                          {job.completedTasks} completed / {job.failedTasks} failed / {job.totalTasks} total · {formatUsd(jobCostSummary.generationCost)} · {executionModeRateLabel(job.executionMode)}
+                        </p>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          Cost: {(jobCostSummary.inputTokens + jobCostSummary.outputTokens).toLocaleString()} tokens · {jobCostSummary.pricedImageCount} priced images
+                        </p>
+                        {reviewSummary.total > 0 ? (
+                          <p className="mt-1 text-sm text-muted-foreground">
+                            Review: {reviewSummary.approved} approved / {reviewSummary.pending} to review / {reviewSummary.rejected} rejected
+                          </p>
+                        ) : null}
+                      </CardContent>
+                    </Link>
+                  </Card>
+                );
+              })}
+            </section>
+          )}
+        </>
       )}
     </main>
+  );
+}
+
+function FilterSelect({
+  value,
+  placeholder,
+  onChange,
+  children,
+}: {
+  value: string;
+  placeholder: string;
+  onChange: (value: string) => void;
+  children: ReactNode;
+}) {
+  return (
+    <Select value={value} onValueChange={onChange}>
+      <SelectTrigger className="h-10 w-full">
+        <SelectValue placeholder={placeholder} />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="all">{placeholder}</SelectItem>
+        {children}
+      </SelectContent>
+    </Select>
   );
 }

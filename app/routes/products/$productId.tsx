@@ -1,11 +1,33 @@
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
-import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, GripVertical, RefreshCw, Send, Trash2, WandSparkles, X } from "lucide-react";
+import {
+  ArrowLeft,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  ExternalLink,
+  GripVertical,
+  RefreshCw,
+  Send,
+  Trash2,
+  WandSparkles,
+  X,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Dialog as DialogPrimitive } from "radix-ui";
-import { BusyIcon, EmptyState, StateBadge, StatusBadge } from "@/components/page";
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import {
+  BusyIcon,
+  EmptyState,
+  StateBadge,
+  StatusBadge,
+} from "@/components/page";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   AlertDialog,
@@ -14,24 +36,44 @@ import {
   AlertDialogDescription,
   AlertDialogFooter,
   AlertDialogHeader,
-  AlertDialogTitle
+  AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
-import { Breadcrumb, BreadcrumbItem, BreadcrumbList, BreadcrumbPage } from "@/components/ui/breadcrumb";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbList,
+  BreadcrumbPage,
+} from "@/components/ui/breadcrumb";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { productFilterArgs, type ProductSearch, validateProductSearch } from "@/lib/productFilters";
-import { generationStatusLabels, shopifyStatusLabel, type GenerationStatus } from "@/lib/status";
+import {
+  productFilterArgs,
+  type ProductSearch,
+  validateProductSearch,
+} from "@/lib/productFilters";
+import {
+  generationStatusLabels,
+  shopifyStatusLabel,
+  type GenerationStatus,
+} from "@/lib/status";
 import { api } from "../../../convex/_generated/api";
 import type { Doc, Id } from "../../../convex/_generated/dataModel";
 
 export const Route = createFileRoute("/products/$productId")({
   validateSearch: validateProductSearch,
-  component: ProductDetailPage
+  component: ProductDetailPage,
 });
 
 type ProductDetail = {
@@ -46,22 +88,44 @@ type ShopifyGalleryImage = {
   altText?: string | null;
 };
 
+type ReviewStatus = "pending" | "approved" | "rejected";
+
 function shopifyMediaId(image: ShopifyGalleryImage) {
   return image.mediaId ?? image.id ?? "";
+}
+
+function getReviewStatus(image: Doc<"generatedImages">): ReviewStatus {
+  return image.reviewStatus ?? "pending";
+}
+
+function isReviewable(image: Doc<"generatedImages">) {
+  return (
+    Boolean(image.storageUrl) &&
+    (image.status === "generated" || image.status === "uploaded")
+  );
+}
+
+function isPushReady(image: Doc<"generatedImages">) {
+  return isReviewable(image) && getReviewStatus(image) === "approved";
 }
 
 function ProductDetailPage() {
   const { productId } = Route.useParams();
   const search = Route.useSearch();
   const navigate = useNavigate();
-  const data = useQuery(api.products.getWithImages, { productId: productId as Id<"products"> }) as ProductDetail | undefined;
+  const data = useQuery(api.products.getWithImages, {
+    productId: productId as Id<"products">,
+  }) as ProductDetail | undefined;
   const productNavigation = useQuery(api.products.navigation, {
     productId: productId as Id<"products">,
-    ...productFilterArgs(search)
+    ...productFilterArgs(search),
   });
-  const prompts = useQuery(api.prompts.list) as Doc<"promptTemplates">[] | undefined;
+  const prompts = useQuery(api.prompts.list) as
+    | Doc<"promptTemplates">[]
+    | undefined;
   const shopInfo = useQuery(api.settings.shopInfo);
   const createJob = useMutation(api.jobs.create);
+  const reviewImages = useMutation(api.jobs.reviewImages);
   const pushImages = useAction(api.shopify.pushProductImages);
   const syncProduct = useAction(api.shopify.syncProduct);
   const deleteImage = useAction(api.shopify.deleteImage);
@@ -70,15 +134,28 @@ function ProductDetailPage() {
   const [force, setForce] = useState(false);
   const [generateOpen, setGenerateOpen] = useState(false);
   const [pushOpen, setPushOpen] = useState(false);
-  const [selectedPushIds, setSelectedPushIds] = useState<Set<Id<"generatedImages">>>(new Set());
+  const [selectedPushIds, setSelectedPushIds] = useState<
+    Set<Id<"generatedImages">>
+  >(new Set());
   const [replaceExisting, setReplaceExisting] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
-  const [lightbox, setLightbox] = useState<{ images: LightboxImage[]; index: number } | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<Doc<"generatedImages"> | null>(null);
+  const [reviewingImageId, setReviewingImageId] =
+    useState<Id<"generatedImages"> | null>(null);
+  const [lightbox, setLightbox] = useState<{
+    images: LightboxImage[];
+    index: number;
+  } | null>(null);
+  const [deleteTarget, setDeleteTarget] =
+    useState<Doc<"generatedImages"> | null>(null);
   const [shopifyReorderBusy, setShopifyReorderBusy] = useState(false);
-  const [dragShopifyMediaId, setDragShopifyMediaId] = useState<string | null>(null);
+  const [dragShopifyMediaId, setDragShopifyMediaId] = useState<string | null>(
+    null,
+  );
   const dragShopifyMediaIdRef = useRef<string | null>(null);
-  const [localShopifyOrder, setLocalShopifyOrder] = useState<{ productId: string; images: ShopifyGalleryImage[] } | null>(null);
+  const [localShopifyOrder, setLocalShopifyOrder] = useState<{
+    productId: string;
+    images: ShopifyGalleryImage[];
+  } | null>(null);
 
   const openLightbox = useCallback((images: LightboxImage[], index: number) => {
     if (images.length) setLightbox({ images, index });
@@ -86,9 +163,15 @@ function ProductDetailPage() {
 
   const product = data?.product;
   const images = data?.images ?? [];
-  const serverShopifyImages = (product?.currentShopifyImages ?? []) as ShopifyGalleryImage[];
-  const shopifyImages = localShopifyOrder?.productId === productId ? localShopifyOrder.images : serverShopifyImages;
-  const canReorderShopifyImages = shopifyImages.length > 1 && shopifyImages.every((image) => shopifyMediaId(image));
+  const serverShopifyImages = (product?.currentShopifyImages ??
+    []) as ShopifyGalleryImage[];
+  const shopifyImages =
+    localShopifyOrder?.productId === productId
+      ? localShopifyOrder.images
+      : serverShopifyImages;
+  const canReorderShopifyImages =
+    shopifyImages.length > 1 &&
+    shopifyImages.every((image) => shopifyMediaId(image));
   const latestJobId = images[0]?.jobId;
   const shopifyAdminUrl = useMemo(() => {
     if (!product || !shopInfo?.storeHandle) return null;
@@ -96,18 +179,33 @@ function ProductDetailPage() {
     if (!numericId) return null;
     return `https://admin.shopify.com/store/${shopInfo.storeHandle}/products/${numericId}`;
   }, [product, shopInfo?.storeHandle]);
-  const availableTypes = useMemo(() => (prompts ?? []).filter((prompt) => prompt.isActive), [prompts]);
+  const availableTypes = useMemo(
+    () => (prompts ?? []).filter((prompt) => prompt.isActive),
+    [prompts],
+  );
   // Include already-pushed ("uploaded") images so they can be re-pushed, e.g.
   // after regenerating them as optimized WebP.
-  const readyImages = images.filter(
-    (image) => (image.status === "generated" || image.status === "uploaded") && image.storageUrl
+  const generatedGalleryImages = images.filter((image) => image.storageUrl);
+  const reviewableImages = images.filter(isReviewable);
+  const approvedImages = reviewableImages.filter(
+    (image) => getReviewStatus(image) === "approved",
   );
+  const rejectedImages = reviewableImages.filter(
+    (image) => getReviewStatus(image) === "rejected",
+  );
+  const pendingImages = reviewableImages.filter(
+    (image) => getReviewStatus(image) === "pending",
+  );
+  const readyImages = images.filter(isPushReady);
 
   useEffect(() => {
     if (!localShopifyOrder || localShopifyOrder.productId !== productId) return;
     const localIds = localShopifyOrder.images.map(shopifyMediaId);
     const serverIds = serverShopifyImages.map(shopifyMediaId);
-    if (localIds.length === serverIds.length && localIds.every((id, index) => id === serverIds[index])) {
+    if (
+      localIds.length === serverIds.length &&
+      localIds.every((id, index) => id === serverIds[index])
+    ) {
       setLocalShopifyOrder(null);
     }
   }, [localShopifyOrder, productId, serverShopifyImages]);
@@ -128,16 +226,21 @@ function ProductDetailPage() {
       const jobId = await createJob({
         productIds: [product._id],
         selectedImageTypes: Array.from(selectedTypes),
-        forceRegenerate: force
+        forceRegenerate: force,
       });
       setGenerateOpen(false);
       toast.success("Background generation started", {
         description: "Progress updates live on this product.",
-        action: { label: "View job", onClick: () => void navigate({ to: "/jobs/$jobId", params: { jobId } }) }
+        action: {
+          label: "View job",
+          onClick: () =>
+            void navigate({ to: "/jobs/$jobId", params: { jobId } }),
+        },
       });
     } catch (jobError) {
       toast.error("Failed to start generation", {
-        description: jobError instanceof Error ? jobError.message : String(jobError)
+        description:
+          jobError instanceof Error ? jobError.message : String(jobError),
       });
     } finally {
       setBusy(null);
@@ -150,6 +253,25 @@ function ProductDetailPage() {
     setPushOpen(true);
   }
 
+  async function setImageReview(
+    image: Doc<"generatedImages">,
+    reviewStatus: "approved" | "rejected",
+  ) {
+    setReviewingImageId(image._id);
+    try {
+      await reviewImages({ imageIds: [image._id], reviewStatus });
+    } catch (reviewError) {
+      toast.error("Review update failed", {
+        description:
+          reviewError instanceof Error
+            ? reviewError.message
+            : String(reviewError),
+      });
+    } finally {
+      setReviewingImageId(null);
+    }
+  }
+
   async function sync() {
     if (!product) return;
     setBusy("sync");
@@ -158,7 +280,8 @@ function ProductDetailPage() {
       toast.success("Product synced from Shopify");
     } catch (syncError) {
       toast.error("Sync failed", {
-        description: syncError instanceof Error ? syncError.message : String(syncError)
+        description:
+          syncError instanceof Error ? syncError.message : String(syncError),
       });
     } finally {
       setBusy(null);
@@ -175,7 +298,10 @@ function ProductDetailPage() {
       toast.success(`Deleted ${label} image everywhere`);
     } catch (deleteError) {
       toast.error("Delete failed", {
-        description: deleteError instanceof Error ? deleteError.message : String(deleteError)
+        description:
+          deleteError instanceof Error
+            ? deleteError.message
+            : String(deleteError),
       });
     } finally {
       setBusy(null);
@@ -190,8 +316,12 @@ function ProductDetailPage() {
   function reorderShopifyImageOver(overMediaId: string) {
     const draggedMediaId = dragShopifyMediaIdRef.current;
     if (!draggedMediaId || draggedMediaId === overMediaId) return;
-    const from = shopifyImages.findIndex((image) => shopifyMediaId(image) === draggedMediaId);
-    const to = shopifyImages.findIndex((image) => shopifyMediaId(image) === overMediaId);
+    const from = shopifyImages.findIndex(
+      (image) => shopifyMediaId(image) === draggedMediaId,
+    );
+    const to = shopifyImages.findIndex(
+      (image) => shopifyMediaId(image) === overMediaId,
+    );
     if (from === -1 || to === -1) return;
     const next = [...shopifyImages];
     const [draggedImage] = next.splice(from, 1);
@@ -209,15 +339,25 @@ function ProductDetailPage() {
     try {
       const result = await reorderProductImages({
         productId: product._id,
-        orderedMediaIds: localShopifyOrder.images.map(shopifyMediaId)
+        orderedMediaIds: localShopifyOrder.images.map(shopifyMediaId),
       });
-      toast.success(result.pending ? "Shopify image reorder queued" : "Shopify image order saved", {
-        description: result.pending ? "Shopify is still applying the new gallery order." : "Prompt references now follow this gallery order."
-      });
+      toast.success(
+        result.pending
+          ? "Shopify image reorder queued"
+          : "Shopify image order saved",
+        {
+          description: result.pending
+            ? "Shopify is still applying the new gallery order."
+            : "Prompt references now follow this gallery order.",
+        },
+      );
     } catch (reorderError) {
       setLocalShopifyOrder(null);
       toast.error("Failed to reorder Shopify images", {
-        description: reorderError instanceof Error ? reorderError.message : String(reorderError)
+        description:
+          reorderError instanceof Error
+            ? reorderError.message
+            : String(reorderError),
       });
     } finally {
       setShopifyReorderBusy(false);
@@ -231,14 +371,19 @@ function ProductDetailPage() {
     try {
       await pushImages({
         productId: product._id,
-        imageIds: readyImages.filter((image) => selectedPushIds.has(image._id)).map((image) => image._id),
-        replaceExisting
+        imageIds: readyImages
+          .filter((image) => selectedPushIds.has(image._id))
+          .map((image) => image._id),
+        replaceExisting,
       });
       setPushOpen(false);
-      toast.success(`Pushed ${count} image${count === 1 ? "" : "s"} to Shopify`);
+      toast.success(
+        `Pushed ${count} image${count === 1 ? "" : "s"} to Shopify`,
+      );
     } catch (pushError) {
       toast.error("Push failed", {
-        description: pushError instanceof Error ? pushError.message : String(pushError)
+        description:
+          pushError instanceof Error ? pushError.message : String(pushError),
       });
     } finally {
       setBusy(null);
@@ -248,7 +393,11 @@ function ProductDetailPage() {
   if (data === undefined) {
     return (
       <main className="page">
-        <EmptyState loading title="Loading product" body="Fetching product details, Shopify images, and generated image history." />
+        <EmptyState
+          loading
+          title="Loading product"
+          body="Fetching product details, Shopify images, and generated image history."
+        />
       </main>
     );
   }
@@ -256,7 +405,10 @@ function ProductDetailPage() {
   if (!product) {
     return (
       <main className="page">
-        <EmptyState title="Product not found" body="The product may not be synced into Convex yet." />
+        <EmptyState
+          title="Product not found"
+          body="The product may not be synced into Convex yet."
+        />
       </main>
     );
   }
@@ -269,7 +421,12 @@ function ProductDetailPage() {
             <Breadcrumb>
               <BreadcrumbList>
                 <BreadcrumbItem>
-                  <Button variant="ghost" size="sm" asChild className="-ml-2 text-muted-foreground">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    asChild
+                    className="-ml-2 text-muted-foreground"
+                  >
                     <Link to="/products" search={search}>
                       <ArrowLeft data-icon="inline-start" />
                       Products
@@ -283,19 +440,43 @@ function ProductDetailPage() {
             </Breadcrumb>
             <StatusBadge
               status={product.generationStatus as GenerationStatus}
-              label={generationStatusLabels[product.generationStatus as GenerationStatus]}
+              label={
+                generationStatusLabels[
+                  product.generationStatus as GenerationStatus
+                ]
+              }
             />
-            <Badge variant="outline">{product.productType || "No category"}</Badge>
-            {product.shopifyStatus ? <Badge variant="outline">{shopifyStatusLabel(product.shopifyStatus)}</Badge> : null}
-            {product.vendor ? <Badge variant="outline">{product.vendor}</Badge> : null}
+            <Badge variant="outline">
+              {product.productType || "No category"}
+            </Badge>
+            {product.shopifyStatus ? (
+              <Badge variant="outline">
+                {shopifyStatusLabel(product.shopifyStatus)}
+              </Badge>
+            ) : null}
+            {product.vendor ? (
+              <Badge variant="outline">{product.vendor}</Badge>
+            ) : null}
           </div>
-          <h1 className="truncate text-2xl font-semibold sm:text-3xl">{product.title}</h1>
+          <h1 className="truncate text-2xl font-semibold sm:text-3xl">
+            {product.title}
+          </h1>
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            <ProductNavigationButton direction="previous" product={productNavigation?.previous} search={search} />
+            <ProductNavigationButton
+              direction="previous"
+              product={productNavigation?.previous}
+              search={search}
+            />
             <span className="text-xs text-muted-foreground">
-              {productNavigation?.position ? `${productNavigation.position} / ${productNavigation.total}` : `${productNavigation?.total ?? 0} products`}
+              {productNavigation?.position
+                ? `${productNavigation.position} / ${productNavigation.total}`
+                : `${productNavigation?.total ?? 0} products`}
             </span>
-            <ProductNavigationButton direction="next" product={productNavigation?.next} search={search} />
+            <ProductNavigationButton
+              direction="next"
+              product={productNavigation?.next}
+              search={search}
+            />
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -307,7 +488,12 @@ function ProductDetailPage() {
               </Link>
             </Button>
           ) : null}
-          <Button size="lg" variant="outline" onClick={() => void sync()} disabled={busy === "sync"}>
+          <Button
+            size="lg"
+            variant="outline"
+            onClick={() => void sync()}
+            disabled={busy === "sync"}
+          >
             <BusyIcon busy={busy === "sync"} />
             {busy !== "sync" ? <RefreshCw data-icon="inline-start" /> : null}
             Sync
@@ -334,7 +520,7 @@ function ProductDetailPage() {
           items={shopifyImages.map((image) => ({
             id: shopifyMediaId(image),
             url: image.url,
-            label: image.altText ?? "Shopify product"
+            label: image.altText ?? "Shopify product",
           }))}
           emptyText="No images found."
           onZoom={openLightbox}
@@ -345,21 +531,27 @@ function ProductDetailPage() {
                   disabled: shopifyReorderBusy,
                   onDragStart: startShopifyImageReorder,
                   onDragOver: reorderShopifyImageOver,
-                  onCommit: commitShopifyImageReorder
+                  onCommit: commitShopifyImageReorder,
                 }
               : undefined
           }
         />
         <Gallery
           title="Generated images"
-          items={images
-            .filter((image) => image.storageUrl)
-            .map((image) => ({
-              url: image.storageUrl!,
-              label: image.imageType,
-              caption: image.imageType,
-              onDelete: () => setDeleteTarget(image)
-            }))}
+          description={`${approvedImages.length} approved · ${pendingImages.length} to review · ${rejectedImages.length} rejected`}
+          items={generatedGalleryImages.map((image) => ({
+            url: image.storageUrl!,
+            label: image.imageType,
+            caption: image.imageType,
+            reviewStatus: getReviewStatus(image),
+            statusLabel: generatedImageStateLabel(image),
+            statusTone: generatedImageStateTone(image),
+            reviewable: isReviewable(image),
+            reviewing: reviewingImageId === image._id,
+            onApprove: () => void setImageReview(image, "approved"),
+            onReject: () => void setImageReview(image, "rejected"),
+            onDelete: () => setDeleteTarget(image),
+          }))}
           emptyText="No generated images yet."
           onZoom={openLightbox}
         />
@@ -381,11 +573,17 @@ function ProductDetailPage() {
           {images.length ? (
             <Accordion type="multiple" className="gap-3">
               {images.map((image) => (
-                <HistoryItem key={image._id} image={image} onDelete={() => setDeleteTarget(image)} />
+                <HistoryItem
+                  key={image._id}
+                  image={image}
+                  onDelete={() => setDeleteTarget(image)}
+                />
               ))}
             </Accordion>
           ) : (
-            <p className="text-sm text-muted-foreground">No generated image records yet.</p>
+            <p className="text-sm text-muted-foreground">
+              No generated image records yet.
+            </p>
           )}
         </CardContent>
       </Card>
@@ -394,25 +592,65 @@ function ProductDetailPage() {
         <div className="mb-4 flex flex-wrap gap-2">
           <StatusBadge
             status={product.generationStatus as GenerationStatus}
-            label={generationStatusLabels[product.generationStatus as GenerationStatus]}
+            label={
+              generationStatusLabels[
+                product.generationStatus as GenerationStatus
+              ]
+            }
           />
-          <Badge variant="outline">{product.productType || "No category"}</Badge>
-          {product.shopifyStatus ? <Badge variant="outline">{shopifyStatusLabel(product.shopifyStatus)}</Badge> : null}
-          {product.vendor ? <Badge variant="outline">{product.vendor}</Badge> : null}
+          <Badge variant="outline">
+            {product.productType || "No category"}
+          </Badge>
+          {product.shopifyStatus ? (
+            <Badge variant="outline">
+              {shopifyStatusLabel(product.shopifyStatus)}
+            </Badge>
+          ) : null}
+          {product.vendor ? (
+            <Badge variant="outline">{product.vendor}</Badge>
+          ) : null}
         </div>
         <dl className="grid gap-x-10 gap-y-4 text-sm sm:grid-cols-2">
-          <Fact label="Collections" value={product.collections.map((collection: any) => collection.title).join(", ") || "None"} />
-          <Fact label="Shopify status" value={shopifyStatusLabel(product.shopifyStatus)} />
-          <Fact label="Last synced" value={product.lastSyncedAt ? new Date(product.lastSyncedAt).toLocaleString() : "Never"} />
-          <Fact label="Generated history" value={`${images.length} image records`} />
+          <Fact
+            label="Collections"
+            value={
+              product.collections
+                .map((collection: any) => collection.title)
+                .join(", ") || "None"
+            }
+          />
+          <Fact
+            label="Shopify status"
+            value={shopifyStatusLabel(product.shopifyStatus)}
+          />
+          <Fact
+            label="Last synced"
+            value={
+              product.lastSyncedAt
+                ? new Date(product.lastSyncedAt).toLocaleString()
+                : "Never"
+            }
+          />
+          <Fact
+            label="Generated history"
+            value={`${images.length} image records`}
+          />
         </dl>
       </section>
 
       <div className="sticky-actions">
-        <Card size="sm" className="flex-row items-center justify-between gap-3 rounded-lg p-3 shadow-md">
+        <Card
+          size="sm"
+          className="flex-row items-center justify-between gap-3 rounded-lg p-3 shadow-md"
+        >
           <div>
-            <p className="text-sm font-medium">{readyImages.length} generated image{readyImages.length === 1 ? "" : "s"} ready</p>
-            <p className="text-xs text-muted-foreground">Push is manual and requires confirmation.</p>
+            <p className="text-sm font-medium">
+              {readyImages.length} generated image
+              {readyImages.length === 1 ? "" : "s"} ready
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Only approved images are pushed.
+            </p>
           </div>
           <Button disabled={!readyImages.length} onClick={openPush}>
             <Send data-icon="inline-start" />
@@ -443,9 +681,12 @@ function ProductDetailPage() {
       <AlertDialog open={pushOpen} onOpenChange={setPushOpen}>
         <AlertDialogContent className="sm:max-w-md">
           <AlertDialogHeader>
-            <AlertDialogTitle>Push generated images to Shopify?</AlertDialogTitle>
+            <AlertDialogTitle>
+              Push generated images to Shopify?
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              Choose which images to upload. Existing Shopify media stays intact unless you explicitly enable replacement below.
+              Choose which approved images to upload. Rejected and unreviewed
+              images stay untouched.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="flex items-center justify-between">
@@ -454,9 +695,16 @@ function ProductDetailPage() {
             </span>
             <Label className="flex items-center gap-2 text-sm">
               <Checkbox
-                checked={readyImages.length > 0 && selectedPushIds.size === readyImages.length}
+                checked={
+                  readyImages.length > 0 &&
+                  selectedPushIds.size === readyImages.length
+                }
                 onCheckedChange={(checked) =>
-                  setSelectedPushIds(checked === true ? new Set(readyImages.map((image) => image._id)) : new Set())
+                  setSelectedPushIds(
+                    checked === true
+                      ? new Set(readyImages.map((image) => image._id))
+                      : new Set(),
+                  )
                 }
               />
               Select all
@@ -482,8 +730,10 @@ function ProductDetailPage() {
                 <div className="image-tile size-12 shrink-0 overflow-hidden rounded-md ring-1 ring-border">
                   <img src={image.storageUrl!} alt={image.imageType} />
                 </div>
-                <span className="min-w-0 flex-1 truncate text-sm font-medium">{image.imageType}</span>
-                {image.status === "uploaded" ? <Badge variant="outline">Pushed</Badge> : null}
+                <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                  {image.imageType}
+                </span>
+                <GeneratedImageStateBadge image={image} />
               </Label>
             ))}
           </div>
@@ -491,15 +741,23 @@ function ProductDetailPage() {
             <Checkbox
               className="mt-0.5"
               checked={replaceExisting}
-              onCheckedChange={(checked) => setReplaceExisting(checked === true)}
+              onCheckedChange={(checked) =>
+                setReplaceExisting(checked === true)
+              }
             />
             <span>Replace current Shopify gallery after upload</span>
           </Label>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={busy === "push"}>Cancel</AlertDialogCancel>
-            <Button disabled={busy === "push" || !selectedPushIds.size} onClick={() => void push()}>
+            <AlertDialogCancel disabled={busy === "push"}>
+              Cancel
+            </AlertDialogCancel>
+            <Button
+              disabled={busy === "push" || !selectedPushIds.size}
+              onClick={() => void push()}
+            >
               <BusyIcon busy={busy === "push"} />
-              Push {selectedPushIds.size} image{selectedPushIds.size === 1 ? "" : "s"}
+              Push {selectedPushIds.size} image
+              {selectedPushIds.size === 1 ? "" : "s"}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -507,22 +765,34 @@ function ProductDetailPage() {
 
       <Lightbox
         state={lightbox}
-        onIndexChange={(index) => setLightbox((current) => (current ? { ...current, index } : current))}
+        onIndexChange={(index) =>
+          setLightbox((current) => (current ? { ...current, index } : current))
+        }
         onClose={() => setLightbox(null)}
       />
 
-      <AlertDialog open={deleteTarget !== null} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+      <AlertDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+      >
         <AlertDialogContent className="sm:max-w-md">
           <AlertDialogHeader>
             <AlertDialogTitle>Delete this image everywhere?</AlertDialogTitle>
             <AlertDialogDescription>
-              The <strong>{deleteTarget?.imageType}</strong> image will be removed from storage, from Shopify if it was
-              pushed, and from this product's history. This cannot be undone.
+              The <strong>{deleteTarget?.imageType}</strong> image will be
+              removed from storage, from Shopify if it was pushed, and from this
+              product's history. This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={busy === "delete"}>Cancel</AlertDialogCancel>
-            <Button variant="destructive" disabled={busy === "delete"} onClick={() => void confirmDelete()}>
+            <AlertDialogCancel disabled={busy === "delete"}>
+              Cancel
+            </AlertDialogCancel>
+            <Button
+              variant="destructive"
+              disabled={busy === "delete"}
+              onClick={() => void confirmDelete()}
+            >
               <BusyIcon busy={busy === "delete"} />
               {busy !== "delete" ? <Trash2 data-icon="inline-start" /> : null}
               Delete everywhere
@@ -537,14 +807,19 @@ function ProductDetailPage() {
 function ProductNavigationButton({
   direction,
   product,
-  search
+  search,
 }: {
   direction: "previous" | "next";
   product: Doc<"products"> | null | undefined;
   search: ProductSearch;
 }) {
   const label = direction === "previous" ? "Previous" : "Next";
-  const icon = direction === "previous" ? <ChevronLeft data-icon="inline-start" /> : <ChevronRight data-icon="inline-end" />;
+  const icon =
+    direction === "previous" ? (
+      <ChevronLeft data-icon="inline-start" />
+    ) : (
+      <ChevronRight data-icon="inline-end" />
+    );
   if (!product) {
     return (
       <Button variant="outline" size="sm" disabled>
@@ -556,7 +831,12 @@ function ProductNavigationButton({
   }
   return (
     <Button variant="outline" size="sm" asChild>
-      <Link to="/products/$productId" params={{ productId: product._id }} search={search} title={product.title}>
+      <Link
+        to="/products/$productId"
+        params={{ productId: product._id }}
+        search={search}
+        title={product.title}
+      >
         {direction === "previous" ? icon : null}
         {label}
         {direction === "next" ? icon : null}
@@ -570,7 +850,7 @@ type LightboxImage = { url: string; label?: string };
 function Lightbox({
   state,
   onIndexChange,
-  onClose
+  onClose,
 }: {
   state: { images: LightboxImage[]; index: number } | null;
   onIndexChange: (index: number) => void;
@@ -587,7 +867,7 @@ function Lightbox({
       if (!images.length) return;
       onIndexChange((index + delta + images.length) % images.length);
     },
-    [index, images.length, onIndexChange]
+    [index, images.length, onIndexChange],
   );
 
   useEffect(() => {
@@ -601,14 +881,19 @@ function Lightbox({
   }, [open, go]);
 
   return (
-    <DialogPrimitive.Root open={open} onOpenChange={(next) => !next && onClose()}>
+    <DialogPrimitive.Root
+      open={open}
+      onOpenChange={(next) => !next && onClose()}
+    >
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm data-open:animate-in data-open:fade-in-0" />
         <DialogPrimitive.Content
           className="fixed inset-0 z-50 flex flex-col items-center justify-center p-4 outline-none sm:p-10"
           onClick={onClose}
         >
-          <DialogPrimitive.Title className="sr-only">{current?.label ?? "Image preview"}</DialogPrimitive.Title>
+          <DialogPrimitive.Title className="sr-only">
+            {current?.label ?? "Image preview"}
+          </DialogPrimitive.Title>
           {current ? (
             <img
               src={current.url}
@@ -673,7 +958,7 @@ function GenerateDialog({
   force,
   onForceChange,
   busy,
-  onGenerate
+  onGenerate,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -690,19 +975,31 @@ function GenerateDialog({
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Generate images</DialogTitle>
-          <DialogDescription>Select image types for this product. Each type maps to a prompt template.</DialogDescription>
+          <DialogDescription>
+            Select image types for this product. Each type maps to a prompt
+            template.
+          </DialogDescription>
         </DialogHeader>
         <div className="flex flex-wrap items-center gap-2">
           <Label className="flex h-8 items-center gap-2 rounded-lg border px-3">
-            <Checkbox checked={force} onCheckedChange={(checked) => onForceChange(checked === true)} />
+            <Checkbox
+              checked={force}
+              onCheckedChange={(checked) => onForceChange(checked === true)}
+            />
             Regenerate existing
           </Label>
         </div>
         <div className="grid gap-2">
           {types.map((type) => (
-            <Label key={type.imageType} className="flex min-h-11 justify-between rounded-lg border px-3">
+            <Label
+              key={type.imageType}
+              className="flex min-h-11 justify-between rounded-lg border px-3"
+            >
               <span>{type.label}</span>
-              <Checkbox checked={selectedTypes.has(type.imageType)} onCheckedChange={() => onToggle(type.imageType)} />
+              <Checkbox
+                checked={selectedTypes.has(type.imageType)}
+                onCheckedChange={() => onToggle(type.imageType)}
+              />
             </Label>
           ))}
         </div>
@@ -721,13 +1018,28 @@ function GenerateDialog({
 function Fact({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <dt className="text-xs font-medium uppercase text-muted-foreground">{label}</dt>
+      <dt className="text-xs font-medium uppercase text-muted-foreground">
+        {label}
+      </dt>
       <dd className="mt-1 break-words">{value}</dd>
     </div>
   );
 }
 
-type GalleryItem = { id?: string; url: string; label?: string; caption?: string; onDelete?: () => void };
+type GalleryItem = {
+  id?: string;
+  url: string;
+  label?: string;
+  caption?: string;
+  reviewStatus?: ReviewStatus;
+  statusLabel?: string;
+  statusTone?: "neutral" | "success" | "warning" | "danger";
+  reviewable?: boolean;
+  reviewing?: boolean;
+  onApprove?: () => void;
+  onReject?: () => void;
+  onDelete?: () => void;
+};
 
 type GalleryReorder = {
   dragId: string | null;
@@ -743,7 +1055,7 @@ function Gallery({
   items,
   emptyText,
   onZoom,
-  reorder
+  reorder,
 }: {
   title: string;
   description?: string;
@@ -752,7 +1064,10 @@ function Gallery({
   onZoom: (images: LightboxImage[], index: number) => void;
   reorder?: GalleryReorder;
 }) {
-  const lightboxImages = items.map((item) => ({ url: item.url, label: item.label }));
+  const lightboxImages = items.map((item) => ({
+    url: item.url,
+    label: item.label,
+  }));
   return (
     <Card className="min-h-72 rounded-lg">
       <CardHeader className="flex flex-row items-center justify-between">
@@ -763,7 +1078,9 @@ function Gallery({
         </div>
       </CardHeader>
       <CardContent>
-        {description ? <p className="mb-3 text-xs text-muted-foreground">{description}</p> : null}
+        {description ? (
+          <p className="mb-3 text-xs text-muted-foreground">{description}</p>
+        ) : null}
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
           {items.length ? (
             items.map((item, index) => {
@@ -790,9 +1107,13 @@ function Gallery({
                   }}
                   onDragEnd={() => reorder && void reorder.onCommit()}
                   data-dragging={reorder?.dragId === item.id ? "" : undefined}
-                  data-testid={reorder ? `shopify-image-${index + 1}` : undefined}
+                  data-testid={
+                    reorder ? `shopify-image-${index + 1}` : undefined
+                  }
                   className={`group relative overflow-hidden rounded-lg ring-1 ring-border transition data-dragging:opacity-50${
                     canDrag ? " cursor-grab active:cursor-grabbing" : ""
+                  }${item.reviewStatus === "rejected" ? " bg-muted opacity-70 grayscale" : ""}${
+                    item.reviewStatus === "approved" ? " ring-emerald-200" : ""
                   }`}
                 >
                   <button
@@ -800,7 +1121,11 @@ function Gallery({
                     onClick={() => onZoom(lightboxImages, index)}
                     className="image-tile w-full cursor-zoom-in rounded-none transition hover:opacity-90"
                   >
-                    <img src={item.url} alt={item.label ?? title} draggable={false} />
+                    <img
+                      src={item.url}
+                      alt={item.label ?? title}
+                      draggable={false}
+                    />
                   </button>
                   {reorder && item.id ? (
                     <span className="pointer-events-none absolute top-1.5 left-1.5 flex items-center gap-1 rounded-md bg-background/85 px-1.5 py-1 text-xs font-medium shadow-sm backdrop-blur-sm">
@@ -819,12 +1144,63 @@ function Gallery({
                       <Trash2 />
                     </Button>
                   ) : null}
-                  {item.caption ? <figcaption className="px-2 py-2 text-xs font-medium">{item.caption}</figcaption> : null}
+                  {item.caption || item.statusLabel || item.reviewable ? (
+                    <figcaption className="grid gap-2 px-2 py-2">
+                      <div className="flex min-w-0 items-center justify-between gap-2">
+                        {item.caption ? (
+                          <span className="truncate text-xs font-medium">
+                            {item.caption}
+                          </span>
+                        ) : null}
+                        {item.statusLabel ? (
+                          <StateBadge state={item.statusTone}>
+                            {item.statusLabel}
+                          </StateBadge>
+                        ) : null}
+                      </div>
+                      {item.reviewable ? (
+                        <div className="grid grid-cols-2 gap-1">
+                          <Button
+                            type="button"
+                            aria-label={`Approve ${item.caption ?? item.label ?? "image"}`}
+                            title="Approve"
+                            variant={
+                              item.reviewStatus === "approved"
+                                ? "default"
+                                : "outline"
+                            }
+                            size="icon-sm"
+                            disabled={item.reviewing}
+                            onClick={item.onApprove}
+                          >
+                            <Check />
+                          </Button>
+                          <Button
+                            type="button"
+                            aria-label={`Reject ${item.caption ?? item.label ?? "image"}`}
+                            title="Reject"
+                            variant={
+                              item.reviewStatus === "rejected"
+                                ? "destructive"
+                                : "outline"
+                            }
+                            size="icon-sm"
+                            disabled={item.reviewing}
+                            onClick={item.onReject}
+                          >
+                            <X />
+                          </Button>
+                        </div>
+                      ) : null}
+                    </figcaption>
+                  ) : null}
                 </figure>
               );
             })
           ) : (
-            <p className="col-span-2 text-sm text-muted-foreground">{emptyText}</p>
+            <p className="col-span-2 text-sm text-muted-foreground">
+              {emptyText}
+            </p>
           )}
         </div>
       </CardContent>
@@ -832,16 +1208,59 @@ function Gallery({
   );
 }
 
-function HistoryItem({ image, onDelete }: { image: Doc<"generatedImages">; onDelete: () => void }) {
-  const state = image.status === "failed" ? "danger" : image.status === "generated" || image.status === "uploaded" ? "success" : "warning";
-  const providerLabel = image.imageProvider === "gemini" ? "Nano Banana Pro" : "OpenAI";
+function generatedImageStateLabel(image: Doc<"generatedImages">) {
+  if (image.status === "failed") return "Error";
+  if (image.status === "uploaded") return "Pushed";
+  if (!isReviewable(image)) return image.status;
+  const reviewStatus = getReviewStatus(image);
+  if (reviewStatus === "approved") return "Approved";
+  if (reviewStatus === "rejected") return "Rejected";
+  return "To review";
+}
+
+function generatedImageStateTone(
+  image: Doc<"generatedImages">,
+): "neutral" | "success" | "warning" | "danger" {
+  if (image.status === "failed") return "danger";
+  if (image.status === "uploaded") return "success";
+  if (!isReviewable(image)) return "warning";
+  const reviewStatus = getReviewStatus(image);
+  if (reviewStatus === "approved") return "success";
+  if (reviewStatus === "rejected") return "danger";
+  return "warning";
+}
+
+function GeneratedImageStateBadge({
+  image,
+}: {
+  image: Doc<"generatedImages">;
+}) {
   return (
-    <AccordionItem value={image._id} className="rounded-lg border px-3 last:border-b">
+    <StateBadge state={generatedImageStateTone(image)}>
+      {generatedImageStateLabel(image)}
+    </StateBadge>
+  );
+}
+
+function HistoryItem({
+  image,
+  onDelete,
+}: {
+  image: Doc<"generatedImages">;
+  onDelete: () => void;
+}) {
+  const providerLabel =
+    image.imageProvider === "gemini" ? "Nano Banana Pro" : "OpenAI";
+  return (
+    <AccordionItem
+      value={image._id}
+      className="rounded-lg border px-3 last:border-b"
+    >
       <AccordionTrigger className="hover:no-underline">
         <span className="flex items-center gap-2">
           {image.imageType}
           <Separator orientation="vertical" className="h-4" />
-          <StateBadge state={state}>{image.status}</StateBadge>
+          <GeneratedImageStateBadge image={image} />
           <Badge variant="outline">{providerLabel}</Badge>
         </span>
       </AccordionTrigger>
@@ -853,13 +1272,25 @@ function HistoryItem({ image, onDelete }: { image: Doc<"generatedImages">; onDel
             </Alert>
           ) : null}
           {image.storageUrl ? (
-            <a className="break-all text-sm underline underline-offset-4" href={image.storageUrl} target="_blank" rel="noreferrer">
+            <a
+              className="break-all text-sm underline underline-offset-4"
+              href={image.storageUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
               {image.storageUrl}
             </a>
           ) : null}
-          <pre className="max-h-64 overflow-auto rounded-lg bg-muted p-3 text-xs whitespace-pre-wrap">{image.promptUsed}</pre>
+          <pre className="max-h-64 overflow-auto rounded-lg bg-muted p-3 text-xs whitespace-pre-wrap">
+            {image.promptUsed}
+          </pre>
           <div className="flex justify-end">
-            <Button variant="outline" size="sm" className="text-destructive hover:text-destructive" onClick={onDelete}>
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-destructive hover:text-destructive"
+              onClick={onDelete}
+            >
               <Trash2 data-icon="inline-start" />
               Delete everywhere
             </Button>

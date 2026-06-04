@@ -4,6 +4,8 @@ import { internalMutation, internalQuery, mutation, query, type MutationCtx } fr
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireUserId } from "./authz";
 import { renderPrompt } from "./lib";
+import { BATCH_PRICE_MULTIPLIER } from "./pricing";
+import { recalculateProductStatus } from "./products";
 
 type ImageProvider = "openai" | "gemini";
 type ExecutionMode = "realtime" | "batch";
@@ -28,6 +30,21 @@ function referenceImageUrls(product: Doc<"products">): string[] {
     ...product.currentShopifyImages.map((image) => (image as { url?: string } | null)?.url)
   ].filter((url): url is string => typeof url === "string" && url.length > 0);
   return Array.from(new Set(candidates));
+}
+
+function imageCostForJob(job: Doc<"generationJobs">, image: Doc<"generatedImages">) {
+  const cost = image.costUsd ?? 0;
+  if (job.executionMode === "batch" && image.costRateMultiplier == null) return cost * BATCH_PRICE_MULTIPLIER;
+  return cost;
+}
+
+function summarizeImageCosts(job: Doc<"generationJobs">, images: Doc<"generatedImages">[]) {
+  return {
+    generationCost: images.reduce((sum, image) => sum + imageCostForJob(job, image), 0),
+    inputTokens: images.reduce((sum, image) => sum + (image.inputTokens ?? 0), 0),
+    outputTokens: images.reduce((sum, image) => sum + (image.outputTokens ?? 0), 0),
+    pricedImageCount: images.filter((image) => image.costUsd != null).length
+  };
 }
 
 async function currentGenerationEngine(ctx: MutationCtx) {
@@ -59,6 +76,7 @@ export const list = query({
         );
         return {
           ...job,
+          costSummary: summarizeImageCosts(job, images),
           reviewSummary: {
             total: reviewable.length,
             pending: reviewable.filter((image) => (image.reviewStatus ?? "pending") === "pending").length,
@@ -79,11 +97,15 @@ export const costSummary = query({
     const jobs = await ctx.db.query("generationJobs").collect();
     const products = await ctx.db.query("products").collect();
     const jobById = new Map(jobs.map((job) => [job._id, job]));
-    const generationCost = images.reduce((sum, image) => sum + (image.costUsd ?? 0), 0);
+    const imageCost = (image: Doc<"generatedImages">) => {
+      const job = jobById.get(image.jobId);
+      return job ? imageCostForJob(job, image) : image.costUsd ?? 0;
+    };
+    const generationCost = images.reduce((sum, image) => sum + imageCost(image), 0);
     const realtimeImages = images.filter((image) => jobById.get(image.jobId)?.executionMode !== "batch");
     const batchImages = images.filter((image) => jobById.get(image.jobId)?.executionMode === "batch");
-    const realtimeGenerationCost = realtimeImages.reduce((sum, image) => sum + (image.costUsd ?? 0), 0);
-    const batchGenerationCost = batchImages.reduce((sum, image) => sum + (image.costUsd ?? 0), 0);
+    const realtimeGenerationCost = realtimeImages.reduce((sum, image) => sum + imageCost(image), 0);
+    const batchGenerationCost = batchImages.reduce((sum, image) => sum + imageCost(image), 0);
     const inputTokens = images.reduce((sum, image) => sum + (image.inputTokens ?? 0), 0);
     const outputTokens = images.reduce((sum, image) => sum + (image.outputTokens ?? 0), 0);
     const analysisCost = products.reduce((sum, product) => sum + (product.vibeCostUsd ?? 0), 0);
@@ -396,7 +418,8 @@ export const completeImage = internalMutation({
     providerResponseId: v.optional(v.union(v.string(), v.null())),
     inputTokens: v.optional(v.number()),
     outputTokens: v.optional(v.number()),
-    costUsd: v.optional(v.number())
+    costUsd: v.optional(v.number()),
+    costRateMultiplier: v.optional(v.number())
   },
   handler: async (ctx, args) => {
     const image = await ctx.db.get(args.imageId);
@@ -415,6 +438,7 @@ export const completeImage = internalMutation({
       inputTokens: args.inputTokens,
       outputTokens: args.outputTokens,
       costUsd: args.costUsd,
+      costRateMultiplier: args.costRateMultiplier,
       updatedAt: Date.now()
     });
     await ctx.db.patch(image.jobId, {
@@ -471,6 +495,7 @@ export const reviewImages = mutation({
     const userId = await requireUserId(ctx);
     const now = Date.now();
     let updated = 0;
+    const affectedProductIds = new Set<Id<"products">>();
     for (const imageId of Array.from(new Set(args.imageIds))) {
       const image = await ctx.db.get(imageId);
       if (!image || !image.storageUrl || (image.status !== "generated" && image.status !== "uploaded")) continue;
@@ -480,7 +505,14 @@ export const reviewImages = mutation({
         reviewedByUserId: userId,
         updatedAt: now
       });
+      affectedProductIds.add(image.productId);
       updated += 1;
+    }
+    for (const productId of affectedProductIds) {
+      await ctx.db.patch(productId, {
+        generationStatus: await recalculateProductStatus(ctx, productId),
+        updatedAt: now
+      });
     }
     return { updated };
   }
@@ -599,12 +631,8 @@ export const finishJobIfDone = internalMutation({
     });
 
     for (const productId of job.productIds as Id<"products">[]) {
-      const images = await ctx.db.query("generatedImages").withIndex("by_product", (q) => q.eq("productId", productId)).collect();
-      const relevant = images.filter((image) => image.jobId === args.jobId);
-      const anyFailed = relevant.some((image) => image.status === "failed");
-      const anyGenerated = relevant.some((image) => image.status === "generated" || image.status === "uploaded");
       await ctx.db.patch(productId, {
-        generationStatus: anyFailed && anyGenerated ? "partial" : anyFailed ? "failed" : "ready",
+        generationStatus: await recalculateProductStatus(ctx, productId),
         updatedAt: Date.now()
       });
     }

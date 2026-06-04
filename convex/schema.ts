@@ -141,6 +141,7 @@ export default defineSchema({
     inputTokens: v.optional(v.number()),
     outputTokens: v.optional(v.number()),
     costUsd: v.optional(v.number()),
+    costRateMultiplier: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number()
   })

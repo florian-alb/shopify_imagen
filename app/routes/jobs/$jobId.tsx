@@ -51,6 +51,7 @@ type JobDetail = {
 
 type ReviewStatus = "pending" | "approved" | "rejected";
 type ReviewFilter = "all" | ReviewStatus | "failed" | "pushed";
+type ReviewAggregateState = "none" | "pending" | "approved" | "partial" | "rejected";
 
 const reviewFilters: Array<{ value: ReviewFilter; label: string }> = [
   { value: "all", label: "All" },
@@ -76,6 +77,23 @@ function matchesFilter(image: Doc<"generatedImages">, filter: ReviewFilter) {
   return isReviewable(image) && getReviewStatus(image) === filter;
 }
 
+function getReviewAggregateState(total: number, pending: number, approved: number, rejected: number): ReviewAggregateState {
+  if (total === 0) return "none";
+  if (pending > 0) return "pending";
+  if (rejected === total) return "rejected";
+  if (approved === total) return "approved";
+  return "partial";
+}
+
+function reviewAggregateBadge(total: number, pending: number, approved: number, rejected: number) {
+  const state = getReviewAggregateState(total, pending, approved, rejected);
+  if (state === "pending") return { tone: "warning" as const, label: `${pending} to review` };
+  if (state === "approved") return { tone: "success" as const, label: "Approved" };
+  if (state === "partial") return { tone: "warning" as const, label: "Partial" };
+  if (state === "rejected") return { tone: "danger" as const, label: "Rejected" };
+  return { tone: "neutral" as const, label: "No review" };
+}
+
 function formatUsd(value: number) {
   return `$${value.toFixed(value < 1 ? 4 : 2)}`;
 }
@@ -86,6 +104,12 @@ function executionModeLabel(mode?: "realtime" | "batch") {
 
 function executionModeRateLabel(mode?: "realtime" | "batch") {
   return mode === "batch" ? "50% rate" : "Full rate";
+}
+
+function imageDisplayCost(image: Doc<"generatedImages">, job: Doc<"generationJobs">) {
+  const cost = image.costUsd ?? 0;
+  if (job.executionMode === "batch" && image.costRateMultiplier == null) return cost * 0.5;
+  return cost;
 }
 
 function getShopifyAdminUrl(product: Doc<"products">, storeHandle?: string | null) {
@@ -156,7 +180,8 @@ function JobDetailPage() {
   const pushProductCount = new Set(pushableImages.map((image) => image.productId)).size;
   const pct = job.totalTasks ? Math.round(((job.completedTasks + job.failedTasks) / job.totalTasks) * 100) : 0;
   const jobState = job.status === "completed" ? "success" : job.status === "failed" ? "danger" : "warning";
-  const jobCost = images.reduce((sum, image) => sum + (image.costUsd ?? 0), 0);
+  const jobCost = images.reduce((sum, image) => sum + imageDisplayCost(image, job), 0);
+  const reviewBadge = reviewAggregateBadge(reviewableImages.length, pendingCount, approvedCount, rejectedCount);
 
   async function handleForcePoll() {
     setPolling(true);
@@ -274,6 +299,7 @@ function JobDetailPage() {
             <StateBadge state={job.executionMode === "batch" ? "success" : "neutral"}>{executionModeLabel(job.executionMode)}</StateBadge>
             <StateBadge>{job.imageProvider === "gemini" ? "Nano Banana Pro" : "OpenAI"}</StateBadge>
             <StateBadge state={jobState}>{job.status}</StateBadge>
+            <StateBadge state={reviewBadge.tone}>{reviewBadge.label}</StateBadge>
             {job.status === "running" && job.batchId ? (
               <Button size="sm" variant="outline" onClick={handleForcePoll} disabled={polling}>
                 {polling ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Zap data-icon="inline-start" />}
@@ -380,7 +406,7 @@ function JobDetailPage() {
                 <p className="font-medium">{image.imageType}</p>
                 <p className="text-xs text-muted-foreground">
                   {image.status} · Created {new Date(image.createdAt).toLocaleString()}
-                  {image.costUsd != null ? ` · ${formatUsd(image.costUsd)} (${((image.inputTokens ?? 0) + (image.outputTokens ?? 0)).toLocaleString()} tok)` : ""}
+                  {image.costUsd != null ? ` · ${formatUsd(imageDisplayCost(image, job))} (${((image.inputTokens ?? 0) + (image.outputTokens ?? 0)).toLocaleString()} tok)` : ""}
                 </p>
                 {image.providerBatchId || image.providerRequestId || image.providerResponseId ? (
                   <dl className="mt-2 grid gap-1 text-xs text-muted-foreground">

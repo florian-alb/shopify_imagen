@@ -234,9 +234,19 @@ export async function recalculateProductStatus(ctx: { db: any }, productId: Id<"
     .query("generatedImages")
     .withIndex("by_product", (q: any) => q.eq("productId", productId))
     .collect();
-  if (images.some((image: Doc<"generatedImages">) => image.status === "failed")) return "partial";
+  if (!images.length) return "not_started";
   if (images.some((image: Doc<"generatedImages">) => image.status === "generating" || image.status === "queued")) return "generating";
-  if (images.length > 0 && images.every((image: Doc<"generatedImages">) => image.shopifyMediaId)) return "pushed";
-  if (images.length > 0 && images.every((image: Doc<"generatedImages">) => image.status === "generated" || image.status === "uploaded")) return "ready";
+  if (images.every((image: Doc<"generatedImages">) => image.status === "failed")) return "failed";
+  if (images.every((image: Doc<"generatedImages">) => image.shopifyMediaId)) return "pushed";
+
+  const reviewable = images.filter(
+    (image: Doc<"generatedImages">) => image.storageUrl && (image.status === "generated" || image.status === "uploaded")
+  );
+  if (reviewable.length) {
+    const anyRejected = reviewable.some((image: Doc<"generatedImages">) => image.reviewStatus === "rejected");
+    if (anyRejected || images.some((image: Doc<"generatedImages">) => image.status === "failed")) return "partial";
+    return "ready";
+  }
+  if (images.some((image: Doc<"generatedImages">) => image.status === "failed")) return "partial";
   return "not_started";
 }
