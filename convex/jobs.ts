@@ -320,6 +320,7 @@ export const create = mutation({
       mode: products.length === 1 ? "single" : "bulk",
       executionMode,
       batchId: null,
+      previousBatchIds: [],
       batchStatus: null,
       batchInputFileName: null,
       batchIngestionStartedAt: null,
@@ -549,11 +550,7 @@ export const pendingBatchJobs = internalQuery({
       .query("generationJobs")
       .withIndex("by_status", (q) => q.eq("status", "running"))
       .collect();
-    const queued = await ctx.db
-      .query("generationJobs")
-      .withIndex("by_status", (q) => q.eq("status", "queued"))
-      .collect();
-    return [...running, ...queued].filter((job) => job.executionMode === "batch");
+    return running.filter((job) => job.executionMode === "batch");
   },
 });
 
@@ -798,9 +795,13 @@ export const retry = mutation({
     const kept = images.filter(
       (img) => img.status === "generated" || img.status === "uploaded",
     );
+    const previousBatchIds = job.batchId
+      ? Array.from(new Set([...(job.previousBatchIds ?? []), job.batchId]))
+      : (job.previousBatchIds ?? []);
     await ctx.db.patch(args.jobId, {
       status: "queued",
       batchId: null,
+      previousBatchIds,
       batchStatus: null,
       batchInputFileName: null,
       batchIngestionStartedAt: null,

@@ -446,6 +446,18 @@ function geminiBatchStatus(payload: any): string | null {
   return typeof raw === "string" && raw ? raw : null;
 }
 
+function geminiResponsesFile(payload: any): string | null {
+  const raw =
+    payload?.response?.responsesFile ??
+    payload?.response?.responses_file ??
+    payload?.metadata?.output?.responsesFile ??
+    payload?.metadata?.output?.responses_file ??
+    payload?.dest?.fileName ??
+    payload?.dest?.file_name ??
+    null;
+  return typeof raw === "string" && raw ? raw : null;
+}
+
 function isGeminiSucceeded(status: string | null | undefined) {
   return status === "JOB_STATE_SUCCEEDED" || status === "BATCH_STATE_SUCCEEDED" || status === "SUCCEEDED";
 }
@@ -561,10 +573,14 @@ async function pollGeminiBatch(batchName: string, inputFileName?: string | null)
   const apiKey = env("GEMINI_API_KEY");
   if (!apiKey) throw new Error("GEMINI_API_KEY is required.");
   const batchUrl = `https://generativelanguage.googleapis.com/v1beta/${batchName}`;
-  const response = await fetch(`${batchUrl}?fields=name,state,metadata,done,error`, {
+  const response = await fetch(`${batchUrl}?fields=name,metadata,done,error`, {
     headers: { "x-goog-api-key": apiKey }
   });
-  const payload = (await response.json().catch(() => null)) as { done?: boolean; state?: string; metadata?: { state?: string }; error?: { message?: string } } | null;
+  const payload = (await response.json().catch(() => null)) as {
+    done?: boolean;
+    metadata?: { state?: string; batchState?: string; output?: { responsesFile?: string; responses_file?: string } };
+    error?: { message?: string };
+  } | null;
   const batchStatus = geminiBatchStatus(payload);
   if (!response.ok) {
     if (isTransientPollStatus(response.status)) {
@@ -581,10 +597,15 @@ async function pollGeminiBatch(batchName: string, inputFileName?: string | null)
   // file. Jobs submitted by older app versions used inline responses; preserve
   // a streaming recovery path for them without loading the operation JSON.
   if (!inputFileName) return { state: "done", source: { kind: "gemini-inline", batchName }, batchStatus };
-  const details = await fetch(`${batchUrl}?fields=response,dest,error`, {
+  const metadataFileName = geminiResponsesFile(payload);
+  if (metadataFileName) return { state: "done", source: { kind: "gemini-file", fileName: metadataFileName }, batchStatus };
+  const details = await fetch(`${batchUrl}?fields=response,error`, {
     headers: { "x-goog-api-key": apiKey }
   });
-  const detailsPayload = (await details.json().catch(() => null)) as { response?: { responsesFile?: string }; dest?: { fileName?: string; file_name?: string }; error?: { message?: string } } | null;
+  const detailsPayload = (await details.json().catch(() => null)) as {
+    response?: { responsesFile?: string; responses_file?: string };
+    error?: { message?: string };
+  } | null;
   if (!details.ok) {
     if (isTransientPollStatus(details.status)) {
       throw new Error(`Gemini batch result lookup failed (${details.status}): ${detailsPayload?.error?.message ?? "unknown error."}`);
@@ -592,7 +613,7 @@ async function pollGeminiBatch(batchName: string, inputFileName?: string | null)
     return { state: "failed", error: `Gemini batch result lookup failed (${details.status}): ${detailsPayload?.error?.message ?? "unknown error."}`, batchStatus };
   }
   if (detailsPayload?.error) return { state: "failed", error: `Gemini batch result lookup failed (${details.status}): ${detailsPayload.error.message ?? "unknown error."}`, batchStatus };
-  const fileName = detailsPayload?.response?.responsesFile ?? detailsPayload?.dest?.fileName ?? detailsPayload?.dest?.file_name;
+  const fileName = geminiResponsesFile(detailsPayload);
   if (!fileName) return { state: "failed", error: "Gemini batch completed without a response file.", batchStatus };
   return { state: "done", source: { kind: "gemini-file", fileName }, batchStatus };
 }
@@ -1217,17 +1238,11 @@ export const pollJob = action({
   args: { jobId: v.id("generationJobs") },
   handler: async (ctx, args): Promise<ManualPollResult> => {
     await requireUserId(ctx);
-    let job = (await ctx.runQuery(internal.jobs.getJobInternal, { jobId: args.jobId })) as Doc<"generationJobs"> | null;
+    const job = (await ctx.runQuery(internal.jobs.getJobInternal, { jobId: args.jobId })) as Doc<"generationJobs"> | null;
     if (!job) throw new Error("Job not found.");
     if (job.executionMode !== "batch") throw new Error("Job is not a batch job.");
-    if (job.status !== "running" && job.status !== "queued") throw new Error("Job is not active.");
+    if (job.status !== "running") throw new Error("Job is not running.");
     if (!job.batchId) throw new Error("Job has no batch ID yet.");
-    if (job.status === "queued") {
-      const markedRunning = await ctx.runMutation(internal.jobs.markRunning, { jobId: job._id });
-      if (!markedRunning) throw new Error("Job is not active.");
-      job = (await ctx.runQuery(internal.jobs.getJobInternal, { jobId: args.jobId })) as Doc<"generationJobs"> | null;
-      if (!job) throw new Error("Job not found.");
-    }
     const batchId = job.batchId;
     if (!batchId) throw new Error("Job has no batch ID yet.");
     const settings = (await ctx.runQuery(internal.settings.internalList, {})) as Record<string, unknown>;

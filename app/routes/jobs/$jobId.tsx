@@ -183,7 +183,7 @@ function JobDetailPage() {
   const pct = job.totalTasks ? Math.round(((job.completedTasks + job.failedTasks) / job.totalTasks) * 100) : 0;
   const jobState = job.status === "completed" ? "success" : job.status === "failed" ? "danger" : "warning";
   const canCancelJob = job.status === "queued" || job.status === "running";
-  const canForcePoll = job.executionMode === "batch" && Boolean(job.batchId) && (job.status === "queued" || job.status === "running");
+  const canForcePoll = job.executionMode === "batch" && Boolean(job.batchId) && job.status === "running";
   const jobCost = images.reduce((sum, image) => sum + imageDisplayCost(image, job), 0);
   const reviewBadge = reviewAggregateBadge(reviewableImages.length, pendingCount, approvedCount, rejectedCount);
 

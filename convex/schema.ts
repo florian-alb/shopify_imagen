@@ -99,6 +99,7 @@ export default defineSchema({
     mode: v.union(v.literal("single"), v.literal("bulk")),
     executionMode: v.optional(v.union(v.literal("realtime"), v.literal("batch"))),
     batchId: v.optional(v.union(v.string(), v.null())),
+    previousBatchIds: v.optional(v.array(v.string())),
     batchStatus: v.optional(v.union(v.string(), v.null())),
     batchInputFileName: v.optional(v.union(v.string(), v.null())),
     batchIngestionStartedAt: v.optional(v.union(v.number(), v.null())),
