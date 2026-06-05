@@ -74,8 +74,6 @@ type ProductPageResult = {
   hasNext: boolean;
 };
 
-const PAGE_SIZE = 20;
-
 function ProductsPage() {
   const search = Route.useSearch();
   const [selected, setSelected] = useState<Set<Id<"products">>>(new Set());
@@ -83,6 +81,7 @@ function ProductsPage() {
   const [syncing, setSyncing] = useState(false);
   const [creatingJob, setCreatingJob] = useState(false);
   const [offset, setOffset] = useState(0);
+  const [pageSize, setPageSize] = useState(20);
   const navigate = useNavigate();
 
   const productListArgs = useMemo(() => productFilterArgs(search), [search.collection, search.q, search.shopifyStatus, search.status, search.type]);
@@ -91,7 +90,7 @@ function ProductsPage() {
     {
       ...productListArgs,
       offset,
-      limit: PAGE_SIZE,
+      limit: pageSize,
     },
   ) as ProductPageResult | undefined;
   const products = productPage?.page ?? [];
@@ -312,11 +311,12 @@ function ProductsPage() {
 
       <NumberedPaginator
         offset={offset}
-        pageSize={PAGE_SIZE}
+        pageSize={pageSize}
         hasPrevious={productPage?.hasPrevious ?? false}
         hasNext={productPage?.hasNext ?? false}
         loading={!loaded}
         onOffsetChange={setOffset}
+        onPageSizeChange={setPageSize}
       />
 
       {selected.size ? (

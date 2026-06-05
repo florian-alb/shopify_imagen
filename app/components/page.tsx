@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import { LoaderCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -130,6 +130,7 @@ export function NumberedPaginator({
   hasNext,
   loading = false,
   onOffsetChange,
+  onPageSizeChange,
 }: {
   offset: number;
   pageSize: number;
@@ -137,6 +138,7 @@ export function NumberedPaginator({
   hasNext: boolean;
   loading?: boolean;
   onOffsetChange: (offset: number) => void;
+  onPageSizeChange?: (pageSize: number) => void;
 }) {
   const currentPage = Math.floor(offset / pageSize) + 1;
   const pages = Array.from(
@@ -160,30 +162,34 @@ export function NumberedPaginator({
       event.preventDefault();
       if (!loading) onOffsetChange(Math.max(0, nextOffset));
     };
-  const setOffset = (value: string) => {
-    const parsed = Number.parseInt(value, 10);
-    if (Number.isFinite(parsed)) onOffsetChange(Math.max(0, parsed));
+  const changePageSize = (value: string) => {
+    const size = Number.parseInt(value, 10);
+    if (Number.isFinite(size)) {
+      onOffsetChange(0);
+      onPageSizeChange!(size);
+    }
   };
 
   return (
     <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
-      <Field orientation="horizontal" className="w-fit">
-        <FieldLabel htmlFor="select-rows-per-page">Rows per page</FieldLabel>
-        <Select defaultValue="20" onValueChange={(value) => setOffset(value)}>
-          <SelectTrigger className="w-20" id="select-rows-per-page">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent align="start">
-            <SelectGroup>
-              <SelectItem value="10">10</SelectItem>
-              <SelectItem value="20">20</SelectItem>
-              <SelectItem value="25">25</SelectItem>
-              <SelectItem value="50">50</SelectItem>
-              <SelectItem value="100">100</SelectItem>
-            </SelectGroup>
-          </SelectContent>
-        </Select>
-      </Field>
+      {onPageSizeChange ? (
+        <Field orientation="horizontal" className="w-fit">
+          <FieldLabel htmlFor="select-rows-per-page">Rows per page</FieldLabel>
+          <Select value={String(pageSize)} onValueChange={changePageSize}>
+            <SelectTrigger className="w-20" id="select-rows-per-page">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent align="start">
+              <SelectGroup>
+                <SelectItem value="10">10</SelectItem>
+                <SelectItem value="25">25</SelectItem>
+                <SelectItem value="50">50</SelectItem>
+                <SelectItem value="100">100</SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </Field>
+      ) : null}
 
       <Pagination className="mx-0 w-auto">
         <PaginationContent>
@@ -199,27 +205,29 @@ export function NumberedPaginator({
               onClick={offsetClick(offset - pageSize)}
             />
           </PaginationItem>
-          {pages.length > 2 && currentPage > 3 ? (
-            <PaginationItem>
-              <PaginationEllipsis />
-            </PaginationItem>
-          ) : null}
-          {pages.map((page) => (
-            <PaginationItem key={page}>
-              <PaginationLink
-                href="#"
-                isActive={page === currentPage}
-                aria-disabled={loading}
-                className={
-                  loading ? "pointer-events-none opacity-50" : undefined
-                }
-                onClick={pageClick(page)}
-              >
-                {page}
-              </PaginationLink>
-            </PaginationItem>
+          {pages.map((page, i) => (
+            <Fragment key={page}>
+              {i > 0 && page > pages[i - 1] + 1 ? (
+                <PaginationItem>
+                  <PaginationEllipsis />
+                </PaginationItem>
+              ) : null}
+              <PaginationItem>
+                <PaginationLink
+                  href="#"
+                  isActive={page === currentPage}
+                  aria-disabled={loading}
+                  className={
+                    loading ? "pointer-events-none opacity-50" : undefined
+                  }
+                  onClick={pageClick(page)}
+                >
+                  {page}
+                </PaginationLink>
+              </PaginationItem>
+            </Fragment>
           ))}
-          {hasNext && pages[pages.length - 1] > currentPage + 1 ? (
+          {hasNext ? (
             <PaginationItem>
               <PaginationEllipsis />
             </PaginationItem>

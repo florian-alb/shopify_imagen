@@ -60,8 +60,6 @@ const jobStatuses = ["queued", "running", "completed", "failed", "cancelled"] as
 const executionModes = ["realtime", "batch"] as const;
 const providers = ["openai", "gemini"] as const;
 const reviewFilters = ["to-review", "approved", "partial", "rejected", "no-review"] as const;
-const PAGE_SIZE = 20;
-
 export const Route = createFileRoute("/jobs/")({
   validateSearch: validateJobSearch,
   component: JobsPage
@@ -113,6 +111,7 @@ function JobsPage() {
   const search = Route.useSearch();
   const navigate = useNavigate();
   const [offset, setOffset] = useState(0);
+  const [pageSize, setPageSize] = useState(20);
   const jobsListArgs = useMemo(() => ({
     status: search.status,
     executionMode: search.executionMode,
@@ -124,7 +123,7 @@ function JobsPage() {
     {
       ...jobsListArgs,
       offset,
-      limit: PAGE_SIZE,
+      limit: pageSize,
     },
   ) as JobsPageResult | undefined;
   const jobs = jobsPage?.page ?? [];
@@ -320,11 +319,12 @@ function JobsPage() {
           )}
           <NumberedPaginator
             offset={offset}
-            pageSize={PAGE_SIZE}
+            pageSize={pageSize}
             hasPrevious={jobsPage?.hasPrevious ?? false}
             hasNext={jobsPage?.hasNext ?? false}
             loading={jobsPage === undefined}
             onOffsetChange={setOffset}
+            onPageSizeChange={setPageSize}
           />
         </>
       )}
