@@ -9,6 +9,7 @@ const productGenerationStatus = v.union(
   v.literal("partial"),
   v.literal("ready"),
   v.literal("pushed"),
+  v.literal("canceled"),
   v.literal("failed")
 );
 
@@ -28,21 +29,32 @@ type ProductFilters = {
   generationStatus?: Doc<"products">["generationStatus"];
 };
 
+function calculateProductStatus(images: Doc<"generatedImages">[]): Doc<"products">["generationStatus"] {
+  if (!images.length) return "not_started";
+  if (images.some((image) => image.status === "generating" || image.status === "queued")) return "generating";
+  const hasGeneratedImage = images.some(
+    (image) => image.storageUrl && (image.status === "generated" || image.status === "uploaded")
+  );
+  if (!hasGeneratedImage && images.some((image) => image.status === "canceled")) return "canceled";
+  if (images.every((image) => image.status === "failed")) return "failed";
+
+  const reviewable = images.filter(
+    (image) => image.storageUrl && (image.status === "generated" || image.status === "uploaded")
+  );
+  if (reviewable.length) {
+    const allReviewablePushed = reviewable.every((image) => image.status === "uploaded" && image.shopifyMediaId);
+    if (allReviewablePushed) return "pushed";
+    const anyRejected = reviewable.some((image) => image.reviewStatus === "rejected");
+    if (anyRejected || images.some((image) => image.status === "failed")) return "partial";
+    return "ready";
+  }
+  if (images.some((image) => image.status === "failed")) return "partial";
+  return "not_started";
+}
+
 async function filteredProducts(ctx: { db: any }, args: ProductFilters) {
   let products: Doc<"products">[];
-  if (args.generationStatus && args.productType) {
-    products = await ctx.db
-      .query("products")
-      .withIndex("by_generation_status_and_product_type", (q: any) =>
-        q.eq("generationStatus", args.generationStatus).eq("productType", args.productType)
-      )
-      .collect();
-  } else if (args.generationStatus) {
-    products = await ctx.db
-      .query("products")
-      .withIndex("by_generation_status", (q: any) => q.eq("generationStatus", args.generationStatus))
-      .collect();
-  } else if (args.productType) {
+  if (args.productType) {
     products = await ctx.db
       .query("products")
       .withIndex("by_product_type", (q: any) => q.eq("productType", args.productType))
@@ -52,7 +64,7 @@ async function filteredProducts(ctx: { db: any }, args: ProductFilters) {
   }
 
   const needle = (args.search ?? "").trim().toLowerCase();
-  return products
+  let filtered = products
     .filter((product) => {
       const matchesSearch =
         !needle ||
@@ -67,6 +79,23 @@ async function filteredProducts(ctx: { db: any }, args: ProductFilters) {
       return matchesSearch && matchesCollection && matchesShopifyStatus;
     })
     .sort((a, b) => b._creationTime - a._creationTime);
+
+  if (args.generationStatus) {
+    const productsWithStatus = await Promise.all(
+      filtered.map(async (product) => {
+        const images = await ctx.db
+          .query("generatedImages")
+          .withIndex("by_product", (q: any) => q.eq("productId", product._id))
+          .collect();
+        return { product, generationStatus: calculateProductStatus(images) };
+      })
+    );
+    filtered = productsWithStatus
+      .filter((item) => item.generationStatus === args.generationStatus)
+      .map((item) => item.product);
+  }
+
+  return filtered;
 }
 
 export const list = query({
@@ -82,6 +111,7 @@ export const list = query({
           .collect();
         return {
           ...product,
+          generationStatus: calculateProductStatus(images),
           generatedImageCount: images.filter((image) => image.storageUrl).length
         };
       })
@@ -151,7 +181,7 @@ export const getWithImages = query({
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
       .order("desc")
       .collect();
-    return { product, images };
+    return { product: { ...product, generationStatus: calculateProductStatus(images) }, images };
   }
 });
 
@@ -234,19 +264,5 @@ export async function recalculateProductStatus(ctx: { db: any }, productId: Id<"
     .query("generatedImages")
     .withIndex("by_product", (q: any) => q.eq("productId", productId))
     .collect();
-  if (!images.length) return "not_started";
-  if (images.some((image: Doc<"generatedImages">) => image.status === "generating" || image.status === "queued")) return "generating";
-  if (images.every((image: Doc<"generatedImages">) => image.status === "failed")) return "failed";
-  if (images.every((image: Doc<"generatedImages">) => image.shopifyMediaId)) return "pushed";
-
-  const reviewable = images.filter(
-    (image: Doc<"generatedImages">) => image.storageUrl && (image.status === "generated" || image.status === "uploaded")
-  );
-  if (reviewable.length) {
-    const anyRejected = reviewable.some((image: Doc<"generatedImages">) => image.reviewStatus === "rejected");
-    if (anyRejected || images.some((image: Doc<"generatedImages">) => image.status === "failed")) return "partial";
-    return "ready";
-  }
-  if (images.some((image: Doc<"generatedImages">) => image.status === "failed")) return "partial";
-  return "not_started";
+  return calculateProductStatus(images);
 }

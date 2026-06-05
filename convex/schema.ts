@@ -8,6 +8,7 @@ const generationStatus = v.union(
   v.literal("partial"),
   v.literal("ready"),
   v.literal("pushed"),
+  v.literal("canceled"),
   v.literal("failed")
 );
 
@@ -24,6 +25,7 @@ const imageStatus = v.union(
   v.literal("generating"),
   v.literal("generated"),
   v.literal("uploaded"),
+  v.literal("canceled"),
   v.literal("failed")
 );
 
@@ -97,6 +99,7 @@ export default defineSchema({
     mode: v.union(v.literal("single"), v.literal("bulk")),
     executionMode: v.optional(v.union(v.literal("realtime"), v.literal("batch"))),
     batchId: v.optional(v.union(v.string(), v.null())),
+    batchStatus: v.optional(v.union(v.string(), v.null())),
     batchInputFileName: v.optional(v.union(v.string(), v.null())),
     batchIngestionStartedAt: v.optional(v.union(v.number(), v.null())),
     batchResultOffset: v.optional(v.number()),

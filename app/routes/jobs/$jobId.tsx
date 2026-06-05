@@ -128,9 +128,11 @@ function JobDetailPage() {
   const reviewImages = useMutation(api.jobs.reviewImages);
   const createJob = useMutation(api.jobs.create);
   const pollJob = useAction(api.generation.pollJob);
+  const cancelJob = useAction(api.generation.cancelJob);
   const pushImages = useAction(api.shopify.pushProductImages);
   const [filter, setFilter] = useState<ReviewFilter>("all");
   const [polling, setPolling] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [reviewing, setReviewing] = useState(false);
   const [regeneratingId, setRegeneratingId] = useState<Id<"generatedImages"> | null>(null);
   const [regenerationTarget, setRegenerationTarget] = useState<Doc<"generatedImages"> | null>(null);
@@ -180,6 +182,7 @@ function JobDetailPage() {
   const pushProductCount = new Set(pushableImages.map((image) => image.productId)).size;
   const pct = job.totalTasks ? Math.round(((job.completedTasks + job.failedTasks) / job.totalTasks) * 100) : 0;
   const jobState = job.status === "completed" ? "success" : job.status === "failed" ? "danger" : "warning";
+  const canCancelJob = job.status === "queued" || job.status === "running";
   const jobCost = images.reduce((sum, image) => sum + imageDisplayCost(image, job), 0);
   const reviewBadge = reviewAggregateBadge(reviewableImages.length, pendingCount, approvedCount, rejectedCount);
 
@@ -188,11 +191,13 @@ function JobDetailPage() {
     try {
       const result = await pollJob({ jobId: job._id });
       if (result.state === "pending") {
-        toast.info("Batch still processing on Gemini. No results yet.");
+        toast.info(`Batch still processing${result.batchStatus ? ` (${result.batchStatus})` : ""}. No results yet.`);
       } else if (result.state === "busy") {
         toast.info("Batch results are already being ingested.");
       } else if (result.state === "failed") {
         toast.error(`Batch failed: ${result.error}`);
+      } else if (result.state === "cancelled") {
+        toast.info("Batch cancelled.");
       } else if (result.state === "partial") {
         toast.success(`Progress: ${result.ingested} image(s) ingested, ${result.failed} failed. The next chunk will continue automatically.`);
       } else {
@@ -202,6 +207,18 @@ function JobDetailPage() {
       toast.error(err instanceof Error ? err.message : String(err));
     } finally {
       setPolling(false);
+    }
+  }
+
+  async function handleCancelJob() {
+    setCancelling(true);
+    try {
+      const result = await cancelJob({ jobId: job._id });
+      toast.info(`Job cancelled${result.batchStatus ? ` (${result.batchStatus})` : ""}.`);
+    } catch (error) {
+      toast.error("Cancel failed", { description: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setCancelling(false);
     }
   }
 
@@ -299,11 +316,18 @@ function JobDetailPage() {
             <StateBadge state={job.executionMode === "batch" ? "success" : "neutral"}>{executionModeLabel(job.executionMode)}</StateBadge>
             <StateBadge>{job.imageProvider === "gemini" ? "Nano Banana Pro" : "OpenAI"}</StateBadge>
             <StateBadge state={jobState}>{job.status}</StateBadge>
+            {job.batchStatus ? <StateBadge>{job.batchStatus}</StateBadge> : null}
             <StateBadge state={reviewBadge.tone}>{reviewBadge.label}</StateBadge>
             {job.status === "running" && job.batchId ? (
               <Button size="sm" variant="outline" onClick={handleForcePoll} disabled={polling}>
                 {polling ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Zap data-icon="inline-start" />}
                 Force poll
+              </Button>
+            ) : null}
+            {canCancelJob ? (
+              <Button size="sm" variant="outline" onClick={handleCancelJob} disabled={cancelling}>
+                {cancelling ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <X data-icon="inline-start" />}
+                Cancel
               </Button>
             ) : null}
             {job.status === "failed" || job.status === "cancelled" ? (
@@ -739,6 +763,7 @@ function ReviewTile({
 
 function ImageStateBadge({ image }: { image: Doc<"generatedImages"> }) {
   if (image.status === "failed") return <StateBadge state="danger">Error</StateBadge>;
+  if (image.status === "canceled") return <StateBadge state="danger">Canceled</StateBadge>;
   if (image.status === "uploaded") return <StateBadge state="success">Pushed</StateBadge>;
   if (!isReviewable(image)) return <StateBadge state="warning">{image.status}</StateBadge>;
   const reviewStatus = getReviewStatus(image);

@@ -425,18 +425,50 @@ type BatchResultSource =
   | { kind: "gemini-file"; fileName: string }
   | { kind: "gemini-inline"; batchName: string };
 type BatchPollResult =
-  | { state: "pending" }
-  | { state: "done"; source: BatchResultSource }
-  | { state: "failed"; error: string };
+  | { state: "pending"; batchStatus?: string | null }
+  | { state: "done"; source: BatchResultSource; batchStatus?: string | null }
+  | { state: "failed"; error: string; batchStatus?: string | null }
+  | { state: "cancelled"; batchStatus?: string | null };
 type TerminalBatchResult =
   | { state: "busy" }
   | { state: "failed"; error: string }
+  | { state: "cancelled" }
   | ({ state: "partial" } & BatchIngestCounts)
   | ({ state: "done" } & BatchIngestCounts);
-type ManualPollResult = { state: "pending" } | TerminalBatchResult;
+type ManualPollResult = { state: "pending"; batchStatus?: string | null } | TerminalBatchResult;
 
 function isTransientPollStatus(status: number): boolean {
   return status === 408 || status === 409 || status === 429 || status >= 500;
+}
+
+function geminiBatchStatus(payload: any): string | null {
+  const raw = payload?.state ?? payload?.metadata?.state ?? payload?.metadata?.batchState ?? null;
+  return typeof raw === "string" && raw ? raw : null;
+}
+
+function isGeminiSucceeded(status: string | null | undefined) {
+  return status === "JOB_STATE_SUCCEEDED" || status === "BATCH_STATE_SUCCEEDED" || status === "SUCCEEDED";
+}
+
+function isGeminiFailed(status: string | null | undefined) {
+  return status === "JOB_STATE_FAILED" || status === "BATCH_STATE_FAILED" || status === "JOB_STATE_EXPIRED" || status === "BATCH_STATE_EXPIRED";
+}
+
+function isGeminiCancelled(status: string | null | undefined) {
+  return status === "JOB_STATE_CANCELLED" || status === "BATCH_STATE_CANCELLED" || status === "CANCELLED" || status === "CANCELED";
+}
+
+function isCancellableBatchStatus(provider: "gemini" | "openai", status: string | null | undefined) {
+  if (!status) return true;
+  if (provider === "openai") return ["validating", "in_progress", "finalizing"].includes(status);
+  return [
+    "JOB_STATE_PENDING",
+    "BATCH_STATE_PENDING",
+    "JOB_STATE_RUNNING",
+    "BATCH_STATE_RUNNING",
+    "PENDING",
+    "RUNNING"
+  ].includes(status);
 }
 
 async function uploadGeminiFile(args: { apiKey: string; body: string; displayName: string }) {
@@ -517,49 +549,52 @@ async function submitGeminiBatch(args: { images: BatchImage[]; settings: Record<
       })
     }
   );
-  const payload = (await response.json().catch(() => null)) as { name?: string; error?: { message?: string } } | null;
+  const payload = (await response.json().catch(() => null)) as { name?: string; state?: string; metadata?: { state?: string }; error?: { message?: string } } | null;
   if (!response.ok || !payload?.name) {
     await deleteGeminiFile(inputFileName).catch(() => undefined);
     throw new Error(`Gemini batch submission failed (${response.status}): ${payload?.error?.message ?? "no batch name returned."}`);
   }
-  return { batchId: payload.name, inputFileName }; // e.g. "batches/123456789"
+  return { batchId: payload.name, inputFileName, batchStatus: geminiBatchStatus(payload) }; // e.g. "batches/123456789"
 }
 
 async function pollGeminiBatch(batchName: string, inputFileName?: string | null): Promise<BatchPollResult> {
   const apiKey = env("GEMINI_API_KEY");
   if (!apiKey) throw new Error("GEMINI_API_KEY is required.");
   const batchUrl = `https://generativelanguage.googleapis.com/v1beta/${batchName}`;
-  const response = await fetch(`${batchUrl}?fields=name,done,error`, {
+  const response = await fetch(`${batchUrl}?fields=name,state,metadata,done,error`, {
     headers: { "x-goog-api-key": apiKey }
   });
-  const payload = (await response.json().catch(() => null)) as { done?: boolean; error?: { message?: string } } | null;
+  const payload = (await response.json().catch(() => null)) as { done?: boolean; state?: string; metadata?: { state?: string }; error?: { message?: string } } | null;
+  const batchStatus = geminiBatchStatus(payload);
   if (!response.ok) {
     if (isTransientPollStatus(response.status)) {
       throw new Error(`Gemini batch poll failed (${response.status}): ${payload?.error?.message ?? "unknown error."}`);
     }
-    return { state: "failed", error: `Gemini batch poll failed (${response.status}): ${payload?.error?.message ?? "unknown error."}` };
+    return { state: "failed", error: `Gemini batch poll failed (${response.status}): ${payload?.error?.message ?? "unknown error."}`, batchStatus };
   }
-  if (payload?.error) return { state: "failed", error: `Gemini batch failed: ${payload.error.message ?? "unknown error."}` };
-  if (!payload?.done) return { state: "pending" };
+  if (isGeminiCancelled(batchStatus)) return { state: "cancelled", batchStatus };
+  if (payload?.error) return { state: "failed", error: `Gemini batch failed: ${payload.error.message ?? "unknown error."}`, batchStatus };
+  if (isGeminiFailed(batchStatus)) return { state: "failed", error: `Gemini batch ${batchStatus}.`, batchStatus };
+  if (!payload?.done && !isGeminiSucceeded(batchStatus)) return { state: "pending", batchStatus };
 
   // New jobs are submitted through File API and return a small JSONL result
   // file. Jobs submitted by older app versions used inline responses; preserve
   // a streaming recovery path for them without loading the operation JSON.
-  if (!inputFileName) return { state: "done", source: { kind: "gemini-inline", batchName } };
-  const details = await fetch(`${batchUrl}?fields=response,error`, {
+  if (!inputFileName) return { state: "done", source: { kind: "gemini-inline", batchName }, batchStatus };
+  const details = await fetch(`${batchUrl}?fields=response,dest,error`, {
     headers: { "x-goog-api-key": apiKey }
   });
-  const detailsPayload = (await details.json().catch(() => null)) as { response?: { responsesFile?: string }; error?: { message?: string } } | null;
+  const detailsPayload = (await details.json().catch(() => null)) as { response?: { responsesFile?: string }; dest?: { fileName?: string; file_name?: string }; error?: { message?: string } } | null;
   if (!details.ok) {
     if (isTransientPollStatus(details.status)) {
       throw new Error(`Gemini batch result lookup failed (${details.status}): ${detailsPayload?.error?.message ?? "unknown error."}`);
     }
-    return { state: "failed", error: `Gemini batch result lookup failed (${details.status}): ${detailsPayload?.error?.message ?? "unknown error."}` };
+    return { state: "failed", error: `Gemini batch result lookup failed (${details.status}): ${detailsPayload?.error?.message ?? "unknown error."}`, batchStatus };
   }
-  if (detailsPayload?.error) return { state: "failed", error: `Gemini batch result lookup failed (${details.status}): ${detailsPayload.error.message ?? "unknown error."}` };
-  const fileName = detailsPayload?.response?.responsesFile;
-  if (!fileName) return { state: "failed", error: "Gemini batch completed without a response file." };
-  return { state: "done", source: { kind: "gemini-file", fileName } };
+  if (detailsPayload?.error) return { state: "failed", error: `Gemini batch result lookup failed (${details.status}): ${detailsPayload.error.message ?? "unknown error."}`, batchStatus };
+  const fileName = detailsPayload?.response?.responsesFile ?? detailsPayload?.dest?.fileName ?? detailsPayload?.dest?.file_name;
+  if (!fileName) return { state: "failed", error: "Gemini batch completed without a response file.", batchStatus };
+  return { state: "done", source: { kind: "gemini-file", fileName }, batchStatus };
 }
 
 async function submitOpenAiBatch(args: { images: BatchImage[]; settings: Record<string, unknown>; model: string }) {
@@ -620,11 +655,11 @@ async function submitOpenAiBatch(args: { images: BatchImage[]; settings: Record<
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({ input_file_id: filePayload.id, endpoint: "/v1/images/edits", completion_window: "24h" })
   });
-  const batchPayload = (await batchResponse.json().catch(() => null)) as { id?: string; error?: { message?: string } } | null;
+  const batchPayload = (await batchResponse.json().catch(() => null)) as { id?: string; status?: string; error?: { message?: string } } | null;
   if (!batchResponse.ok || !batchPayload?.id) {
     throw new Error(`OpenAI batch creation failed (${batchResponse.status}): ${batchPayload?.error?.message ?? "no batch id."}`);
   }
-  return batchPayload.id;
+  return { batchId: batchPayload.id, batchStatus: batchPayload.status ?? null };
 }
 
 async function pollOpenAiBatch(batchId: string, settings: Record<string, unknown>): Promise<BatchPollResult> {
@@ -642,6 +677,7 @@ async function pollOpenAiBatch(batchId: string, settings: Record<string, unknown
     return { state: "failed", error: `OpenAI batch poll failed (${response.status}): ${payload?.error?.message ?? "unknown error."}` };
   }
   const status: string = payload?.status ?? "";
+  const batchStatus = status || null;
   if (status === "failed" || status === "expired" || status === "cancelled") {
     // Surface the batch-level errors (e.g. unsupported model) instead of a
     // generic status, so the cause is visible directly in the logs.
@@ -650,9 +686,10 @@ async function pollOpenAiBatch(batchId: string, settings: Record<string, unknown
       (payload?.errors?.data ?? []).map((entry: any) => entry?.message).filter(Boolean).join("; ") ||
       payload?.error?.message ||
       "";
-    return { state: "failed", error: `OpenAI batch ${status}${detail ? `: ${detail}` : "."}` };
+    if (status === "cancelled") return { state: "cancelled", batchStatus };
+    return { state: "failed", error: `OpenAI batch ${status}${detail ? `: ${detail}` : "."}`, batchStatus };
   }
-  if (status !== "completed") return { state: "pending" };
+  if (status !== "completed") return { state: "pending", batchStatus };
 
   const outputFormat = String(settings.OPENAI_IMAGE_OUTPUT_FORMAT ?? env("OPENAI_IMAGE_OUTPUT_FORMAT", "jpeg")).toLowerCase();
   const mime = OUTPUT_FORMAT_TO_MIME[outputFormat] ?? OUTPUT_FORMAT_TO_MIME.jpeg;
@@ -701,13 +738,44 @@ async function pollOpenAiBatch(batchId: string, settings: Record<string, unknown
   };
   await ingest(payload?.output_file_id);
   await ingest(payload?.error_file_id);
-  return { state: "done", source: { kind: "items", results } };
+  return { state: "done", source: { kind: "items", results }, batchStatus };
+}
+
+async function cancelGeminiBatch(batchName: string): Promise<string | null> {
+  const apiKey = env("GEMINI_API_KEY");
+  if (!apiKey) throw new Error("GEMINI_API_KEY is required.");
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/${batchName}:cancel`, {
+    method: "POST",
+    headers: { "x-goog-api-key": apiKey, "Content-Type": "application/json" },
+    body: "{}"
+  });
+  const payload = (await response.json().catch(() => null)) as { state?: string; metadata?: { state?: string }; error?: { message?: string } } | null;
+  if (!response.ok) {
+    throw new Error(`Gemini batch cancel failed (${response.status}): ${payload?.error?.message ?? "unknown error."}`);
+  }
+  return geminiBatchStatus(payload) ?? "JOB_STATE_CANCELLED";
+}
+
+async function cancelOpenAiBatch(batchId: string): Promise<string | null> {
+  const apiKey = env("OPENAI_API_KEY");
+  if (!apiKey) throw new Error("OPENAI_API_KEY is required.");
+  const response = await fetch(`https://api.openai.com/v1/batches/${batchId}/cancel`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }
+  });
+  const payload = (await response.json().catch(() => null)) as { status?: string; error?: { message?: string } } | null;
+  if (!response.ok) {
+    throw new Error(`OpenAI batch cancel failed (${response.status}): ${payload?.error?.message ?? "unknown error."}`);
+  }
+  return payload?.status ?? "cancelling";
 }
 
 export const submitBatch = internalAction({
   args: { jobId: v.id("generationJobs") },
   handler: async (ctx, args) => {
     await ctx.runMutation(internal.jobs.markRunning, { jobId: args.jobId });
+    const job = (await ctx.runQuery(internal.jobs.getJobInternal, { jobId: args.jobId })) as Doc<"generationJobs"> | null;
+    if (!job || job.status === "cancelled") return;
     const settings = (await ctx.runQuery(internal.settings.internalList, {})) as Record<string, unknown>;
     const allImages = (await ctx.runQuery(internal.jobs.imagesForJob, { jobId: args.jobId })) as Doc<"generatedImages">[];
     const images = allImages.filter((img) => img.status === "queued");
@@ -720,7 +788,6 @@ export const submitBatch = internalAction({
 
     // Vibe analysis once per distinct product, then bake the scene context and
     // second-image guidance into each prompt before the batch is submitted.
-    const job = (await ctx.runQuery(internal.jobs.getJobInternal, { jobId: args.jobId })) as Doc<"generationJobs"> | null;
     const vibeEnabled = job?.vibeAnalysis ?? String(settings.VIBE_ANALYSIS ?? "on") !== "off";
     const vibeByProduct = new Map<string, string>();
     for (const image of images) {
@@ -742,10 +809,11 @@ export const submitBatch = internalAction({
       const submitted =
         provider === "gemini"
           ? await submitGeminiBatch({ images: preparedImages, settings, model })
-          : { batchId: await submitOpenAiBatch({ images: preparedImages, settings, model }), inputFileName: null };
+          : { ...(await submitOpenAiBatch({ images: preparedImages, settings, model })), inputFileName: null };
       await ctx.runMutation(internal.jobs.setBatchInfo, {
         jobId: args.jobId,
         batchId: submitted.batchId,
+        batchStatus: submitted.batchStatus,
         batchInputFileName: submitted.inputFileName
       });
       await ctx.runMutation(internal.jobs.markImagesGenerating, { jobId: args.jobId, providerBatchId: submitted.batchId });
@@ -1059,11 +1127,24 @@ async function processTerminalBatch(
   job: Doc<"generationJobs">,
   poll: Exclude<BatchPollResult, { state: "pending" }>
 ): Promise<TerminalBatchResult> {
+  if (poll.batchStatus !== undefined) {
+    await ctx.runMutation(internal.jobs.setBatchStatus, { jobId: job._id, batchStatus: poll.batchStatus });
+  }
   const acquired = await ctx.runMutation(internal.jobs.acquireBatchIngestion, { jobId: job._id });
   if (!acquired) return { state: "busy" as const };
   try {
     const images = (await ctx.runQuery(internal.jobs.imagesForJob, { jobId: job._id })) as Doc<"generatedImages">[];
     const pending = images.filter((image) => image.status === "queued" || image.status === "generating");
+    if (poll.state === "cancelled") {
+      log("batch", "batch cancelled", { jobId: job._id, batchId: job.batchId, pending: pending.length });
+      await ctx.runMutation(internal.jobs.cancelInternal, {
+        jobId: job._id,
+        reason: "Provider batch was cancelled.",
+        batchStatus: poll.batchStatus ?? job.batchStatus ?? null
+      });
+      await cleanupGeminiBatchFiles(job);
+      return { state: "cancelled" as const };
+    }
     if (poll.state === "failed") {
       log("batch", "batch failed", { jobId: job._id, batchId: job.batchId, error: poll.error, pending: pending.length });
       for (const image of pending) {
@@ -1123,6 +1204,9 @@ export const pollBatches = internalAction({
         log("batch", "poll error (will retry)", { jobId: job._id, batchId: job.batchId, error: error instanceof Error ? error.message : String(error) });
         continue;
       }
+      if (poll.batchStatus !== undefined) {
+        await ctx.runMutation(internal.jobs.setBatchStatus, { jobId: job._id, batchStatus: poll.batchStatus });
+      }
       if (poll.state === "pending") continue;
       await processTerminalBatch(ctx, job, poll);
     }
@@ -1145,9 +1229,56 @@ export const pollJob = action({
     } catch (error) {
       throw new Error(`Poll failed: ${error instanceof Error ? error.message : String(error)}`);
     }
-    log("batch", "manual poll", { jobId: job._id, batchId: job.batchId, state: poll.state });
-    if (poll.state === "pending") return { state: "pending" };
+    log("batch", "manual poll", { jobId: job._id, batchId: job.batchId, state: poll.state, batchStatus: poll.batchStatus });
+    if (poll.batchStatus !== undefined) {
+      await ctx.runMutation(internal.jobs.setBatchStatus, { jobId: job._id, batchStatus: poll.batchStatus });
+    }
+    if (poll.state === "pending") return { state: "pending", batchStatus: poll.batchStatus };
     return processTerminalBatch(ctx, job, poll);
+  }
+});
+
+export const cancelJob = action({
+  args: { jobId: v.id("generationJobs") },
+  handler: async (ctx, args): Promise<{ state: "cancelled"; batchStatus?: string | null }> => {
+    await requireUserId(ctx);
+    const job = (await ctx.runQuery(internal.jobs.getJobInternal, { jobId: args.jobId })) as Doc<"generationJobs"> | null;
+    if (!job) throw new Error("Job not found.");
+    if (job.status === "completed" || job.status === "failed" || job.status === "cancelled") {
+      throw new Error(`Job is already ${job.status}.`);
+    }
+
+    let batchStatus = job.batchStatus ?? null;
+    if (job.executionMode === "batch" && job.batchId) {
+      const settings = (await ctx.runQuery(internal.settings.internalList, {})) as Record<string, unknown>;
+      const provider = job.imageProvider === "gemini" ? "gemini" : "openai";
+      const poll = provider === "gemini" ? await pollGeminiBatch(job.batchId, job.batchInputFileName) : await pollOpenAiBatch(job.batchId, settings);
+      if (poll.batchStatus !== undefined) {
+        batchStatus = poll.batchStatus ?? null;
+        await ctx.runMutation(internal.jobs.setBatchStatus, { jobId: job._id, batchStatus });
+      }
+      if (poll.state === "cancelled") {
+        await processTerminalBatch(ctx, job, poll);
+        return { state: "cancelled", batchStatus };
+      }
+      if (poll.state === "done" || poll.state === "failed") {
+        await processTerminalBatch(ctx, job, poll);
+        throw new Error(`Batch is already ${poll.state}.`);
+      }
+      if (!isCancellableBatchStatus(provider, batchStatus)) {
+        throw new Error(`Batch cannot be cancelled in provider status ${batchStatus}.`);
+      }
+      batchStatus = provider === "gemini" ? await cancelGeminiBatch(job.batchId) : await cancelOpenAiBatch(job.batchId);
+      await ctx.runMutation(internal.jobs.setBatchStatus, { jobId: job._id, batchStatus });
+    }
+
+    await ctx.runMutation(internal.jobs.cancelInternal, {
+      jobId: args.jobId,
+      reason: "Job cancelled by user.",
+      batchStatus
+    });
+    log("batch", "job cancelled", { jobId: args.jobId, batchId: job.batchId, batchStatus });
+    return { state: "cancelled", batchStatus };
   }
 });
 
@@ -1155,8 +1286,9 @@ export const processJob = internalAction({
   args: { jobId: v.id("generationJobs") },
   handler: async (ctx, args) => {
     await ctx.runMutation(internal.jobs.markRunning, { jobId: args.jobId });
-    const settings = (await ctx.runQuery(internal.settings.internalList, {})) as Record<string, unknown>;
     const job = (await ctx.runQuery(internal.jobs.getJobInternal, { jobId: args.jobId })) as Doc<"generationJobs"> | null;
+    if (!job || job.status === "cancelled") return;
+    const settings = (await ctx.runQuery(internal.settings.internalList, {})) as Record<string, unknown>;
     const vibeEnabled = job?.vibeAnalysis ?? String(settings.VIBE_ANALYSIS ?? "on") !== "off";
     const maxRetries = intEnv("MAX_RETRIES", 2);
     log("realtime", "job start", { jobId: args.jobId, provider: job?.imageProvider, model: job?.imageModel, tasks: job?.totalTasks });

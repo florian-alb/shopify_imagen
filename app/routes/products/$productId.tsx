@@ -1210,6 +1210,7 @@ function Gallery({
 
 function generatedImageStateLabel(image: Doc<"generatedImages">) {
   if (image.status === "failed") return "Error";
+  if (image.status === "canceled") return "Canceled";
   if (image.status === "uploaded") return "Pushed";
   if (!isReviewable(image)) return image.status;
   const reviewStatus = getReviewStatus(image);
@@ -1222,6 +1223,7 @@ function generatedImageStateTone(
   image: Doc<"generatedImages">,
 ): "neutral" | "success" | "warning" | "danger" {
   if (image.status === "failed") return "danger";
+  if (image.status === "canceled") return "danger";
   if (image.status === "uploaded") return "success";
   if (!isReviewable(image)) return "warning";
   const reviewStatus = getReviewStatus(image);

@@ -271,7 +271,7 @@ function JobsPage() {
             <section className="grid gap-3">
               {filteredJobs?.map((job) => {
                 const pct = job.totalTasks ? Math.round(((job.completedTasks + job.failedTasks) / job.totalTasks) * 100) : 0;
-                const state = job.status === "completed" ? "success" : job.status === "failed" ? "danger" : "warning";
+                const state = job.status === "completed" ? "success" : job.status === "failed" || job.status === "cancelled" ? "danger" : "warning";
                 const reviewSummary = job.reviewSummary ?? emptyReviewSummary;
                 const jobCostSummary = job.costSummary ?? emptyJobCostSummary;
                 const review = reviewBadge(reviewSummary);
@@ -286,6 +286,7 @@ function JobsPage() {
                         <div className="flex flex-wrap items-center gap-2">
                           <StateBadge state={job.executionMode === "batch" ? "success" : "neutral"}>{executionModeLabel(job.executionMode)}</StateBadge>
                           <StateBadge>{job.imageProvider === "gemini" ? "Nano Banana Pro" : "OpenAI"}</StateBadge>
+                          {job.batchStatus ? <StateBadge>{job.batchStatus}</StateBadge> : null}
                           <StateBadge state={state}>{job.status}</StateBadge>
                           <StateBadge state={review.tone}>{review.label}</StateBadge>
                         </div>
