@@ -1217,19 +1217,28 @@ export const pollJob = action({
   args: { jobId: v.id("generationJobs") },
   handler: async (ctx, args): Promise<ManualPollResult> => {
     await requireUserId(ctx);
-    const job = (await ctx.runQuery(internal.jobs.getJobInternal, { jobId: args.jobId })) as Doc<"generationJobs"> | null;
+    let job = (await ctx.runQuery(internal.jobs.getJobInternal, { jobId: args.jobId })) as Doc<"generationJobs"> | null;
     if (!job) throw new Error("Job not found.");
-    if (job.status !== "running") throw new Error("Job is not running.");
+    if (job.executionMode !== "batch") throw new Error("Job is not a batch job.");
+    if (job.status !== "running" && job.status !== "queued") throw new Error("Job is not active.");
     if (!job.batchId) throw new Error("Job has no batch ID yet.");
+    if (job.status === "queued") {
+      const markedRunning = await ctx.runMutation(internal.jobs.markRunning, { jobId: job._id });
+      if (!markedRunning) throw new Error("Job is not active.");
+      job = (await ctx.runQuery(internal.jobs.getJobInternal, { jobId: args.jobId })) as Doc<"generationJobs"> | null;
+      if (!job) throw new Error("Job not found.");
+    }
+    const batchId = job.batchId;
+    if (!batchId) throw new Error("Job has no batch ID yet.");
     const settings = (await ctx.runQuery(internal.settings.internalList, {})) as Record<string, unknown>;
     const provider = job.imageProvider === "gemini" ? "gemini" : "openai";
     let poll: BatchPollResult;
     try {
-      poll = provider === "gemini" ? await pollGeminiBatch(job.batchId, job.batchInputFileName) : await pollOpenAiBatch(job.batchId, settings);
+      poll = provider === "gemini" ? await pollGeminiBatch(batchId, job.batchInputFileName) : await pollOpenAiBatch(batchId, settings);
     } catch (error) {
       throw new Error(`Poll failed: ${error instanceof Error ? error.message : String(error)}`);
     }
-    log("batch", "manual poll", { jobId: job._id, batchId: job.batchId, state: poll.state, batchStatus: poll.batchStatus });
+    log("batch", "manual poll", { jobId: job._id, batchId, state: poll.state, batchStatus: poll.batchStatus });
     if (poll.batchStatus !== undefined) {
       await ctx.runMutation(internal.jobs.setBatchStatus, { jobId: job._id, batchStatus: poll.batchStatus });
     }

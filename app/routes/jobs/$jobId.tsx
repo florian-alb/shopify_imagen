@@ -183,6 +183,7 @@ function JobDetailPage() {
   const pct = job.totalTasks ? Math.round(((job.completedTasks + job.failedTasks) / job.totalTasks) * 100) : 0;
   const jobState = job.status === "completed" ? "success" : job.status === "failed" ? "danger" : "warning";
   const canCancelJob = job.status === "queued" || job.status === "running";
+  const canForcePoll = job.executionMode === "batch" && Boolean(job.batchId) && (job.status === "queued" || job.status === "running");
   const jobCost = images.reduce((sum, image) => sum + imageDisplayCost(image, job), 0);
   const reviewBadge = reviewAggregateBadge(reviewableImages.length, pendingCount, approvedCount, rejectedCount);
 
@@ -318,7 +319,7 @@ function JobDetailPage() {
             <StateBadge state={jobState}>{job.status}</StateBadge>
             {job.batchStatus ? <StateBadge>{job.batchStatus}</StateBadge> : null}
             <StateBadge state={reviewBadge.tone}>{reviewBadge.label}</StateBadge>
-            {job.status === "running" && job.batchId ? (
+            {canForcePoll ? (
               <Button size="sm" variant="outline" onClick={handleForcePoll} disabled={polling}>
                 {polling ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Zap data-icon="inline-start" />}
                 Force poll

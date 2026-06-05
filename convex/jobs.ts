@@ -549,7 +549,11 @@ export const pendingBatchJobs = internalQuery({
       .query("generationJobs")
       .withIndex("by_status", (q) => q.eq("status", "running"))
       .collect();
-    return running.filter((job) => job.executionMode === "batch");
+    const queued = await ctx.db
+      .query("generationJobs")
+      .withIndex("by_status", (q) => q.eq("status", "queued"))
+      .collect();
+    return [...running, ...queued].filter((job) => job.executionMode === "batch");
   },
 });
 
