@@ -32,21 +32,20 @@ type ProductFilters = {
 function calculateProductStatus(images: Doc<"generatedImages">[]): Doc<"products">["generationStatus"] {
   if (!images.length) return "not_started";
   if (images.some((image) => image.status === "generating" || image.status === "queued")) return "generating";
-  const hasGeneratedImage = images.some(
-    (image) => image.storageUrl && (image.status === "generated" || image.status === "uploaded")
-  );
-  if (!hasGeneratedImage && images.some((image) => image.status === "canceled")) return "canceled";
-  if (images.every((image) => image.status === "failed")) return "failed";
 
   const reviewable = images.filter(
     (image) => image.storageUrl && (image.status === "generated" || image.status === "uploaded")
   );
+  if (reviewable.some((image) => (image.reviewStatus ?? "pending") === "pending")) return "partial";
+  if (reviewable.some((image) => image.status === "uploaded" && image.shopifyMediaId)) return "pushed";
+  if (reviewable.some((image) => (image.reviewStatus ?? "pending") === "approved")) return "ready";
+  if (images.every((image) => image.status === "failed")) return "failed";
+  const hasGeneratedImage = images.some(
+    (image) => image.storageUrl && (image.status === "generated" || image.status === "uploaded")
+  );
+  if (!hasGeneratedImage && images.some((image) => image.status === "canceled")) return "canceled";
   if (reviewable.length) {
-    const allReviewablePushed = reviewable.every((image) => image.status === "uploaded" && image.shopifyMediaId);
-    if (allReviewablePushed) return "pushed";
-    const anyRejected = reviewable.some((image) => image.reviewStatus === "rejected");
-    if (anyRejected || images.some((image) => image.status === "failed")) return "partial";
-    return "ready";
+    return "partial";
   }
   if (images.some((image) => image.status === "failed")) return "partial";
   return "not_started";
