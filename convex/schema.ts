@@ -65,7 +65,13 @@ export default defineSchema({
     metafields: v.array(v.any()),
     featuredImageUrl: v.optional(v.union(v.string(), v.null())),
     currentShopifyImages: v.array(v.any()),
+    shopifyImageCount: v.optional(v.number()),
     generationStatus,
+    generatedImageCount: v.optional(v.number()),
+    pendingReviewCount: v.optional(v.number()),
+    approvedImageCount: v.optional(v.number()),
+    rejectedImageCount: v.optional(v.number()),
+    latestJobId: v.optional(v.union(v.id("generationJobs"), v.null())),
     vibe: v.optional(v.union(v.string(), v.null())),
     vibeCostUsd: v.optional(v.number()),
     vibeAnalyzedAt: v.optional(v.number()),
@@ -75,8 +81,10 @@ export default defineSchema({
   })
     .index("by_shopify_product_id", ["shopifyProductId"])
     .index("by_handle", ["handle"])
+    .index("by_created", ["createdAt"])
     .index("by_generation_status", ["generationStatus"])
     .index("by_product_type", ["productType"])
+    .index("by_shopify_status", ["shopifyStatus"])
     .index("by_generation_status_and_product_type", ["generationStatus", "productType"])
     .searchIndex("search_products", { searchField: "title", filterFields: ["generationStatus"] }),
   promptTemplates: defineTable({
@@ -99,6 +107,7 @@ export default defineSchema({
     mode: v.union(v.literal("single"), v.literal("bulk")),
     executionMode: v.optional(v.union(v.literal("realtime"), v.literal("batch"))),
     batchId: v.optional(v.union(v.string(), v.null())),
+    previousBatchIds: v.optional(v.array(v.string())),
     batchStatus: v.optional(v.union(v.string(), v.null())),
     batchInputFileName: v.optional(v.union(v.string(), v.null())),
     batchIngestionStartedAt: v.optional(v.union(v.number(), v.null())),
@@ -112,6 +121,14 @@ export default defineSchema({
     totalTasks: v.number(),
     completedTasks: v.number(),
     failedTasks: v.number(),
+    generationCost: v.optional(v.number()),
+    inputTokens: v.optional(v.number()),
+    outputTokens: v.optional(v.number()),
+    pricedImageCount: v.optional(v.number()),
+    reviewTotal: v.optional(v.number()),
+    reviewPending: v.optional(v.number()),
+    reviewApproved: v.optional(v.number()),
+    reviewRejected: v.optional(v.number()),
     error: v.optional(v.union(v.string(), v.null())),
     createdByUserId: v.optional(v.id("users")),
     createdAt: v.number(),

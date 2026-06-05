@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   BusyIcon,
   EmptyState,
+  NumberedPaginator,
   PageHeader,
   StatusBadge,
 } from "@/components/page";
@@ -40,14 +41,40 @@ export const Route = createFileRoute("/products/")({
   component: ProductsPage,
 });
 
-type Product = Doc<"products"> & {
-  generatedImageCount?: number;
+type Product = {
+  _id: Id<"products">;
+  _creationTime: number;
+  shopifyProductId: string;
+  title: string;
+  handle: string;
+  vendor?: string | null;
+  productType?: string | null;
+  shopifyStatus?: string | null;
+  featuredImageUrl?: string | null;
+  shopifyImageCount: number;
+  generationStatus: GenerationStatus;
+  generatedImageCount: number;
+  pendingReviewCount: number;
+  approvedImageCount: number;
+  rejectedImageCount: number;
+  latestJobId?: Id<"generationJobs"> | null;
+  createdAt: number;
+  updatedAt: number;
 };
 type ProductFacets = {
   productTypes: string[];
   shopifyStatuses: string[];
   collections: Array<{ id: string; title: string; handle?: string }>;
 };
+type ProductPageResult = {
+  page: Product[];
+  offset: number;
+  limit: number;
+  hasPrevious: boolean;
+  hasNext: boolean;
+};
+
+const PAGE_SIZE = 20;
 
 function ProductsPage() {
   const search = Route.useSearch();
@@ -55,9 +82,19 @@ function ProductsPage() {
   const [chooserOpen, setChooserOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [creatingJob, setCreatingJob] = useState(false);
+  const [offset, setOffset] = useState(0);
   const navigate = useNavigate();
 
-  const products = useQuery(api.products.list, productFilterArgs(search)) as Product[] | undefined;
+  const productListArgs = useMemo(() => productFilterArgs(search), [search.collection, search.q, search.shopifyStatus, search.status, search.type]);
+  const productPage = useQuery(
+    api.products.list,
+    {
+      ...productListArgs,
+      offset,
+      limit: PAGE_SIZE,
+    },
+  ) as ProductPageResult | undefined;
+  const products = productPage?.page ?? [];
   const facets = useQuery(api.products.facets) as ProductFacets | undefined;
   const settings = useQuery(api.settings.list);
   const syncProducts = useAction(api.shopify.syncProducts);
@@ -67,6 +104,11 @@ function ProductsPage() {
   function updateSearch(patch: Partial<ProductSearch>) {
     void navigate({ to: "/products", search: { ...search, ...patch }, replace: true });
   }
+
+  useEffect(() => {
+    setOffset(0);
+    setSelected(new Set());
+  }, [productListArgs.collection, productListArgs.generationStatus, productListArgs.productType, productListArgs.search, productListArgs.shopifyStatus]);
 
   const selectedProducts = useMemo(
     () => (products ?? []).filter((product) => selected.has(product._id)),
@@ -135,7 +177,7 @@ function ProductsPage() {
     }
   }
 
-  const loaded = products !== undefined && facets !== undefined;
+  const loaded = productPage !== undefined && facets !== undefined;
   const allVisibleSelected = products?.length
     ? products.every((product) => selected.has(product._id))
     : false;
@@ -268,6 +310,15 @@ function ProductsPage() {
         </section>
       )}
 
+      <NumberedPaginator
+        offset={offset}
+        pageSize={PAGE_SIZE}
+        hasPrevious={productPage?.hasPrevious ?? false}
+        hasNext={productPage?.hasNext ?? false}
+        loading={!loaded}
+        onOffsetChange={setOffset}
+      />
+
       {selected.size ? (
         <div className="sticky-actions">
           <Card
@@ -344,8 +395,7 @@ function ProductRow({
   onToggle: () => void;
   onGenerateOne: () => void;
 }) {
-  const image =
-    product.featuredImageUrl ?? product.currentShopifyImages[0]?.url;
+  const image = product.featuredImageUrl;
   return (
     <Card
       size="sm"
@@ -399,7 +449,7 @@ function ProductRow({
           </Badge>
           {product.shopifyStatus ? <Badge variant="outline">{shopifyStatusLabel(product.shopifyStatus)}</Badge> : null}
           <Badge variant="outline">
-            {product.currentShopifyImages.length} Shopify
+            {product.shopifyImageCount} Shopify
           </Badge>
           <Badge variant="outline">
             {product.generatedImageCount ?? 0} Generated

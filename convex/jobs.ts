@@ -11,10 +11,33 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { requireUserId } from "./authz";
 import { renderPrompt } from "./lib";
 import { BATCH_PRICE_MULTIPLIER } from "./pricing";
-import { recalculateProductStatus } from "./products";
+import { refreshProductSummary } from "./products";
 
 type ImageProvider = "openai" | "gemini";
 type ExecutionMode = "realtime" | "batch";
+const DEFAULT_PAGE_SIZE = 20;
+const MAX_PAGE_SIZE = 100;
+
+const jobStatusFilter = v.optional(
+  v.union(
+    v.literal("queued"),
+    v.literal("running"),
+    v.literal("completed"),
+    v.literal("failed"),
+    v.literal("cancelled"),
+  ),
+);
+const executionModeFilter = v.optional(v.union(v.literal("realtime"), v.literal("batch")));
+const providerFilter = v.optional(v.union(v.literal("openai"), v.literal("gemini")));
+const reviewFilter = v.optional(
+  v.union(
+    v.literal("to-review"),
+    v.literal("approved"),
+    v.literal("partial"),
+    v.literal("rejected"),
+    v.literal("no-review"),
+  ),
+);
 
 function appendRegenerationInstructions(prompt: string, instructions?: string) {
   const correction = instructions?.trim();
@@ -71,6 +94,70 @@ function summarizeImageCosts(
   };
 }
 
+function storedJobCostSummary(job: Doc<"generationJobs">) {
+  return {
+    generationCost: job.generationCost ?? 0,
+    inputTokens: job.inputTokens ?? 0,
+    outputTokens: job.outputTokens ?? 0,
+    pricedImageCount: job.pricedImageCount ?? 0,
+  };
+}
+
+function storedJobReviewSummary(job: Doc<"generationJobs">) {
+  return {
+    total: job.reviewTotal ?? 0,
+    pending: job.reviewPending ?? 0,
+    approved: job.reviewApproved ?? 0,
+    rejected: job.reviewRejected ?? 0,
+  };
+}
+
+function getStoredReviewState(job: Doc<"generationJobs">) {
+  const total = job.reviewTotal ?? 0;
+  const pending = job.reviewPending ?? 0;
+  const approved = job.reviewApproved ?? 0;
+  const rejected = job.reviewRejected ?? 0;
+  if (total === 0) return "no-review";
+  if (pending > 0) return "to-review";
+  if (rejected === total) return "rejected";
+  if (approved === total) return "approved";
+  return "partial";
+}
+
+function listedJob(job: Doc<"generationJobs">) {
+  return {
+    ...job,
+    costSummary: storedJobCostSummary(job),
+    reviewSummary: storedJobReviewSummary(job),
+  };
+}
+
+export async function refreshJobSummary(ctx: { db: any }, jobId: Id<"generationJobs">) {
+  const job = await ctx.db.get(jobId);
+  if (!job) return null;
+  const images = await ctx.db
+    .query("generatedImages")
+    .withIndex("by_job", (q: any) => q.eq("jobId", jobId))
+    .collect();
+  const costSummary = summarizeImageCosts(job, images);
+  const reviewable: Doc<"generatedImages">[] = images.filter(
+    (image: Doc<"generatedImages">) => image.storageUrl && (image.status === "generated" || image.status === "uploaded"),
+  );
+  const patch = {
+    generationCost: costSummary.generationCost,
+    inputTokens: costSummary.inputTokens,
+    outputTokens: costSummary.outputTokens,
+    pricedImageCount: costSummary.pricedImageCount,
+    reviewTotal: reviewable.length,
+    reviewPending: reviewable.filter((image) => (image.reviewStatus ?? "pending") === "pending").length,
+    reviewApproved: reviewable.filter((image) => image.reviewStatus === "approved").length,
+    reviewRejected: reviewable.filter((image) => image.reviewStatus === "rejected").length,
+    updatedAt: Date.now(),
+  };
+  await ctx.db.patch(jobId, patch);
+  return patch;
+}
+
 async function currentGenerationEngine(ctx: MutationCtx) {
   const rows = await ctx.db.query("appSettings").collect();
   const settings = Object.fromEntries(
@@ -89,43 +176,41 @@ async function currentGenerationEngine(ctx: MutationCtx) {
 }
 
 export const list = query({
-  args: {},
-  handler: async (ctx) => {
+  args: {
+    status: jobStatusFilter,
+    executionMode: executionModeFilter,
+    provider: providerFilter,
+    review: reviewFilter,
+    offset: v.optional(v.number()),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
     await requireUserId(ctx);
-    const jobs = await ctx.db
+    const offset = Math.max(0, Math.floor(args.offset ?? 0));
+    const limit = Math.max(1, Math.min(Math.floor(args.limit ?? DEFAULT_PAGE_SIZE), MAX_PAGE_SIZE));
+    const page: Doc<"generationJobs">[] = [];
+    let matched = 0;
+    const jobs = ctx.db
       .query("generationJobs")
       .withIndex("by_created")
-      .order("desc")
-      .take(100);
-    return Promise.all(
-      jobs.map(async (job) => {
-        const images = await ctx.db
-          .query("generatedImages")
-          .withIndex("by_job", (q) => q.eq("jobId", job._id))
-          .collect();
-        const reviewable = images.filter(
-          (image) =>
-            image.storageUrl &&
-            (image.status === "generated" || image.status === "uploaded"),
-        );
-        return {
-          ...job,
-          costSummary: summarizeImageCosts(job, images),
-          reviewSummary: {
-            total: reviewable.length,
-            pending: reviewable.filter(
-              (image) => (image.reviewStatus ?? "pending") === "pending",
-            ).length,
-            approved: reviewable.filter(
-              (image) => image.reviewStatus === "approved",
-            ).length,
-            rejected: reviewable.filter(
-              (image) => image.reviewStatus === "rejected",
-            ).length,
-          },
-        };
-      }),
-    );
+      .order("desc");
+    for await (const job of jobs) {
+      const effectiveExecutionMode = job.executionMode ?? "realtime";
+      if (args.status && job.status !== args.status) continue;
+      if (args.executionMode && effectiveExecutionMode !== args.executionMode) continue;
+      if (args.provider && job.imageProvider !== args.provider) continue;
+      if (args.review && getStoredReviewState(job) !== args.review) continue;
+      if (matched >= offset && page.length < limit + 1) page.push(job);
+      matched += 1;
+      if (page.length >= limit + 1) break;
+    }
+    return {
+      page: page.slice(0, limit).map(listedJob),
+      offset,
+      limit,
+      hasPrevious: offset > 0,
+      hasNext: page.length > limit,
+    };
   },
 });
 
@@ -133,44 +218,26 @@ export const costSummary = query({
   args: {},
   handler: async (ctx) => {
     await requireUserId(ctx);
-    const images = await ctx.db.query("generatedImages").collect();
     const jobs = await ctx.db.query("generationJobs").collect();
-    const products = await ctx.db.query("products").collect();
-    const jobById = new Map(jobs.map((job) => [job._id, job]));
-    const imageCost = (image: Doc<"generatedImages">) => {
-      const job = jobById.get(image.jobId);
-      return job ? imageCostForJob(job, image) : (image.costUsd ?? 0);
-    };
-    const generationCost = images.reduce(
-      (sum, image) => sum + imageCost(image),
+    const generationCost = jobs.reduce(
+      (sum, job) => sum + (job.generationCost ?? 0),
       0,
     );
-    const realtimeImages = images.filter(
-      (image) => jobById.get(image.jobId)?.executionMode !== "batch",
-    );
-    const batchImages = images.filter(
-      (image) => jobById.get(image.jobId)?.executionMode === "batch",
-    );
-    const realtimeGenerationCost = realtimeImages.reduce(
-      (sum, image) => sum + imageCost(image),
+    const realtimeGenerationCost = jobs
+      .filter((job) => job.executionMode !== "batch")
+      .reduce((sum, job) => sum + (job.generationCost ?? 0), 0);
+    const batchGenerationCost = jobs
+      .filter((job) => job.executionMode === "batch")
+      .reduce((sum, job) => sum + (job.generationCost ?? 0), 0);
+    const inputTokens = jobs.reduce(
+      (sum, job) => sum + (job.inputTokens ?? 0),
       0,
     );
-    const batchGenerationCost = batchImages.reduce(
-      (sum, image) => sum + imageCost(image),
+    const outputTokens = jobs.reduce(
+      (sum, job) => sum + (job.outputTokens ?? 0),
       0,
     );
-    const inputTokens = images.reduce(
-      (sum, image) => sum + (image.inputTokens ?? 0),
-      0,
-    );
-    const outputTokens = images.reduce(
-      (sum, image) => sum + (image.outputTokens ?? 0),
-      0,
-    );
-    const analysisCost = products.reduce(
-      (sum, product) => sum + (product.vibeCostUsd ?? 0),
-      0,
-    );
+    const analysisCost = 0;
     return {
       generationCost,
       realtimeGenerationCost,
@@ -179,12 +246,13 @@ export const costSummary = query({
       totalCost: generationCost + analysisCost,
       inputTokens,
       outputTokens,
-      realtimeImageCount: realtimeImages.filter(
-        (image) => image.costUsd != null,
-      ).length,
-      batchImageCount: batchImages.filter((image) => image.costUsd != null)
-        .length,
-      pricedImageCount: images.filter((image) => image.costUsd != null).length,
+      realtimeImageCount: jobs
+        .filter((job) => job.executionMode !== "batch")
+        .reduce((sum, job) => sum + (job.pricedImageCount ?? 0), 0),
+      batchImageCount: jobs
+        .filter((job) => job.executionMode === "batch")
+        .reduce((sum, job) => sum + (job.pricedImageCount ?? 0), 0),
+      pricedImageCount: jobs.reduce((sum, job) => sum + (job.pricedImageCount ?? 0), 0),
     };
   },
 });
@@ -320,6 +388,7 @@ export const create = mutation({
       mode: products.length === 1 ? "single" : "bulk",
       executionMode,
       batchId: null,
+      previousBatchIds: [],
       batchStatus: null,
       batchInputFileName: null,
       batchIngestionStartedAt: null,
@@ -333,6 +402,14 @@ export const create = mutation({
       totalTasks: planned.length,
       completedTasks: 0,
       failedTasks: 0,
+      generationCost: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      pricedImageCount: 0,
+      reviewTotal: 0,
+      reviewPending: 0,
+      reviewApproved: 0,
+      reviewRejected: 0,
       error: null,
       createdByUserId: userId,
       createdAt: now,
@@ -360,8 +437,14 @@ export const create = mutation({
       });
       await ctx.db.patch(task.product._id, {
         generationStatus: "generating",
+        latestJobId: jobId,
         updatedAt: now,
       });
+    }
+
+    await refreshJobSummary(ctx, jobId);
+    for (const product of products) {
+      await refreshProductSummary(ctx, product._id);
     }
 
     await ctx.scheduler.runAfter(
@@ -425,11 +508,9 @@ async function cancelJobLocally(
     updatedAt: now,
     completedAt: now,
   });
+  await refreshJobSummary(ctx, args.jobId);
   for (const productId of job.productIds as Id<"products">[]) {
-    await ctx.db.patch(productId, {
-      generationStatus: await recalculateProductStatus(ctx, productId),
-      updatedAt: now,
-    });
+    await refreshProductSummary(ctx, productId);
   }
 }
 
@@ -549,11 +630,7 @@ export const pendingBatchJobs = internalQuery({
       .query("generationJobs")
       .withIndex("by_status", (q) => q.eq("status", "running"))
       .collect();
-    const queued = await ctx.db
-      .query("generationJobs")
-      .withIndex("by_status", (q) => q.eq("status", "queued"))
-      .collect();
-    return [...running, ...queued].filter((job) => job.executionMode === "batch");
+    return running.filter((job) => job.executionMode === "batch");
   },
 });
 
@@ -646,6 +723,8 @@ export const completeImage = internalMutation({
       completedTasks: (await ctx.db.get(image.jobId))!.completedTasks + 1,
       updatedAt: Date.now(),
     });
+    await refreshJobSummary(ctx, image.jobId);
+    await refreshProductSummary(ctx, image.productId);
     return true;
   },
 });
@@ -682,7 +761,9 @@ export const failImage = internalMutation({
         failedTasks: job.failedTasks + 1,
         updatedAt: Date.now(),
       });
+      await refreshJobSummary(ctx, job._id);
     }
+    await refreshProductSummary(ctx, image.productId);
     return true;
   },
 });
@@ -707,6 +788,7 @@ export const reviewImages = mutation({
     const now = Date.now();
     let updated = 0;
     const affectedProductIds = new Set<Id<"products">>();
+    const affectedJobIds = new Set<Id<"generationJobs">>();
     for (const imageId of Array.from(new Set(args.imageIds))) {
       const image = await ctx.db.get(imageId);
       if (
@@ -722,13 +804,14 @@ export const reviewImages = mutation({
         updatedAt: now,
       });
       affectedProductIds.add(image.productId);
+      affectedJobIds.add(image.jobId);
       updated += 1;
     }
+    for (const jobId of affectedJobIds) {
+      await refreshJobSummary(ctx, jobId);
+    }
     for (const productId of affectedProductIds) {
-      await ctx.db.patch(productId, {
-        generationStatus: await recalculateProductStatus(ctx, productId),
-        updatedAt: now,
-      });
+      await refreshProductSummary(ctx, productId);
     }
     return { updated };
   },
@@ -758,6 +841,8 @@ export const retry = mutation({
     if (!toRetry.length) throw new Error("No failed images to retry.");
 
     const now = Date.now();
+    const affectedProductIds = new Set<Id<"products">>();
+    const affectedJobIds = new Set<Id<"generationJobs">>([args.jobId]);
 
     // Cancel any stuck images from OTHER jobs on the same products so they
     // don't show as phantom "generating"/"queued" entries on the product page.
@@ -776,6 +861,8 @@ export const retry = mutation({
             error: "Superseded by retry.",
             updatedAt: now,
           });
+          affectedProductIds.add(img.productId);
+          affectedJobIds.add(img.jobId);
         }
       }
     }
@@ -793,14 +880,19 @@ export const retry = mutation({
         generationStatus: "generating",
         updatedAt: now,
       });
+      affectedProductIds.add(img.productId);
     }
 
     const kept = images.filter(
       (img) => img.status === "generated" || img.status === "uploaded",
     );
+    const previousBatchIds = job.batchId
+      ? Array.from(new Set([...(job.previousBatchIds ?? []), job.batchId]))
+      : (job.previousBatchIds ?? []);
     await ctx.db.patch(args.jobId, {
       status: "queued",
       batchId: null,
+      previousBatchIds,
       batchStatus: null,
       batchInputFileName: null,
       batchIngestionStartedAt: null,
@@ -812,6 +904,13 @@ export const retry = mutation({
       completedAt: undefined,
       updatedAt: now,
     });
+
+    for (const jobId of affectedJobIds) {
+      await refreshJobSummary(ctx, jobId);
+    }
+    for (const productId of affectedProductIds) {
+      await refreshProductSummary(ctx, productId);
+    }
 
     await ctx.scheduler.runAfter(
       0,
@@ -850,11 +949,9 @@ export const failStuckJob = internalMutation({
       completedAt: now,
       updatedAt: now,
     });
+    await refreshJobSummary(ctx, args.jobId);
     for (const productId of job.productIds as Id<"products">[]) {
-      await ctx.db.patch(productId, {
-        generationStatus: "failed",
-        updatedAt: now,
-      });
+      await refreshProductSummary(ctx, productId);
     }
   },
 });
@@ -875,13 +972,23 @@ export const finishJobIfDone = internalMutation({
       completedAt: Date.now(),
       updatedAt: Date.now(),
     });
+    await refreshJobSummary(ctx, args.jobId);
 
     for (const productId of job.productIds as Id<"products">[]) {
-      await ctx.db.patch(productId, {
-        generationStatus: await recalculateProductStatus(ctx, productId),
-        updatedAt: Date.now(),
-      });
+      await refreshProductSummary(ctx, productId);
     }
     return true;
+  },
+});
+
+export const backfillJobSummaries = mutation({
+  args: {},
+  handler: async (ctx) => {
+    await requireUserId(ctx);
+    const jobs = await ctx.db.query("generationJobs").collect();
+    for (const job of jobs) {
+      await refreshJobSummary(ctx, job._id);
+    }
+    return { jobs: jobs.length };
   },
 });

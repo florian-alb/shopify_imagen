@@ -1,7 +1,7 @@
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "convex/react";
-import { useMemo, type ReactNode } from "react";
-import { EmptyState, PageHeader, StateBadge } from "@/components/page";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { EmptyState, NumberedPaginator, PageHeader, StateBadge } from "@/components/page";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -34,6 +34,13 @@ type ListedJob = Doc<"generationJobs"> & {
   costSummary?: JobCostSummary;
   reviewSummary?: ReviewSummary;
 };
+type JobsPageResult = {
+  page: ListedJob[];
+  offset: number;
+  limit: number;
+  hasPrevious: boolean;
+  hasNext: boolean;
+};
 
 type JobStatusFilter = "all" | "queued" | "running" | "completed" | "failed" | "cancelled";
 type ExecutionModeFilter = "all" | "realtime" | "batch";
@@ -53,6 +60,7 @@ const jobStatuses = ["queued", "running", "completed", "failed", "cancelled"] as
 const executionModes = ["realtime", "batch"] as const;
 const providers = ["openai", "gemini"] as const;
 const reviewFilters = ["to-review", "approved", "partial", "rejected", "no-review"] as const;
+const PAGE_SIZE = 20;
 
 export const Route = createFileRoute("/jobs/")({
   validateSearch: validateJobSearch,
@@ -84,14 +92,6 @@ function executionModeRateLabel(mode?: "realtime" | "batch") {
   return mode === "batch" ? "50% rate" : "Full rate";
 }
 
-function reviewMatchesFilter(reviewSummary: ReviewSummary, filter: ReviewFilter) {
-  if (filter === "all") return true;
-  const state = getReviewState(reviewSummary);
-  if (filter === "to-review") return state === "pending";
-  if (filter === "no-review") return state === "none";
-  return state === filter;
-}
-
 function getReviewState(reviewSummary: ReviewSummary): ReviewState {
   if (reviewSummary.total === 0) return "none";
   if (reviewSummary.pending > 0) return "pending";
@@ -112,7 +112,22 @@ function reviewBadge(reviewSummary: ReviewSummary) {
 function JobsPage() {
   const search = Route.useSearch();
   const navigate = useNavigate();
-  const jobs = useQuery(api.jobs.list) as ListedJob[] | undefined;
+  const [offset, setOffset] = useState(0);
+  const jobsListArgs = useMemo(() => ({
+    status: search.status,
+    executionMode: search.executionMode,
+    provider: search.provider,
+    review: search.review
+  }), [search.executionMode, search.provider, search.review, search.status]);
+  const jobsPage = useQuery(
+    api.jobs.list,
+    {
+      ...jobsListArgs,
+      offset,
+      limit: PAGE_SIZE,
+    },
+  ) as JobsPageResult | undefined;
+  const jobs = jobsPage?.page ?? [];
   const cost = useQuery(api.jobs.costSummary);
   const statusFilter: JobStatusFilter = search.status ?? "all";
   const executionModeFilter: ExecutionModeFilter = search.executionMode ?? "all";
@@ -123,20 +138,12 @@ function JobsPage() {
     void navigate({ to: "/jobs", search: { ...search, ...patch }, replace: true });
   }
 
-  const filteredJobs = useMemo(() => {
-    if (!jobs) return undefined;
-    return jobs.filter((job) => {
-      const effectiveExecutionMode = job.executionMode ?? "realtime";
-      const reviewSummary = job.reviewSummary ?? emptyReviewSummary;
-      if (statusFilter !== "all" && job.status !== statusFilter) return false;
-      if (executionModeFilter !== "all" && effectiveExecutionMode !== executionModeFilter) return false;
-      if (providerFilter !== "all" && job.imageProvider !== providerFilter) return false;
-      return reviewMatchesFilter(reviewSummary, reviewFilter);
-    });
-  }, [executionModeFilter, jobs, providerFilter, reviewFilter, statusFilter]);
+  useEffect(() => {
+    setOffset(0);
+  }, [jobsListArgs.executionMode, jobsListArgs.provider, jobsListArgs.review, jobsListArgs.status]);
 
   const filteredCostSummary = useMemo(() => {
-    return (filteredJobs ?? []).reduce(
+    return jobs.reduce(
       (summary, job) => {
         const jobCost = job.costSummary ?? emptyJobCostSummary;
         summary.generationCost += jobCost.generationCost;
@@ -147,7 +154,7 @@ function JobsPage() {
       },
       { ...emptyJobCostSummary },
     );
-  }, [filteredJobs]);
+  }, [jobs]);
 
   const hasActiveFilters =
     statusFilter !== "all" ||
@@ -169,7 +176,7 @@ function JobsPage() {
       <PageHeader eyebrow="Jobs" title="Background generation jobs" />
       {cost ? (
         <Card className="mb-4 rounded-lg">
-          <CardContent className={cn("grid gap-4 pt-1 sm:grid-cols-3", jobs?.length ? "lg:grid-cols-4" : null)}>
+          <CardContent className={cn("grid gap-4 pt-1 sm:grid-cols-3", jobs.length ? "lg:grid-cols-4" : null)}>
             <div>
               <p className="text-sm text-muted-foreground">Total spent</p>
               <p className="text-2xl font-semibold">{formatUsd(cost.totalCost)}</p>
@@ -191,12 +198,12 @@ function JobsPage() {
               <p className="text-sm text-muted-foreground">Vibe analysis</p>
               <p className="text-2xl font-semibold">{formatUsd(cost.analysisCost)}</p>
             </div>
-            {jobs?.length ? (
+            {jobs.length ? (
               <div>
                 <p className="text-sm text-muted-foreground">Filtered result</p>
                 <p className="text-2xl font-semibold">{formatUsd(filteredCostSummary.generationCost)}</p>
                 <p className="text-xs text-muted-foreground">
-                  {(filteredJobs?.length ?? 0).toLocaleString()} / {jobs.length.toLocaleString()} jobs
+                  {jobs.length.toLocaleString()} jobs at offset {offset}
                 </p>
                 <p className="text-xs text-muted-foreground">
                   {(filteredCostSummary.inputTokens + filteredCostSummary.outputTokens).toLocaleString()} tokens · {filteredCostSummary.pricedImageCount} images
@@ -206,7 +213,7 @@ function JobsPage() {
           </CardContent>
         </Card>
       ) : null}
-      {jobs === undefined ? (
+      {jobsPage === undefined ? (
         <EmptyState loading title="Loading jobs" body="Fetching recent generation work from Convex." />
       ) : jobs.length === 0 ? (
         <EmptyState title="No jobs yet" body="Create a generation job from the products page." />
@@ -265,11 +272,11 @@ function JobsPage() {
             </CardContent>
           </Card>
 
-          {filteredJobs?.length === 0 ? (
+          {jobs.length === 0 ? (
             <EmptyState title="No matching jobs" body="Adjust the filters to show more generation jobs." />
           ) : (
             <section className="grid gap-3">
-              {filteredJobs?.map((job) => {
+              {jobs.map((job) => {
                 const pct = job.totalTasks ? Math.round(((job.completedTasks + job.failedTasks) / job.totalTasks) * 100) : 0;
                 const state = job.status === "completed" ? "success" : job.status === "failed" || job.status === "cancelled" ? "danger" : "warning";
                 const reviewSummary = job.reviewSummary ?? emptyReviewSummary;
@@ -311,6 +318,14 @@ function JobsPage() {
               })}
             </section>
           )}
+          <NumberedPaginator
+            offset={offset}
+            pageSize={PAGE_SIZE}
+            hasPrevious={jobsPage?.hasPrevious ?? false}
+            hasNext={jobsPage?.hasNext ?? false}
+            loading={jobsPage === undefined}
+            onOffsetChange={setOffset}
+          />
         </>
       )}
     </main>

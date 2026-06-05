@@ -3,7 +3,8 @@ import { internal } from "./_generated/api";
 import { action, internalMutation, internalQuery } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireUserId } from "./authz";
-import { recalculateProductStatus } from "./products";
+import { refreshProductSummary } from "./products";
+import { refreshJobSummary } from "./jobs";
 
 type GraphQlResponse<T> = { data?: T; errors?: Array<{ message: string }> };
 
@@ -227,6 +228,7 @@ export const syncProducts = action({
       after = data.products.pageInfo.endCursor;
     }
 
+    await ctx.runMutation(internal.products.refreshFacets, {});
     return { synced: syncedIds.length };
   }
 });
@@ -240,6 +242,7 @@ export const syncProduct = action({
     const data = await shopifyGraphql<{ product: any | null }>(PRODUCT_QUERY, { id: product.shopifyProductId });
     if (!data.product) throw new Error("Product no longer exists in Shopify.");
     const id: Id<"products"> = await ctx.runMutation(internal.products.upsertSynced, mapProductForUpsert(data.product));
+    await ctx.runMutation(internal.products.refreshFacets, {});
     return { productId: id };
   }
 });
@@ -322,7 +325,10 @@ export const reorderProductImages = action({
     const completed = jobId ? await waitForShopifyJob(jobId, accessToken) : true;
     if (completed) {
       const after = await shopifyGraphql<{ product: any | null }>(PRODUCT_QUERY, { id: product.shopifyProductId }, accessToken);
-      if (after.product) await ctx.runMutation(internal.products.upsertSynced, mapProductForUpsert(after.product));
+      if (after.product) {
+        await ctx.runMutation(internal.products.upsertSynced, mapProductForUpsert(after.product));
+        await ctx.runMutation(internal.products.refreshFacets, {});
+      }
     }
 
     return { reordered: moves.length, pending: !completed };
@@ -441,16 +447,18 @@ export const markImagePushed = internalMutation({
       shopifyMediaId: args.shopifyMediaId,
       updatedAt: Date.now()
     });
+    const image = await ctx.db.get(args.imageId);
+    if (image) {
+      await refreshJobSummary(ctx, image.jobId);
+      await refreshProductSummary(ctx, image.productId);
+    }
   }
 });
 
 export const markProductPushed = internalMutation({
   args: { productId: v.id("products") },
   handler: async (ctx, args) => {
-    await ctx.db.patch(args.productId, {
-      generationStatus: await recalculateProductStatus(ctx, args.productId),
-      updatedAt: Date.now()
-    });
+    await refreshProductSummary(ctx, args.productId);
   }
 });
 
@@ -470,6 +478,7 @@ export const cacheProductImageOrder = internalMutation({
     await ctx.db.patch(product._id, {
       currentShopifyImages: orderedImages,
       featuredImageUrl: (orderedImages[0] as any)?.url ?? null,
+      shopifyImageCount: orderedImages.length,
       updatedAt: Date.now()
     });
   }
@@ -497,11 +506,18 @@ export const deleteImageRecord = internalMutation({
           (entry: any) => (entry.mediaId ?? entry.id) !== image.shopifyMediaId
         );
         if (remaining.length !== product.currentShopifyImages.length) {
-          await ctx.db.patch(product._id, { currentShopifyImages: remaining, updatedAt: Date.now() });
+          await ctx.db.patch(product._id, {
+            currentShopifyImages: remaining,
+            featuredImageUrl: (remaining[0] as any)?.url ?? null,
+            shopifyImageCount: remaining.length,
+            updatedAt: Date.now()
+          });
         }
       }
     }
     await ctx.db.delete(args.imageId);
+    await refreshJobSummary(ctx, image.jobId);
+    await refreshProductSummary(ctx, image.productId);
   }
 });
 
