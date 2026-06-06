@@ -1,6 +1,6 @@
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "convex/react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import { EmptyState, NumberedPaginator, PageHeader, StateBadge } from "@/components/page";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -51,10 +51,11 @@ type JobSearch = {
   executionMode?: Exclude<ExecutionModeFilter, "all">;
   provider?: Exclude<ProviderFilter, "all">;
   review?: Exclude<ReviewFilter, "all">;
+  page?: number;
+  pageSize?: number;
 };
 
 const emptyReviewSummary: ReviewSummary = { total: 0, pending: 0, approved: 0, rejected: 0 };
-const emptyJobCostSummary: JobCostSummary = { generationCost: 0, inputTokens: 0, outputTokens: 0, pricedImageCount: 0 };
 const jobStatuses = ["queued", "running", "completed", "failed", "cancelled"] as const;
 const executionModes = ["realtime", "batch"] as const;
 const providers = ["openai", "gemini"] as const;
@@ -69,12 +70,26 @@ function optionalEnum<T extends readonly string[]>(value: unknown, allowed: T): 
 }
 
 function validateJobSearch(search: Record<string, unknown>): JobSearch {
+  const page = parsePositiveInt(search.page);
+  const pageSize = parsePageSize(search.pageSize);
   return {
     status: optionalEnum(search.status, jobStatuses),
     executionMode: optionalEnum(search.executionMode, executionModes),
     provider: optionalEnum(search.provider, providers),
-    review: optionalEnum(search.review, reviewFilters)
+    review: optionalEnum(search.review, reviewFilters),
+    page: page && page > 1 ? page : undefined,
+    pageSize: pageSize && pageSize !== 20 ? pageSize : undefined
   };
+}
+
+function parsePositiveInt(value: unknown) {
+  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number.parseInt(value, 10) : undefined;
+  return Number.isFinite(parsed) && parsed && parsed > 0 ? Math.floor(parsed) : undefined;
+}
+
+function parsePageSize(value: unknown) {
+  const parsed = parsePositiveInt(value);
+  return parsed && [20, 50, 100].includes(parsed) ? parsed : undefined;
 }
 
 function formatUsd(value: number) {
@@ -105,8 +120,9 @@ function reviewBadge(reviewSummary: ReviewSummary) {
 function JobsPage() {
   const search = Route.useSearch();
   const navigate = useNavigate();
-  const [offset, setOffset] = useState(0);
-  const [pageSize, setPageSize] = useState(20);
+  const page = search.page ?? 1;
+  const pageSize = search.pageSize ?? 20;
+  const offset = (page - 1) * pageSize;
   const jobsListArgs = useMemo(() => ({
     status: search.status,
     executionMode: search.executionMode,
@@ -132,9 +148,20 @@ function JobsPage() {
     void navigate({ to: "/jobs", search: { ...search, ...patch }, replace: true });
   }
 
-  useEffect(() => {
-    setOffset(0);
-  }, [jobsListArgs.executionMode, jobsListArgs.provider, jobsListArgs.review, jobsListArgs.status]);
+  function updateFilters(patch: Partial<JobSearch>) {
+    updateSearch({ ...patch, page: undefined });
+  }
+
+  function updatePage(nextPage: number) {
+    updateSearch({ page: nextPage > 1 ? nextPage : undefined });
+  }
+
+  function updatePageSize(nextPageSize: number) {
+    updateSearch({
+      page: undefined,
+      pageSize: nextPageSize === 20 ? undefined : nextPageSize
+    });
+  }
 
   const hasActiveFilters =
     statusFilter !== "all" ||
@@ -147,7 +174,8 @@ function JobsPage() {
       status: undefined,
       executionMode: undefined,
       provider: undefined,
-      review: undefined
+      review: undefined,
+      page: undefined
     });
   };
 
@@ -192,7 +220,7 @@ function JobsPage() {
               <FilterSelect
                 value={statusFilter}
                 placeholder="All states"
-                onChange={(value) => updateSearch({ status: value === "all" ? undefined : value as JobSearch["status"] })}
+                onChange={(value) => updateFilters({ status: value === "all" ? undefined : value as JobSearch["status"] })}
               >
                 <SelectItem value="queued">Queued</SelectItem>
                 <SelectItem value="running">Running</SelectItem>
@@ -203,7 +231,7 @@ function JobsPage() {
               <FilterSelect
                 value={executionModeFilter}
                 placeholder="Batch + realtime"
-                onChange={(value) => updateSearch({ executionMode: value === "all" ? undefined : value as JobSearch["executionMode"] })}
+                onChange={(value) => updateFilters({ executionMode: value === "all" ? undefined : value as JobSearch["executionMode"] })}
               >
                 <SelectItem value="realtime">Real-time</SelectItem>
                 <SelectItem value="batch">Batch</SelectItem>
@@ -211,7 +239,7 @@ function JobsPage() {
               <FilterSelect
                 value={reviewFilter}
                 placeholder="All review states"
-                onChange={(value) => updateSearch({ review: value === "all" ? undefined : value as JobSearch["review"] })}
+                onChange={(value) => updateFilters({ review: value === "all" ? undefined : value as JobSearch["review"] })}
               >
                 <SelectItem value="to-review">To review</SelectItem>
                 <SelectItem value="approved">Approved</SelectItem>
@@ -222,7 +250,7 @@ function JobsPage() {
               <FilterSelect
                 value={providerFilter}
                 placeholder="All providers"
-                onChange={(value) => updateSearch({ provider: value === "all" ? undefined : value as JobSearch["provider"] })}
+                onChange={(value) => updateFilters({ provider: value === "all" ? undefined : value as JobSearch["provider"] })}
               >
                 <SelectItem value="gemini">Nano Banana Pro</SelectItem>
                 <SelectItem value="openai">OpenAI</SelectItem>
@@ -280,13 +308,13 @@ function JobsPage() {
             </section>
           )}
           <NumberedPaginator
-            offset={offset}
+            page={page}
             pageSize={pageSize}
             hasPrevious={jobsPage?.hasPrevious ?? false}
             hasNext={jobsPage?.hasNext ?? false}
             loading={jobsPage === undefined}
-            onOffsetChange={setOffset}
-            onPageSizeChange={setPageSize}
+            onPageChange={updatePage}
+            onPageSizeChange={updatePageSize}
           />
         </>
       )}

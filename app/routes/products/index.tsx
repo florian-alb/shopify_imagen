@@ -80,10 +80,11 @@ function ProductsPage() {
   const [chooserOpen, setChooserOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [creatingJob, setCreatingJob] = useState(false);
-  const [pageSize, setPageSize] = useState(20);
   const navigate = useNavigate();
 
-  const offset = search.offset ?? 0;
+  const page = search.page ?? 1;
+  const pageSize = search.pageSize ?? 20;
+  const offset = (page - 1) * pageSize;
   const productListArgs = useMemo(() => productFilterArgs(search), [search.collection, search.q, search.shopifyStatus, search.status, search.type]);
   const productPage = useQuery(
     api.products.list,
@@ -105,12 +106,19 @@ function ProductsPage() {
   }
 
   function updateFilters(patch: Partial<ProductSearch>) {
-    updateSearch({ ...patch, offset: undefined });
+    updateSearch({ ...patch, page: undefined });
     setSelected(new Set());
   }
 
-  function updateOffset(nextOffset: number) {
-    updateSearch({ offset: nextOffset > 0 ? nextOffset : undefined });
+  function updatePage(nextPage: number) {
+    updateSearch({ page: nextPage > 1 ? nextPage : undefined });
+  }
+
+  function updatePageSize(nextPageSize: number) {
+    updateSearch({
+      page: undefined,
+      pageSize: nextPageSize === 20 ? undefined : nextPageSize
+    });
   }
 
   const selectedProducts = useMemo(
@@ -314,13 +322,13 @@ function ProductsPage() {
       )}
 
       <NumberedPaginator
-        offset={offset}
+        page={page}
         pageSize={pageSize}
         hasPrevious={productPage?.hasPrevious ?? false}
         hasNext={productPage?.hasNext ?? false}
         loading={!loaded}
-        onOffsetChange={updateOffset}
-        onPageSizeChange={setPageSize}
+        onPageChange={updatePage}
+        onPageSizeChange={updatePageSize}
       />
 
       {selected.size ? (

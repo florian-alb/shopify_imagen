@@ -123,23 +123,23 @@ export function BusyIcon({ busy }: { busy: boolean }) {
 }
 
 export function NumberedPaginator({
-  offset,
+  page,
   pageSize,
   hasPrevious,
   hasNext,
   loading = false,
-  onOffsetChange,
+  onPageChange,
   onPageSizeChange,
 }: {
-  offset: number;
+  page: number;
   pageSize: number;
   hasPrevious: boolean;
   hasNext: boolean;
   loading?: boolean;
-  onOffsetChange: (offset: number) => void;
+  onPageChange: (page: number) => void;
   onPageSizeChange?: (pageSize: number) => void;
 }) {
-  const currentPage = Math.floor(offset / pageSize) + 1;
+  const currentPage = Math.max(1, page);
   const pages = Array.from(
     new Set([
       1,
@@ -149,22 +149,20 @@ export function NumberedPaginator({
       ...(hasNext ? [currentPage + 1] : []),
     ]),
   ).sort((a, b) => a - b);
-  const goToPage = (page: number) =>
-    onOffsetChange(Math.max(0, (page - 1) * pageSize));
+  const goToPage = (nextPage: number) => onPageChange(Math.max(1, nextPage));
   const pageClick =
-    (page: number) => (event: React.MouseEvent<HTMLAnchorElement>) => {
+    (nextPage: number) => (event: React.MouseEvent<HTMLAnchorElement>) => {
       event.preventDefault();
-      if (!loading) goToPage(page);
+      if (!loading) goToPage(nextPage);
     };
-  const offsetClick =
-    (nextOffset: number) => (event: React.MouseEvent<HTMLAnchorElement>) => {
+  const navClick =
+    (nextPage: number) => (event: React.MouseEvent<HTMLAnchorElement>) => {
       event.preventDefault();
-      if (!loading) onOffsetChange(Math.max(0, nextOffset));
+      if (!loading) goToPage(nextPage);
     };
   const changePageSize = (value: string) => {
     const size = Number.parseInt(value, 10);
     if (Number.isFinite(size)) {
-      onOffsetChange(0);
       onPageSizeChange!(size);
     }
   };
@@ -200,7 +198,7 @@ export function NumberedPaginator({
                   ? "pointer-events-none opacity-50"
                   : undefined
               }
-              onClick={offsetClick(offset - pageSize)}
+              onClick={navClick(currentPage - 1)}
             />
           </PaginationItem>
           {pages.map((page, i) => (
@@ -239,7 +237,7 @@ export function NumberedPaginator({
                   ? "pointer-events-none opacity-50"
                   : undefined
               }
-              onClick={offsetClick(offset + pageSize)}
+              onClick={navClick(currentPage + 1)}
             />
           </PaginationItem>
         </PaginationContent>
