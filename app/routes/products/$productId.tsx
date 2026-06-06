@@ -131,7 +131,6 @@ function ProductDetailPage() {
   const deleteImage = useAction(api.shopify.deleteImage);
   const reorderProductImages = useAction(api.shopify.reorderProductImages);
   const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set());
-  const [force, setForce] = useState(false);
   const [generateOpen, setGenerateOpen] = useState(false);
   const [pushOpen, setPushOpen] = useState(false);
   const [selectedPushIds, setSelectedPushIds] = useState<
@@ -215,7 +214,6 @@ function ProductDetailPage() {
     const presets = availableTypes.filter((type) => type.isPreset);
     const defaults = presets.length ? presets : availableTypes;
     setSelectedTypes(new Set(defaults.map((type) => type.imageType)));
-    setForce(false);
     setGenerateOpen(true);
   }
 
@@ -226,7 +224,7 @@ function ProductDetailPage() {
       const jobId = await createJob({
         productIds: [product._id],
         selectedImageTypes: Array.from(selectedTypes),
-        forceRegenerate: force,
+        forceRegenerate: false,
       });
       setGenerateOpen(false);
       toast.success("Background generation started", {
@@ -672,8 +670,6 @@ function ProductDetailPage() {
             return next;
           })
         }
-        force={force}
-        onForceChange={setForce}
         busy={busy === "generate"}
         onGenerate={() => void generate()}
       />
@@ -955,8 +951,6 @@ function GenerateDialog({
   types,
   selectedTypes,
   onToggle,
-  force,
-  onForceChange,
   busy,
   onGenerate,
 }: {
@@ -965,8 +959,6 @@ function GenerateDialog({
   types: Doc<"promptTemplates">[];
   selectedTypes: Set<string>;
   onToggle: (type: string) => void;
-  force: boolean;
-  onForceChange: (checked: boolean) => void;
   busy: boolean;
   onGenerate: () => void;
 }) {
@@ -980,15 +972,6 @@ function GenerateDialog({
             template.
           </DialogDescription>
         </DialogHeader>
-        <div className="flex flex-wrap items-center gap-2">
-          <Label className="flex h-8 items-center gap-2 rounded-lg border px-3">
-            <Checkbox
-              checked={force}
-              onCheckedChange={(checked) => onForceChange(checked === true)}
-            />
-            Regenerate existing
-          </Label>
-        </div>
         <div className="grid gap-2">
           {types.map((type) => (
             <Label

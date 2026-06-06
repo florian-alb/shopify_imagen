@@ -219,25 +219,51 @@ export const costSummary = query({
   handler: async (ctx) => {
     await requireUserId(ctx);
     const jobs = await ctx.db.query("generationJobs").collect();
-    const generationCost = jobs.reduce(
-      (sum, job) => sum + (job.generationCost ?? 0),
+    const products = await ctx.db.query("products").collect();
+    const needsImageFallback = jobs.some(
+      (job) =>
+        job.generationCost == null ||
+        job.inputTokens == null ||
+        job.outputTokens == null ||
+        job.pricedImageCount == null,
+    );
+    const images = needsImageFallback
+      ? await ctx.db.query("generatedImages").collect()
+      : [];
+    const imagesByJob = new Map<Id<"generationJobs">, Doc<"generatedImages">[]>();
+    for (const image of images) {
+      imagesByJob.set(image.jobId, [...(imagesByJob.get(image.jobId) ?? []), image]);
+    }
+    const jobCost = (job: Doc<"generationJobs">) => {
+      if (
+        job.generationCost != null &&
+        job.inputTokens != null &&
+        job.outputTokens != null &&
+        job.pricedImageCount != null
+      ) {
+        return {
+          generationCost: job.generationCost,
+          inputTokens: job.inputTokens,
+          outputTokens: job.outputTokens,
+          pricedImageCount: job.pricedImageCount,
+        };
+      }
+      return summarizeImageCosts(job, imagesByJob.get(job._id) ?? []);
+    };
+    const costs = jobs.map((job) => ({ job, cost: jobCost(job) }));
+    const generationCost = costs.reduce((sum, item) => sum + item.cost.generationCost, 0);
+    const realtimeGenerationCost = costs
+      .filter((item) => item.job.executionMode !== "batch")
+      .reduce((sum, item) => sum + item.cost.generationCost, 0);
+    const batchGenerationCost = costs
+      .filter((item) => item.job.executionMode === "batch")
+      .reduce((sum, item) => sum + item.cost.generationCost, 0);
+    const inputTokens = costs.reduce((sum, item) => sum + item.cost.inputTokens, 0);
+    const outputTokens = costs.reduce((sum, item) => sum + item.cost.outputTokens, 0);
+    const analysisCost = products.reduce(
+      (sum, product) => sum + (product.vibeCostUsd ?? 0),
       0,
     );
-    const realtimeGenerationCost = jobs
-      .filter((job) => job.executionMode !== "batch")
-      .reduce((sum, job) => sum + (job.generationCost ?? 0), 0);
-    const batchGenerationCost = jobs
-      .filter((job) => job.executionMode === "batch")
-      .reduce((sum, job) => sum + (job.generationCost ?? 0), 0);
-    const inputTokens = jobs.reduce(
-      (sum, job) => sum + (job.inputTokens ?? 0),
-      0,
-    );
-    const outputTokens = jobs.reduce(
-      (sum, job) => sum + (job.outputTokens ?? 0),
-      0,
-    );
-    const analysisCost = 0;
     return {
       generationCost,
       realtimeGenerationCost,
@@ -246,13 +272,13 @@ export const costSummary = query({
       totalCost: generationCost + analysisCost,
       inputTokens,
       outputTokens,
-      realtimeImageCount: jobs
-        .filter((job) => job.executionMode !== "batch")
-        .reduce((sum, job) => sum + (job.pricedImageCount ?? 0), 0),
-      batchImageCount: jobs
-        .filter((job) => job.executionMode === "batch")
-        .reduce((sum, job) => sum + (job.pricedImageCount ?? 0), 0),
-      pricedImageCount: jobs.reduce((sum, job) => sum + (job.pricedImageCount ?? 0), 0),
+      realtimeImageCount: costs
+        .filter((item) => item.job.executionMode !== "batch")
+        .reduce((sum, item) => sum + item.cost.pricedImageCount, 0),
+      batchImageCount: costs
+        .filter((item) => item.job.executionMode === "batch")
+        .reduce((sum, item) => sum + item.cost.pricedImageCount, 0),
+      pricedImageCount: costs.reduce((sum, item) => sum + item.cost.pricedImageCount, 0),
     };
   },
 });
@@ -375,7 +401,7 @@ export const create = mutation({
     if (!planned.length) {
       if (anySkippedAsExisting) {
         throw new Error(
-          'All selected image types already exist for these products. Enable "Regenerate existing" to recreate them.',
+          "All selected image types already exist for these products.",
         );
       }
       throw new Error(

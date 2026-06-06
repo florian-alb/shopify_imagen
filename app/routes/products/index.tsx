@@ -80,10 +80,10 @@ function ProductsPage() {
   const [chooserOpen, setChooserOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [creatingJob, setCreatingJob] = useState(false);
-  const [offset, setOffset] = useState(0);
   const [pageSize, setPageSize] = useState(20);
   const navigate = useNavigate();
 
+  const offset = search.offset ?? 0;
   const productListArgs = useMemo(() => productFilterArgs(search), [search.collection, search.q, search.shopifyStatus, search.status, search.type]);
   const productPage = useQuery(
     api.products.list,
@@ -104,10 +104,14 @@ function ProductsPage() {
     void navigate({ to: "/products", search: { ...search, ...patch }, replace: true });
   }
 
-  useEffect(() => {
-    setOffset(0);
+  function updateFilters(patch: Partial<ProductSearch>) {
+    updateSearch({ ...patch, offset: undefined });
     setSelected(new Set());
-  }, [productListArgs.collection, productListArgs.generationStatus, productListArgs.productType, productListArgs.search, productListArgs.shopifyStatus]);
+  }
+
+  function updateOffset(nextOffset: number) {
+    updateSearch({ offset: nextOffset > 0 ? nextOffset : undefined });
+  }
 
   const selectedProducts = useMemo(
     () => (products ?? []).filter((product) => selected.has(product._id)),
@@ -152,13 +156,13 @@ function ProductsPage() {
     });
   }
 
-  async function generate(imageTypes: string[], forceRegenerate: boolean, useVibeAnalysis: boolean) {
+  async function generate(imageTypes: string[], useVibeAnalysis: boolean) {
     setCreatingJob(true);
     try {
       const jobId = await createJob({
         productIds: Array.from(selected),
         selectedImageTypes: imageTypes,
-        forceRegenerate,
+        forceRegenerate: false,
         useVibeAnalysis,
       });
       setChooserOpen(false);
@@ -207,14 +211,14 @@ function ProductsPage() {
             <Input
               className="h-10 pl-9"
               value={search.q ?? ""}
-              onChange={(event) => updateSearch({ q: event.target.value || undefined })}
+              onChange={(event) => updateFilters({ q: event.target.value || undefined })}
               placeholder="Search name or handle"
             />
           </Label>
           <FilterSelect
             value={search.type ?? ""}
             placeholder="All categories"
-            onChange={(type) => updateSearch({ type: type || undefined })}
+            onChange={(type) => updateFilters({ type: type || undefined })}
           >
             {facets?.productTypes.map((item) => (
               <SelectItem key={item} value={item}>
@@ -225,7 +229,7 @@ function ProductsPage() {
           <FilterSelect
             value={search.collection ?? ""}
             placeholder="All collections"
-            onChange={(collection) => updateSearch({ collection: collection || undefined })}
+            onChange={(collection) => updateFilters({ collection: collection || undefined })}
           >
             {facets?.collections.map((item) => (
               <SelectItem key={item.id} value={item.id}>
@@ -236,7 +240,7 @@ function ProductsPage() {
           <FilterSelect
             value={search.shopifyStatus ?? ""}
             placeholder="All Shopify states"
-            onChange={(shopifyStatus) => updateSearch({ shopifyStatus: shopifyStatus || undefined })}
+            onChange={(shopifyStatus) => updateFilters({ shopifyStatus: shopifyStatus || undefined })}
           >
             {facets?.shopifyStatuses.map((item) => (
               <SelectItem key={item} value={item}>
@@ -247,7 +251,7 @@ function ProductsPage() {
           <FilterSelect
             value={search.status ?? ""}
             placeholder="All generation states"
-            onChange={(status) => updateSearch({ status: (status || undefined) as ProductSearch["status"] })}
+            onChange={(status) => updateFilters({ status: (status || undefined) as ProductSearch["status"] })}
           >
             {Object.entries(generationStatusLabels).map(([value, label]) => (
               <SelectItem key={value} value={value}>
@@ -315,7 +319,7 @@ function ProductsPage() {
         hasPrevious={productPage?.hasPrevious ?? false}
         hasNext={productPage?.hasNext ?? false}
         loading={!loaded}
-        onOffsetChange={setOffset}
+        onOffsetChange={updateOffset}
         onPageSizeChange={setPageSize}
       />
 
@@ -347,7 +351,7 @@ function ProductsPage() {
             products={selectedProducts}
             submitting={creatingJob}
             defaultUseVibe={vibeDefault}
-            onGenerate={(types, force, useVibe) => void generate(types, force, useVibe)}
+            onGenerate={(types, useVibe) => void generate(types, useVibe)}
           />
         ) : null}
       </Dialog>
@@ -477,7 +481,7 @@ function ImageTypeChooser({
   products: Product[];
   submitting: boolean;
   defaultUseVibe: boolean;
-  onGenerate: (imageTypes: string[], forceRegenerate: boolean, useVibeAnalysis: boolean) => void;
+  onGenerate: (imageTypes: string[], useVibeAnalysis: boolean) => void;
 }) {
   const prompts = useQuery(api.prompts.list) as
     | Doc<"promptTemplates">[]
@@ -488,7 +492,6 @@ function ImageTypeChooser({
   );
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [touched, setTouched] = useState(false);
-  const [force, setForce] = useState(false);
   const [useVibe, setUseVibe] = useState(defaultUseVibe);
 
   // Default to the preset image types until the user changes the selection.
@@ -522,13 +525,6 @@ function ImageTypeChooser({
       <div className="flex flex-wrap items-center gap-2">
         <Label className="flex h-8 items-center gap-2 rounded-lg border px-3">
           <Checkbox
-            checked={force}
-            onCheckedChange={(checked) => setForce(checked === true)}
-          />
-          Regenerate existing
-        </Label>
-        <Label className="flex h-8 items-center gap-2 rounded-lg border px-3">
-          <Checkbox
             checked={useVibe}
             onCheckedChange={(checked) => setUseVibe(checked === true)}
           />
@@ -552,7 +548,7 @@ function ImageTypeChooser({
       <DialogFooter>
         <Button
           disabled={!selected.size || submitting}
-          onClick={() => onGenerate(Array.from(selected), force, useVibe)}
+          onClick={() => onGenerate(Array.from(selected), useVibe)}
         >
           <BusyIcon busy={submitting} />
           {!submitting ? <WandSparkles data-icon="inline-start" /> : null}

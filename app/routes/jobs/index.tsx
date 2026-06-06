@@ -2,7 +2,6 @@ import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "convex/react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { EmptyState, NumberedPaginator, PageHeader, StateBadge } from "@/components/page";
-import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -86,10 +85,6 @@ function executionModeLabel(mode?: "realtime" | "batch") {
   return mode === "batch" ? "Batch" : "Real-time";
 }
 
-function executionModeRateLabel(mode?: "realtime" | "batch") {
-  return mode === "batch" ? "50% rate" : "Full rate";
-}
-
 function getReviewState(reviewSummary: ReviewSummary): ReviewState {
   if (reviewSummary.total === 0) return "none";
   if (reviewSummary.pending > 0) return "pending";
@@ -141,20 +136,6 @@ function JobsPage() {
     setOffset(0);
   }, [jobsListArgs.executionMode, jobsListArgs.provider, jobsListArgs.review, jobsListArgs.status]);
 
-  const filteredCostSummary = useMemo(() => {
-    return jobs.reduce(
-      (summary, job) => {
-        const jobCost = job.costSummary ?? emptyJobCostSummary;
-        summary.generationCost += jobCost.generationCost;
-        summary.inputTokens += jobCost.inputTokens;
-        summary.outputTokens += jobCost.outputTokens;
-        summary.pricedImageCount += jobCost.pricedImageCount;
-        return summary;
-      },
-      { ...emptyJobCostSummary },
-    );
-  }, [jobs]);
-
   const hasActiveFilters =
     statusFilter !== "all" ||
     executionModeFilter !== "all" ||
@@ -175,7 +156,7 @@ function JobsPage() {
       <PageHeader eyebrow="Jobs" title="Background generation jobs" />
       {cost ? (
         <Card className="mb-4 rounded-lg">
-          <CardContent className={cn("grid gap-4 pt-1 sm:grid-cols-3", jobs.length ? "lg:grid-cols-4" : null)}>
+          <CardContent className="grid gap-4 pt-1 sm:grid-cols-3">
             <div>
               <p className="text-sm text-muted-foreground">Total spent</p>
               <p className="text-2xl font-semibold">{formatUsd(cost.totalCost)}</p>
@@ -197,18 +178,6 @@ function JobsPage() {
               <p className="text-sm text-muted-foreground">Vibe analysis</p>
               <p className="text-2xl font-semibold">{formatUsd(cost.analysisCost)}</p>
             </div>
-            {jobs.length ? (
-              <div>
-                <p className="text-sm text-muted-foreground">Filtered result</p>
-                <p className="text-2xl font-semibold">{formatUsd(filteredCostSummary.generationCost)}</p>
-                <p className="text-xs text-muted-foreground">
-                  {jobs.length.toLocaleString()} jobs at offset {offset}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {(filteredCostSummary.inputTokens + filteredCostSummary.outputTokens).toLocaleString()} tokens · {filteredCostSummary.pricedImageCount} images
-                </p>
-              </div>
-            ) : null}
           </CardContent>
         </Card>
       ) : null}
@@ -279,37 +248,30 @@ function JobsPage() {
                 const pct = job.totalTasks ? Math.round(((job.completedTasks + job.failedTasks) / job.totalTasks) * 100) : 0;
                 const state = job.status === "completed" ? "success" : job.status === "failed" || job.status === "cancelled" ? "danger" : "warning";
                 const reviewSummary = job.reviewSummary ?? emptyReviewSummary;
-                const jobCostSummary = job.costSummary ?? emptyJobCostSummary;
                 const review = reviewBadge(reviewSummary);
                 return (
-                  <Card key={job._id} className="rounded-lg">
-                    <Link to="/jobs/$jobId" params={{ jobId: job._id }} className="flex flex-col gap-4">
-                      <CardHeader className="flex flex-row items-start justify-between gap-3">
+                  <Card key={job._id} className="rounded-lg py-3">
+                    <Link to="/jobs/$jobId" params={{ jobId: job._id }} className="block">
+                      <CardHeader className="flex flex-row items-start justify-between gap-3 px-3 pb-2 pt-0">
                         <div>
-                          <CardTitle>{job.mode === "bulk" ? "Bulk generation" : "Single product generation"}</CardTitle>
+                          <CardTitle className="text-base">{job.mode === "bulk" ? "Bulk generation" : "Single product generation"}</CardTitle>
                           <p className="text-sm text-muted-foreground">{new Date(job.createdAt).toLocaleString()}</p>
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
                           <StateBadge state={job.executionMode === "batch" ? "success" : "neutral"}>{executionModeLabel(job.executionMode)}</StateBadge>
                           <StateBadge>{job.imageProvider === "gemini" ? "Nano Banana Pro" : "OpenAI"}</StateBadge>
-                          {job.batchStatus ? <StateBadge>{job.batchStatus}</StateBadge> : null}
                           <StateBadge state={state}>{job.status}</StateBadge>
                           <StateBadge state={review.tone}>{review.label}</StateBadge>
                         </div>
                       </CardHeader>
-                      <CardContent>
+                      <CardContent className="px-3 pb-0 pt-0">
                         <Progress value={pct} className="h-2" />
-                        <p className="mt-2 text-sm text-muted-foreground">
-                          {job.completedTasks} completed / {job.failedTasks} failed / {job.totalTasks} total · {formatUsd(jobCostSummary.generationCost)} · {executionModeRateLabel(job.executionMode)}
-                        </p>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                          Cost: {(jobCostSummary.inputTokens + jobCostSummary.outputTokens).toLocaleString()} tokens · {jobCostSummary.pricedImageCount} priced images
-                        </p>
-                        {reviewSummary.total > 0 ? (
-                          <p className="mt-1 text-sm text-muted-foreground">
-                            Review: {reviewSummary.approved} approved / {reviewSummary.pending} to review / {reviewSummary.rejected} rejected
-                          </p>
-                        ) : null}
+                        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
+                          <span>{job.completedTasks} completed / {job.failedTasks} failed / {job.totalTasks} total</span>
+                          {reviewSummary.total > 0 ? (
+                            <span>{reviewSummary.approved} approved · {reviewSummary.pending} to review · {reviewSummary.rejected} rejected</span>
+                          ) : null}
+                        </div>
                       </CardContent>
                     </Link>
                   </Card>

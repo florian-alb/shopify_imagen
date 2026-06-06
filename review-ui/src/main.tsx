@@ -227,7 +227,6 @@ function DetailGallery({
 
 function ProductDetail({
   product,
-  force,
   jobRunning,
   replaceState,
   onBack,
@@ -235,7 +234,6 @@ function ProductDetail({
   onReplace
 }: {
   product: ReviewProduct;
-  force: boolean;
   jobRunning: boolean;
   replaceState?: ReplaceState[string];
   onBack: () => void;
@@ -256,7 +254,7 @@ function ProductDetail({
         <div className="detail-actions">
           <button className="secondary-button" disabled={jobRunning} onClick={() => onGenerate([product.id])}>
             {jobRunning ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
-            <span>{force ? "Regenerate" : "Generate"}</span>
+            <span>Generate</span>
           </button>
           <button className="replace-button" disabled={!ready || replacing} onClick={() => onReplace(product)}>
             {replacing ? <Loader2 className="spin" size={16} /> : <UploadCloud size={16} />}
@@ -314,7 +312,6 @@ function App() {
   const [category, setCategory] = useState("all");
   const [collection, setCollection] = useState("all");
   const [generationFilter, setGenerationFilter] = useState<GenerationFilter>("all");
-  const [force, setForce] = useState(false);
   const [job, setJob] = useState<GenerationJob | null>(null);
   const [replaceState, setReplaceState] = useState<ReplaceState>({});
   const [activeProductId, setActiveProductId] = useState<string | null>(() => productIdFromPath(window.location.pathname));
@@ -401,7 +398,7 @@ function App() {
       const result = await requestJson<{ job: GenerationJob }>("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ productIds, budget: true, concurrency: 1, force })
+        body: JSON.stringify({ productIds, budget: true, concurrency: 1, force: false })
       });
       setJob(result.job);
     } catch (generateError) {
@@ -470,7 +467,6 @@ function App() {
       <>
         <ProductDetail
           product={activeProduct}
-          force={force}
           jobRunning={jobRunning}
           replaceState={replaceState[activeProduct.id]}
           onBack={navigateToList}
@@ -522,10 +518,6 @@ function App() {
             <option key={item} value={item}>{generationFilterLabels[item]}</option>
           ))}
         </select>
-        <label className="toggle-row">
-          <input type="checkbox" checked={force} onChange={(event) => setForce(event.target.checked)} />
-          <span>Regenerate existing</span>
-        </label>
       </section>
 
       {error ? <div className="notice notice-bad page-notice"><AlertCircle size={16} /><span>{error}</span></div> : null}
