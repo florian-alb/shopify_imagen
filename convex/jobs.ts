@@ -355,27 +355,8 @@ export const create = mutation({
       sourceImageUrl2: string | null;
     }> = [];
 
-    let anySkippedAsExisting = false;
-
     for (const product of products) {
-      const existingImages = await ctx.db
-        .query("generatedImages")
-        .withIndex("by_product", (q) => q.eq("productId", product._id))
-        .collect();
-      const existingReady = new Set(
-        existingImages
-          .filter(
-            (image) =>
-              image.status === "generated" || image.status === "uploaded",
-          )
-          .map((image) => image.imageType),
-      );
-
       for (const imageType of selectedImageTypes) {
-        if (!args.forceRegenerate && existingReady.has(imageType)) {
-          anySkippedAsExisting = true;
-          continue;
-        }
         const template = promptByType.get(imageType);
         if (!template)
           throw new Error(`No active prompt template found for ${imageType}.`);
@@ -399,11 +380,6 @@ export const create = mutation({
     }
 
     if (!planned.length) {
-      if (anySkippedAsExisting) {
-        throw new Error(
-          "All selected image types already exist for these products.",
-        );
-      }
       throw new Error(
         "No image tasks could be planned for the selected products.",
       );

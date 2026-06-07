@@ -224,7 +224,7 @@ function ProductDetailPage() {
       const jobId = await createJob({
         productIds: [product._id],
         selectedImageTypes: Array.from(selectedTypes),
-        forceRegenerate: false,
+        forceRegenerate: true,
       });
       setGenerateOpen(false);
       toast.success("Background generation started", {

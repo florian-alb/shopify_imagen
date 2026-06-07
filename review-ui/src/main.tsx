@@ -398,7 +398,7 @@ function App() {
       const result = await requestJson<{ job: GenerationJob }>("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ productIds, budget: true, concurrency: 1, force: false })
+        body: JSON.stringify({ productIds, budget: true, concurrency: 1, force: true })
       });
       setJob(result.job);
     } catch (generateError) {

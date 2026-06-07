@@ -170,7 +170,7 @@ function ProductsPage() {
       const jobId = await createJob({
         productIds: Array.from(selected),
         selectedImageTypes: imageTypes,
-        forceRegenerate: false,
+        forceRegenerate: true,
         useVibeAnalysis,
       });
       setChooserOpen(false);
