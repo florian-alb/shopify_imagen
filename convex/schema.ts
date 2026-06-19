@@ -12,6 +12,39 @@ const generationStatus = v.union(
   v.literal("failed")
 );
 
+const productGenerationState = v.union(
+  v.literal("not_started"),
+  v.literal("generating"),
+  v.literal("complete"),
+  v.literal("incomplete"),
+  v.literal("failed"),
+  v.literal("canceled")
+);
+
+const productReviewState = v.union(
+  v.literal("none"),
+  v.literal("needs_review"),
+  v.literal("partially_approved"),
+  v.literal("approved"),
+  v.literal("rejected")
+);
+
+const productPublishState = v.union(
+  v.literal("not_ready"),
+  v.literal("ready_to_push"),
+  v.literal("partially_pushed"),
+  v.literal("pushed")
+);
+
+const productPrimaryAction = v.union(
+  v.literal("generate"),
+  v.literal("wait"),
+  v.literal("review"),
+  v.literal("push"),
+  v.literal("fix_errors"),
+  v.literal("done")
+);
+
 const jobStatus = v.union(
   v.literal("queued"),
   v.literal("running"),
@@ -67,7 +100,14 @@ export default defineSchema({
     currentShopifyImages: v.array(v.any()),
     shopifyImageCount: v.optional(v.number()),
     generationStatus,
+    generationState: v.optional(productGenerationState),
+    reviewState: v.optional(productReviewState),
+    publishState: v.optional(productPublishState),
+    primaryAction: v.optional(productPrimaryAction),
     generatedImageCount: v.optional(v.number()),
+    failedImageCount: v.optional(v.number()),
+    publishedImageCount: v.optional(v.number()),
+    publishableImageCount: v.optional(v.number()),
     pendingReviewCount: v.optional(v.number()),
     approvedImageCount: v.optional(v.number()),
     rejectedImageCount: v.optional(v.number()),
@@ -83,9 +123,14 @@ export default defineSchema({
     .index("by_handle", ["handle"])
     .index("by_created", ["createdAt"])
     .index("by_generation_status", ["generationStatus"])
+    .index("by_generation_state", ["generationState"])
+    .index("by_review_state", ["reviewState"])
+    .index("by_publish_state", ["publishState"])
+    .index("by_primary_action", ["primaryAction"])
     .index("by_product_type", ["productType"])
     .index("by_shopify_status", ["shopifyStatus"])
     .index("by_generation_status_and_product_type", ["generationStatus", "productType"])
+    .index("by_primary_action_and_product_type", ["primaryAction", "productType"])
     .searchIndex("search_products", { searchField: "title", filterFields: ["generationStatus"] }),
   promptTemplates: defineTable({
     imageType: v.string(),

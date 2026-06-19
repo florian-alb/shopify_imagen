@@ -8,7 +8,7 @@ import {
   EmptyState,
   NumberedPaginator,
   PageHeader,
-  StatusBadge,
+  StateBadge,
 } from "@/components/page";
 import { productFilterArgs, type ProductSearch, validateProductSearch } from "@/lib/productFilters";
 import { Badge } from "@/components/ui/badge";
@@ -32,7 +32,22 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { generationStatusLabels, shopifyStatusLabel, type GenerationStatus } from "@/lib/status";
+import {
+  generationStateTone,
+  primaryActionTone,
+  productGenerationStateLabels,
+  productPrimaryActionLabels,
+  productPublishStateLabels,
+  productReviewStateLabels,
+  publishStateTone,
+  reviewStateTone,
+  shopifyStatusLabel,
+  type GenerationStatus,
+  type ProductGenerationState,
+  type ProductPrimaryAction,
+  type ProductPublishState,
+  type ProductReviewState,
+} from "@/lib/status";
 import { api } from "../../../convex/_generated/api";
 import type { Doc, Id } from "../../../convex/_generated/dataModel";
 
@@ -53,7 +68,14 @@ type Product = {
   featuredImageUrl?: string | null;
   shopifyImageCount: number;
   generationStatus: GenerationStatus;
+  generationState: ProductGenerationState;
+  reviewState: ProductReviewState;
+  publishState: ProductPublishState;
+  primaryAction: ProductPrimaryAction;
   generatedImageCount: number;
+  failedImageCount: number;
+  publishedImageCount: number;
+  publishableImageCount: number;
   pendingReviewCount: number;
   approvedImageCount: number;
   rejectedImageCount: number;
@@ -85,7 +107,10 @@ function ProductsPage() {
   const page = search.page ?? 1;
   const pageSize = search.pageSize ?? 20;
   const offset = (page - 1) * pageSize;
-  const productListArgs = useMemo(() => productFilterArgs(search), [search.collection, search.q, search.shopifyStatus, search.status, search.type]);
+  const productListArgs = useMemo(
+    () => productFilterArgs(search),
+    [search.action, search.collection, search.generation, search.publish, search.q, search.review, search.shopifyStatus, search.status, search.type],
+  );
   const productPage = useQuery(
     api.products.list,
     {
@@ -213,7 +238,7 @@ function ProductsPage() {
       />
 
       <Card className="mb-4 rounded-lg py-3">
-        <CardContent className="grid gap-3 px-3 md:grid-cols-[1.5fr_1fr_1fr_1fr_1fr]">
+        <CardContent className="grid gap-3 px-3 md:grid-cols-[1.5fr_1fr_1fr_1fr] xl:grid-cols-[1.4fr_repeat(4,1fr)]">
           <Label className="relative block">
             <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -223,6 +248,17 @@ function ProductsPage() {
               placeholder="Search name or handle"
             />
           </Label>
+          <FilterSelect
+            value={search.action ?? ""}
+            placeholder="All work queues"
+            onChange={(action) => updateFilters({ action: (action || undefined) as ProductSearch["action"] })}
+          >
+            {Object.entries(productPrimaryActionLabels).map(([value, label]) => (
+              <SelectItem key={value} value={value}>
+                {label}
+              </SelectItem>
+            ))}
+          </FilterSelect>
           <FilterSelect
             value={search.type ?? ""}
             placeholder="All categories"
@@ -257,11 +293,33 @@ function ProductsPage() {
             ))}
           </FilterSelect>
           <FilterSelect
-            value={search.status ?? ""}
-            placeholder="All generation states"
-            onChange={(status) => updateFilters({ status: (status || undefined) as ProductSearch["status"] })}
+            value={search.generation ?? ""}
+            placeholder="All generation"
+            onChange={(generation) => updateFilters({ generation: (generation || undefined) as ProductSearch["generation"] })}
           >
-            {Object.entries(generationStatusLabels).map(([value, label]) => (
+            {Object.entries(productGenerationStateLabels).map(([value, label]) => (
+              <SelectItem key={value} value={value}>
+                {label}
+              </SelectItem>
+            ))}
+          </FilterSelect>
+          <FilterSelect
+            value={search.review ?? ""}
+            placeholder="All review"
+            onChange={(review) => updateFilters({ review: (review || undefined) as ProductSearch["review"] })}
+          >
+            {Object.entries(productReviewStateLabels).map(([value, label]) => (
+              <SelectItem key={value} value={value}>
+                {label}
+              </SelectItem>
+            ))}
+          </FilterSelect>
+          <FilterSelect
+            value={search.publish ?? ""}
+            placeholder="All publish"
+            onChange={(publish) => updateFilters({ publish: (publish || undefined) as ProductSearch["publish"] })}
+          >
+            {Object.entries(productPublishStateLabels).map(([value, label]) => (
               <SelectItem key={value} value={value}>
                 {label}
               </SelectItem>
@@ -443,14 +501,9 @@ function ProductRow({
           >
             <h2 className="truncate text-base font-medium">{product.title}</h2>
           </Link>
-          <StatusBadge
-            status={product.generationStatus as GenerationStatus}
-            label={
-              generationStatusLabels[
-                product.generationStatus as GenerationStatus
-              ]
-            }
-          />
+          <StateBadge state={primaryActionTone(product.primaryAction)}>
+            {productPrimaryActionLabels[product.primaryAction]}
+          </StateBadge>
         </div>
         <p className="truncate text-sm text-muted-foreground">
           {product.handle}
@@ -460,12 +513,18 @@ function ProductRow({
             {product.productType || "No category"}
           </Badge>
           {product.shopifyStatus ? <Badge variant="outline">{shopifyStatusLabel(product.shopifyStatus)}</Badge> : null}
-          <Badge variant="outline">
-            {product.shopifyImageCount} Shopify
-          </Badge>
-          <Badge variant="outline">
-            {product.generatedImageCount ?? 0} Generated
-          </Badge>
+          <StateBadge state={generationStateTone(product.generationState)}>
+            {productGenerationStateLabels[product.generationState]}
+          </StateBadge>
+          <StateBadge state={reviewStateTone(product.reviewState)}>
+            {productReviewStateLabels[product.reviewState]}
+          </StateBadge>
+          <StateBadge state={publishStateTone(product.publishState)}>
+            {productPublishStateLabels[product.publishState]}
+          </StateBadge>
+          <Badge variant="outline">{product.shopifyImageCount} Shopify</Badge>
+          <Badge variant="outline">{product.generatedImageCount ?? 0} generated</Badge>
+          {product.failedImageCount ? <Badge variant="outline">{product.failedImageCount} failed</Badge> : null}
         </div>
       </div>
       <Button

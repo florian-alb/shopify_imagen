@@ -13,11 +13,48 @@ const productGenerationStatus = v.union(
   v.literal("failed")
 );
 
+const productGenerationState = v.union(
+  v.literal("not_started"),
+  v.literal("generating"),
+  v.literal("complete"),
+  v.literal("incomplete"),
+  v.literal("failed"),
+  v.literal("canceled")
+);
+
+const productReviewState = v.union(
+  v.literal("none"),
+  v.literal("needs_review"),
+  v.literal("partially_approved"),
+  v.literal("approved"),
+  v.literal("rejected")
+);
+
+const productPublishState = v.union(
+  v.literal("not_ready"),
+  v.literal("ready_to_push"),
+  v.literal("partially_pushed"),
+  v.literal("pushed")
+);
+
+const productPrimaryAction = v.union(
+  v.literal("generate"),
+  v.literal("wait"),
+  v.literal("review"),
+  v.literal("push"),
+  v.literal("fix_errors"),
+  v.literal("done")
+);
+
 const productFilterArgs = {
   search: v.optional(v.string()),
   productType: v.optional(v.string()),
   collection: v.optional(v.string()),
   shopifyStatus: v.optional(v.string()),
+  primaryAction: v.optional(productPrimaryAction),
+  generationState: v.optional(productGenerationState),
+  reviewState: v.optional(productReviewState),
+  publishState: v.optional(productPublishState),
   generationStatus: v.optional(productGenerationStatus)
 };
 
@@ -26,6 +63,10 @@ type ProductFilters = {
   productType?: string;
   collection?: string;
   shopifyStatus?: string;
+  primaryAction?: Doc<"products">["primaryAction"];
+  generationState?: Doc<"products">["generationState"];
+  reviewState?: Doc<"products">["reviewState"];
+  publishState?: Doc<"products">["publishState"];
   generationStatus?: Doc<"products">["generationStatus"];
 };
 
@@ -61,15 +102,68 @@ function calculateProductStatus(images: Doc<"generatedImages">[]): Doc<"products
   return "not_started";
 }
 
-function countReviewable(images: Doc<"generatedImages">[]) {
+function calculateProductWorkflow(images: Doc<"generatedImages">[]) {
+  const totalImageCount = images.length;
+  const runningImageCount = images.filter((image) => image.status === "queued" || image.status === "generating").length;
+  const failedImageCount = images.filter((image) => image.status === "failed").length;
+  const canceledImageCount = images.filter((image) => image.status === "canceled").length;
   const reviewable = images.filter(
     (image) => image.storageUrl && (image.status === "generated" || image.status === "uploaded")
   );
+  const generatedImageCount = reviewable.length;
+  const pendingReviewCount = reviewable.filter((image) => (image.reviewStatus ?? "pending") === "pending").length;
+  const approvedImageCount = reviewable.filter((image) => image.reviewStatus === "approved").length;
+  const rejectedImageCount = reviewable.filter((image) => image.reviewStatus === "rejected").length;
+  const publishedImageCount = reviewable.filter((image) => image.status === "uploaded" && image.shopifyMediaId).length;
+  const publishableImageCount = reviewable.filter(
+    (image) => image.reviewStatus === "approved" && !(image.status === "uploaded" && image.shopifyMediaId)
+  ).length;
+
+  let generationState: Doc<"products">["generationState"] = "not_started";
+  if (totalImageCount === 0) generationState = "not_started";
+  else if (runningImageCount > 0) generationState = "generating";
+  else if (generatedImageCount === 0 && failedImageCount === totalImageCount) generationState = "failed";
+  else if (generatedImageCount === 0 && canceledImageCount > 0) generationState = "canceled";
+  else if (failedImageCount > 0 || canceledImageCount > 0) generationState = "incomplete";
+  else generationState = "complete";
+
+  let reviewState: Doc<"products">["reviewState"] = "none";
+  if (generatedImageCount === 0) reviewState = "none";
+  else if (pendingReviewCount > 0 && approvedImageCount > 0) reviewState = "partially_approved";
+  else if (pendingReviewCount > 0) reviewState = "needs_review";
+  else if (approvedImageCount === generatedImageCount) reviewState = "approved";
+  else if (rejectedImageCount === generatedImageCount) reviewState = "rejected";
+  else if (approvedImageCount > 0) reviewState = "partially_approved";
+  else reviewState = "rejected";
+
+  let publishState: Doc<"products">["publishState"] = "not_ready";
+  if (approvedImageCount === 0) publishState = "not_ready";
+  else if (publishedImageCount > 0 && publishedImageCount >= approvedImageCount) publishState = "pushed";
+  else if (publishedImageCount > 0) publishState = "partially_pushed";
+  else if (publishableImageCount > 0) publishState = "ready_to_push";
+
+  let primaryAction: Doc<"products">["primaryAction"] = "generate";
+  if (generationState === "not_started") primaryAction = "generate";
+  else if (generationState === "generating") primaryAction = "wait";
+  else if (reviewState === "needs_review" || reviewState === "partially_approved") primaryAction = "review";
+  else if (publishState === "ready_to_push" || publishState === "partially_pushed") primaryAction = "push";
+  else if (generationState === "failed" || generationState === "canceled" || generationState === "incomplete") primaryAction = "fix_errors";
+  else if (publishState === "pushed") primaryAction = "done";
+  else if (reviewState === "rejected") primaryAction = "generate";
+
   return {
-    generatedImageCount: images.filter((image) => image.storageUrl).length,
-    pendingReviewCount: reviewable.filter((image) => (image.reviewStatus ?? "pending") === "pending").length,
-    approvedImageCount: reviewable.filter((image) => image.reviewStatus === "approved").length,
-    rejectedImageCount: reviewable.filter((image) => image.reviewStatus === "rejected").length,
+    generationStatus: calculateProductStatus(images),
+    generationState,
+    reviewState,
+    publishState,
+    primaryAction,
+    generatedImageCount,
+    failedImageCount,
+    publishedImageCount,
+    publishableImageCount,
+    pendingReviewCount,
+    approvedImageCount,
+    rejectedImageCount,
     latestJobId:
       images.reduce<Doc<"generatedImages"> | null>((latest, image) => {
         if (!latest) return image;
@@ -79,6 +173,10 @@ function countReviewable(images: Doc<"generatedImages">[]) {
 }
 
 function lightProduct(product: Doc<"products">) {
+  const generationState = product.generationState ?? legacyGenerationState(product.generationStatus);
+  const reviewState = product.reviewState ?? legacyReviewState(product);
+  const publishState = product.publishState ?? legacyPublishState(product);
+  const primaryAction = product.primaryAction ?? legacyPrimaryAction(generationState, reviewState, publishState);
   return {
     _id: product._id,
     _creationTime: product._creationTime,
@@ -91,7 +189,14 @@ function lightProduct(product: Doc<"products">) {
     featuredImageUrl: product.featuredImageUrl,
     shopifyImageCount: product.shopifyImageCount ?? product.currentShopifyImages.length,
     generationStatus: product.generationStatus,
+    generationState,
+    reviewState,
+    publishState,
+    primaryAction,
     generatedImageCount: product.generatedImageCount ?? 0,
+    failedImageCount: product.failedImageCount ?? 0,
+    publishedImageCount: product.publishedImageCount ?? 0,
+    publishableImageCount: product.publishableImageCount ?? 0,
     pendingReviewCount: product.pendingReviewCount ?? 0,
     approvedImageCount: product.approvedImageCount ?? 0,
     rejectedImageCount: product.rejectedImageCount ?? 0,
@@ -99,6 +204,58 @@ function lightProduct(product: Doc<"products">) {
     createdAt: product.createdAt,
     updatedAt: product.updatedAt
   };
+}
+
+function legacyGenerationState(status: Doc<"products">["generationStatus"]): NonNullable<Doc<"products">["generationState"]> {
+  if (status === "not_started") return "not_started";
+  if (status === "generating") return "generating";
+  if (status === "failed") return "failed";
+  if (status === "canceled") return "canceled";
+  if (status === "partial") return "incomplete";
+  return "complete";
+}
+
+function legacyReviewState(product: Doc<"products">): NonNullable<Doc<"products">["reviewState"]> {
+  const generated = product.generatedImageCount ?? 0;
+  const pending = product.pendingReviewCount ?? 0;
+  const approved = product.approvedImageCount ?? 0;
+  const rejected = product.rejectedImageCount ?? 0;
+  if (generated === 0) return "none";
+  if (pending > 0 && approved > 0) return "partially_approved";
+  if (pending > 0) return "needs_review";
+  if (approved === generated) return "approved";
+  if (rejected === generated) return "rejected";
+  if (approved > 0) return "partially_approved";
+  return "rejected";
+}
+
+function legacyPublishState(product: Doc<"products">): NonNullable<Doc<"products">["publishState"]> {
+  if (product.generationStatus === "pushed") return "pushed";
+  if ((product.approvedImageCount ?? 0) > 0) return "ready_to_push";
+  return "not_ready";
+}
+
+function legacyPrimaryAction(
+  generationState: NonNullable<Doc<"products">["generationState"]>,
+  reviewState: NonNullable<Doc<"products">["reviewState"]>,
+  publishState: NonNullable<Doc<"products">["publishState"]>
+): NonNullable<Doc<"products">["primaryAction"]> {
+  if (generationState === "not_started") return "generate";
+  if (generationState === "generating") return "wait";
+  if (reviewState === "needs_review" || reviewState === "partially_approved") return "review";
+  if (publishState === "ready_to_push" || publishState === "partially_pushed") return "push";
+  if (generationState === "failed" || generationState === "canceled" || generationState === "incomplete") return "fix_errors";
+  if (publishState === "pushed") return "done";
+  if (reviewState === "rejected") return "generate";
+  return "generate";
+}
+
+function productWorkflowFields(product: Doc<"products">) {
+  const generationState = product.generationState ?? legacyGenerationState(product.generationStatus);
+  const reviewState = product.reviewState ?? legacyReviewState(product);
+  const publishState = product.publishState ?? legacyPublishState(product);
+  const primaryAction = product.primaryAction ?? legacyPrimaryAction(generationState, reviewState, publishState);
+  return { generationState, reviewState, publishState, primaryAction };
 }
 
 function buildFacets(products: Doc<"products">[]): ProductFacets {
@@ -115,39 +272,56 @@ function buildFacets(products: Doc<"products">[]): ProductFacets {
 }
 
 function productMatches(product: Doc<"products">, args: ProductFilters, needle: string) {
+  const workflow = productWorkflowFields(product);
   const matchesSearch =
     !needle ||
     product.title.toLowerCase().includes(needle) ||
     product.handle.toLowerCase().includes(needle);
+  const matchesProductType = !args.productType || product.productType === args.productType;
   const matchesCollection =
     !args.collection ||
     product.collections.some((collection: { id?: string; title?: string; handle?: string }) => {
       return collection.id === args.collection || collection.handle === args.collection || collection.title === args.collection;
     });
   const matchesShopifyStatus = !args.shopifyStatus || product.shopifyStatus === args.shopifyStatus;
-  return matchesSearch && matchesCollection && matchesShopifyStatus;
+  const matchesPrimaryAction = !args.primaryAction || workflow.primaryAction === args.primaryAction;
+  const matchesGenerationState = !args.generationState || workflow.generationState === args.generationState;
+  const matchesReviewState = !args.reviewState || workflow.reviewState === args.reviewState;
+  const matchesPublishState = !args.publishState || workflow.publishState === args.publishState;
+  const matchesGenerationStatus = !args.generationStatus || product.generationStatus === args.generationStatus;
+  return (
+    matchesSearch &&
+    matchesProductType &&
+    matchesCollection &&
+    matchesShopifyStatus &&
+    matchesPrimaryAction &&
+    matchesGenerationState &&
+    matchesReviewState &&
+    matchesPublishState &&
+    matchesGenerationStatus
+  );
 }
 
 async function filteredProducts(ctx: { db: any }, args: ProductFilters) {
   let products: Doc<"products">[];
-  if (args.generationStatus && args.productType) {
+  if (!args.primaryAction && !args.generationState && !args.reviewState && !args.publishState && args.generationStatus && args.productType) {
     products = await ctx.db
       .query("products")
       .withIndex("by_generation_status_and_product_type", (q: any) =>
         q.eq("generationStatus", args.generationStatus).eq("productType", args.productType)
       )
       .collect();
-  } else if (args.generationStatus) {
+  } else if (!args.primaryAction && !args.generationState && !args.reviewState && !args.publishState && args.generationStatus) {
     products = await ctx.db
       .query("products")
       .withIndex("by_generation_status", (q: any) => q.eq("generationStatus", args.generationStatus))
       .collect();
-  } else if (args.productType) {
+  } else if (!args.primaryAction && !args.generationState && !args.reviewState && !args.publishState && args.productType) {
     products = await ctx.db
       .query("products")
       .withIndex("by_product_type", (q: any) => q.eq("productType", args.productType))
       .collect();
-  } else if (args.shopifyStatus) {
+  } else if (!args.primaryAction && !args.generationState && !args.reviewState && !args.publishState && args.shopifyStatus) {
     products = await ctx.db
       .query("products")
       .withIndex("by_shopify_status", (q: any) => q.eq("shopifyStatus", args.shopifyStatus))
@@ -157,20 +331,8 @@ async function filteredProducts(ctx: { db: any }, args: ProductFilters) {
   }
 
   const needle = (args.search ?? "").trim().toLowerCase();
-  let filtered = products
-    .filter((product) => {
-      const matchesSearch =
-        !needle ||
-        product.title.toLowerCase().includes(needle) ||
-        product.handle.toLowerCase().includes(needle);
-      const matchesCollection =
-        !args.collection ||
-        product.collections.some((collection: { id?: string; title?: string; handle?: string }) => {
-          return collection.id === args.collection || collection.handle === args.collection || collection.title === args.collection;
-        });
-      const matchesShopifyStatus = !args.shopifyStatus || product.shopifyStatus === args.shopifyStatus;
-      return matchesSearch && matchesCollection && matchesShopifyStatus;
-    })
+  const filtered = products
+    .filter((product) => productMatches(product, args, needle))
     .sort((a, b) => b._creationTime - a._creationTime);
 
   return filtered;
@@ -184,7 +346,7 @@ export const list = query({
     const limit = Math.max(1, Math.min(Math.floor(args.limit ?? DEFAULT_PAGE_SIZE), MAX_PAGE_SIZE));
     const needle = (args.search ?? "").trim().toLowerCase();
     let queryBuilder;
-    if (args.generationStatus && args.productType) {
+    if (!args.primaryAction && !args.generationState && !args.reviewState && !args.publishState && args.generationStatus && args.productType) {
       const generationStatus = args.generationStatus;
       const productType = args.productType;
       queryBuilder = ctx.db
@@ -192,12 +354,12 @@ export const list = query({
         .withIndex("by_generation_status_and_product_type", (q) =>
           q.eq("generationStatus", generationStatus).eq("productType", productType)
         );
-    } else if (args.generationStatus) {
+    } else if (!args.primaryAction && !args.generationState && !args.reviewState && !args.publishState && args.generationStatus) {
       const generationStatus = args.generationStatus;
       queryBuilder = ctx.db.query("products").withIndex("by_generation_status", (q) => q.eq("generationStatus", generationStatus));
-    } else if (args.productType) {
+    } else if (!args.primaryAction && !args.generationState && !args.reviewState && !args.publishState && args.productType) {
       queryBuilder = ctx.db.query("products").withIndex("by_product_type", (q) => q.eq("productType", args.productType));
-    } else if (args.shopifyStatus) {
+    } else if (!args.primaryAction && !args.generationState && !args.reviewState && !args.publishState && args.shopifyStatus) {
       queryBuilder = ctx.db.query("products").withIndex("by_shopify_status", (q) => q.eq("shopifyStatus", args.shopifyStatus));
     } else {
       queryBuilder = ctx.db.query("products").withIndex("by_created").order("desc");
@@ -275,7 +437,7 @@ export const getWithImages = query({
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
       .order("desc")
       .collect();
-    return { product: { ...product, generationStatus: calculateProductStatus(images) }, images };
+    return { product: { ...product, ...calculateProductWorkflow(images) }, images };
   }
 });
 
@@ -314,6 +476,23 @@ export const upsertSynced = internalMutation({
       ...args,
       shopifyImageCount: args.currentShopifyImages.length,
       generationStatus: existing?.generationStatus ?? ("not_started" as const),
+      generationState: existing
+        ? existing.generationState ?? legacyGenerationState(existing.generationStatus)
+        : ("not_started" as const),
+      reviewState: existing
+        ? existing.reviewState ?? legacyReviewState(existing)
+        : ("none" as const),
+      publishState: existing
+        ? existing.publishState ?? legacyPublishState(existing)
+        : ("not_ready" as const),
+      primaryAction: existing
+        ? existing.primaryAction ??
+          legacyPrimaryAction(
+            existing.generationState ?? legacyGenerationState(existing.generationStatus),
+            existing.reviewState ?? legacyReviewState(existing),
+            existing.publishState ?? legacyPublishState(existing)
+          )
+        : ("generate" as const),
       lastSyncedAt: now,
       updatedAt: now
     };
@@ -389,14 +568,12 @@ export async function refreshProductSummary(ctx: { db: any }, productId: Id<"pro
     .query("generatedImages")
     .withIndex("by_product", (q: any) => q.eq("productId", productId))
     .collect();
-  const summary = countReviewable(images);
-  const generationStatus = calculateProductStatus(images);
+  const summary = calculateProductWorkflow(images);
   await ctx.db.patch(productId, {
     ...summary,
-    generationStatus,
     updatedAt: Date.now()
   });
-  return { ...summary, generationStatus };
+  return summary;
 }
 
 export const backfillProductSummaries = mutation({

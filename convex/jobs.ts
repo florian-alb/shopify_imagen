@@ -439,6 +439,8 @@ export const create = mutation({
       });
       await ctx.db.patch(task.product._id, {
         generationStatus: "generating",
+        generationState: "generating",
+        primaryAction: "wait",
         latestJobId: jobId,
         updatedAt: now,
       });
@@ -880,6 +882,8 @@ export const retry = mutation({
       });
       await ctx.db.patch(img.productId, {
         generationStatus: "generating",
+        generationState: "generating",
+        primaryAction: "wait",
         updatedAt: now,
       });
       affectedProductIds.add(img.productId);

@@ -211,8 +211,6 @@ function JobsPage() {
       ) : null}
       {jobsPage === undefined ? (
         <EmptyState loading title="Loading jobs" body="Fetching recent generation work from Convex." />
-      ) : jobs.length === 0 ? (
-        <EmptyState title="No jobs yet" body="Create a generation job from the products page." />
       ) : (
         <>
           <Card className="mb-4 rounded-lg py-3">
@@ -269,7 +267,14 @@ function JobsPage() {
           </Card>
 
           {jobs.length === 0 ? (
-            <EmptyState title="No matching jobs" body="Adjust the filters to show more generation jobs." />
+            <EmptyState
+              title={hasActiveFilters ? "No matching jobs" : "No jobs yet"}
+              body={
+                hasActiveFilters
+                  ? "Adjust the filters to show more generation jobs."
+                  : "Create a generation job from the products page."
+              }
+            />
           ) : (
             <section className="grid gap-3">
               {jobs.map((job) => {

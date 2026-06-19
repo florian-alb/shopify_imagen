@@ -20,7 +20,6 @@ import {
   BusyIcon,
   EmptyState,
   StateBadge,
-  StatusBadge,
 } from "@/components/page";
 import {
   Accordion,
@@ -64,9 +63,19 @@ import {
   validateProductSearch,
 } from "@/lib/productFilters";
 import {
-  generationStatusLabels,
+  generationStateTone,
+  primaryActionTone,
+  productGenerationStateLabels,
+  productPrimaryActionLabels,
+  productPublishStateLabels,
+  productReviewStateLabels,
+  publishStateTone,
+  reviewStateTone,
   shopifyStatusLabel,
-  type GenerationStatus,
+  type ProductGenerationState,
+  type ProductPrimaryAction,
+  type ProductPublishState,
+  type ProductReviewState,
 } from "@/lib/status";
 import { api } from "../../../convex/_generated/api";
 import type { Doc, Id } from "../../../convex/_generated/dataModel";
@@ -196,6 +205,10 @@ function ProductDetailPage() {
     (image) => getReviewStatus(image) === "pending",
   );
   const readyImages = images.filter(isPushReady);
+  const primaryAction = (product?.primaryAction ?? "generate") as ProductPrimaryAction;
+  const generationState = (product?.generationState ?? "not_started") as ProductGenerationState;
+  const reviewState = (product?.reviewState ?? "none") as ProductReviewState;
+  const publishState = (product?.publishState ?? "not_ready") as ProductPublishState;
 
   useEffect(() => {
     if (!localShopifyOrder || localShopifyOrder.productId !== productId) return;
@@ -436,14 +449,18 @@ function ProductDetailPage() {
                 </BreadcrumbItem>
               </BreadcrumbList>
             </Breadcrumb>
-            <StatusBadge
-              status={product.generationStatus as GenerationStatus}
-              label={
-                generationStatusLabels[
-                  product.generationStatus as GenerationStatus
-                ]
-              }
-            />
+            <StateBadge state={primaryActionTone(primaryAction)}>
+              {productPrimaryActionLabels[primaryAction]}
+            </StateBadge>
+            <StateBadge state={generationStateTone(generationState)}>
+              {productGenerationStateLabels[generationState]}
+            </StateBadge>
+            <StateBadge state={reviewStateTone(reviewState)}>
+              {productReviewStateLabels[reviewState]}
+            </StateBadge>
+            <StateBadge state={publishStateTone(publishState)}>
+              {productPublishStateLabels[publishState]}
+            </StateBadge>
             <Badge variant="outline">
               {product.productType || "No category"}
             </Badge>
@@ -588,14 +605,18 @@ function ProductDetailPage() {
 
       <section className="mb-5 px-1 py-3">
         <div className="mb-4 flex flex-wrap gap-2">
-          <StatusBadge
-            status={product.generationStatus as GenerationStatus}
-            label={
-              generationStatusLabels[
-                product.generationStatus as GenerationStatus
-              ]
-            }
-          />
+          <StateBadge state={primaryActionTone(primaryAction)}>
+            {productPrimaryActionLabels[primaryAction]}
+          </StateBadge>
+          <StateBadge state={generationStateTone(generationState)}>
+            {productGenerationStateLabels[generationState]}
+          </StateBadge>
+          <StateBadge state={reviewStateTone(reviewState)}>
+            {productReviewStateLabels[reviewState]}
+          </StateBadge>
+          <StateBadge state={publishStateTone(publishState)}>
+            {productPublishStateLabels[publishState]}
+          </StateBadge>
           <Badge variant="outline">
             {product.productType || "No category"}
           </Badge>

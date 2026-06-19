@@ -1,10 +1,25 @@
-import { generationStatusLabels, type GenerationStatus } from "@/lib/status";
+import {
+  generationStatusLabels,
+  productGenerationStateLabels,
+  productPrimaryActionLabels,
+  productPublishStateLabels,
+  productReviewStateLabels,
+  type GenerationStatus,
+  type ProductGenerationState,
+  type ProductPrimaryAction,
+  type ProductPublishState,
+  type ProductReviewState,
+} from "@/lib/status";
 
 export type ProductSearch = {
   q?: string;
   type?: string;
   collection?: string;
   shopifyStatus?: string;
+  action?: ProductPrimaryAction;
+  generation?: ProductGenerationState;
+  review?: ProductReviewState;
+  publish?: ProductPublishState;
   status?: GenerationStatus;
   page?: number;
   pageSize?: number;
@@ -18,6 +33,10 @@ function optionalString(value: unknown) {
 
 export function validateProductSearch(search: Record<string, unknown>): ProductSearch {
   const status = optionalString(search.status);
+  const action = optionalString(search.action);
+  const generation = optionalString(search.generation);
+  const review = optionalString(search.review);
+  const publish = optionalString(search.publish);
   const page = parsePositiveInt(search.page);
   const pageSize = parsePageSize(search.pageSize);
   return {
@@ -25,6 +44,10 @@ export function validateProductSearch(search: Record<string, unknown>): ProductS
     type: optionalString(search.type),
     collection: optionalString(search.collection),
     shopifyStatus: optionalString(search.shopifyStatus)?.toUpperCase(),
+    action: action && action in productPrimaryActionLabels ? (action as ProductPrimaryAction) : undefined,
+    generation: generation && generation in productGenerationStateLabels ? (generation as ProductGenerationState) : undefined,
+    review: review && review in productReviewStateLabels ? (review as ProductReviewState) : undefined,
+    publish: publish && publish in productPublishStateLabels ? (publish as ProductPublishState) : undefined,
     status: status && status in generationStatusLabels ? (status as GenerationStatus) : undefined,
     page: page && page > 1 ? page : undefined,
     pageSize: pageSize && pageSize !== 20 ? pageSize : undefined
@@ -47,6 +70,10 @@ export function productFilterArgs(search: ProductSearch) {
     productType: search.type,
     collection: search.collection,
     shopifyStatus: search.shopifyStatus,
+    primaryAction: search.action,
+    generationState: search.generation,
+    reviewState: search.review,
+    publishState: search.publish,
     generationStatus: search.status
   };
 }
