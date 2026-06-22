@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireUserId } from "./authz";
+import { getActiveShopScope, shopMatchesScope, type ShopScope } from "./shopScope";
 
 const productGenerationStatus = v.union(
   v.literal("not_started"),
@@ -302,7 +303,7 @@ function productMatches(product: Doc<"products">, args: ProductFilters, needle: 
   );
 }
 
-async function filteredProducts(ctx: { db: any }, args: ProductFilters) {
+async function filteredProducts(ctx: { db: any }, args: ProductFilters, scope: ShopScope) {
   let products: Doc<"products">[];
   if (!args.primaryAction && !args.generationState && !args.reviewState && !args.publishState && args.generationStatus && args.productType) {
     products = await ctx.db
@@ -332,6 +333,7 @@ async function filteredProducts(ctx: { db: any }, args: ProductFilters) {
 
   const needle = (args.search ?? "").trim().toLowerCase();
   const filtered = products
+    .filter((product) => shopMatchesScope(product, scope))
     .filter((product) => productMatches(product, args, needle))
     .sort((a, b) => b._creationTime - a._creationTime);
 
@@ -341,7 +343,8 @@ async function filteredProducts(ctx: { db: any }, args: ProductFilters) {
 export const list = query({
   args: { ...productFilterArgs, offset: v.optional(v.number()), limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
-    await requireUserId(ctx);
+    const userId = await requireUserId(ctx);
+    const scope = await getActiveShopScope(ctx, userId);
     const offset = Math.max(0, Math.floor(args.offset ?? 0));
     const limit = Math.max(1, Math.min(Math.floor(args.limit ?? DEFAULT_PAGE_SIZE), MAX_PAGE_SIZE));
     const needle = (args.search ?? "").trim().toLowerCase();
@@ -368,6 +371,7 @@ export const list = query({
     const page: Doc<"products">[] = [];
     let matched = 0;
     for await (const product of queryBuilder) {
+      if (!shopMatchesScope(product, scope)) continue;
       if (!productMatches(product, args, needle)) continue;
       if (matched >= offset && page.length < limit + 1) page.push(product);
       matched += 1;
@@ -390,8 +394,9 @@ export const navigation = query({
     ...productFilterArgs
   },
   handler: async (ctx, args) => {
-    await requireUserId(ctx);
-    const products = await filteredProducts(ctx, args);
+    const userId = await requireUserId(ctx);
+    const scope = await getActiveShopScope(ctx, userId);
+    const products = await filteredProducts(ctx, args, scope);
     const index = products.findIndex((product) => product._id === args.productId);
     return {
       previous: index > 0 ? products[index - 1] : null,
@@ -405,8 +410,10 @@ export const navigation = query({
 export const facets = query({
   args: {},
   handler: async (ctx) => {
-    await requireUserId(ctx);
-    const cached = await ctx.db.query("appSettings").withIndex("by_key", (q) => q.eq("key", PRODUCT_FACETS_KEY)).unique();
+    const userId = await requireUserId(ctx);
+    const scope = await getActiveShopScope(ctx, userId);
+    const rows = await ctx.db.query("appSettings").collect();
+    const cached = rows.find((row) => row.key === PRODUCT_FACETS_KEY && shopMatchesScope(row, scope));
     return (cached?.value as ProductFacets | undefined) ?? { productTypes: [], shopifyStatuses: [], collections: [] };
   }
 });
@@ -414,8 +421,11 @@ export const facets = query({
 export const get = query({
   args: { productId: v.id("products") },
   handler: async (ctx, args) => {
-    await requireUserId(ctx);
-    return ctx.db.get(args.productId);
+    const userId = await requireUserId(ctx);
+    const scope = await getActiveShopScope(ctx, userId);
+    const product = await ctx.db.get(args.productId);
+    if (!product || !shopMatchesScope(product, scope)) return null;
+    return product;
   }
 });
 
@@ -429,9 +439,10 @@ export const internalGet = internalQuery({
 export const getWithImages = query({
   args: { productId: v.id("products") },
   handler: async (ctx, args) => {
-    await requireUserId(ctx);
+    const userId = await requireUserId(ctx);
+    const scope = await getActiveShopScope(ctx, userId);
     const product = await ctx.db.get(args.productId);
-    if (!product) return null;
+    if (!product || !shopMatchesScope(product, scope)) return null;
     const images = await ctx.db
       .query("generatedImages")
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
@@ -444,14 +455,17 @@ export const getWithImages = query({
 export const byIds = query({
   args: { productIds: v.array(v.id("products")) },
   handler: async (ctx, args) => {
-    await requireUserId(ctx);
+    const userId = await requireUserId(ctx);
+    const scope = await getActiveShopScope(ctx, userId);
     const products = await Promise.all(args.productIds.map((id) => ctx.db.get(id)));
-    return products.filter(Boolean) as Doc<"products">[];
+    return products.filter((product) => product && shopMatchesScope(product, scope)) as Doc<"products">[];
   }
 });
 
 export const upsertSynced = internalMutation({
   args: {
+    shopId: v.optional(v.id("shops")),
+    adoptLegacy: v.optional(v.boolean()),
     shopifyProductId: v.string(),
     title: v.string(),
     handle: v.string(),
@@ -468,12 +482,25 @@ export const upsertSynced = internalMutation({
   },
   handler: async (ctx, args) => {
     const now = Date.now();
-    const existing = await ctx.db
-      .query("products")
-      .withIndex("by_shopify_product_id", (q) => q.eq("shopifyProductId", args.shopifyProductId))
-      .unique();
+    const scopedExisting = args.shopId
+      ? await ctx.db
+        .query("products")
+        .withIndex("by_shop_and_shopify_product_id", (q) =>
+          q.eq("shopId", args.shopId).eq("shopifyProductId", args.shopifyProductId)
+        )
+        .unique()
+      : null;
+    const legacyExisting =
+      !scopedExisting && (!args.shopId || args.adoptLegacy)
+        ? await ctx.db
+          .query("products")
+          .withIndex("by_shopify_product_id", (q) => q.eq("shopifyProductId", args.shopifyProductId))
+          .unique()
+        : null;
+    const existing = scopedExisting ?? (legacyExisting?.shopId ? null : legacyExisting);
+    const { adoptLegacy, ...productArgs } = args;
     const payload = {
-      ...args,
+      ...productArgs,
       shopifyImageCount: args.currentShopifyImages.length,
       generationStatus: existing?.generationStatus ?? ("not_started" as const),
       generationState: existing
@@ -513,16 +540,29 @@ export const upsertSynced = internalMutation({
 });
 
 export const refreshFacets = internalMutation({
-  args: {},
-  handler: async (ctx) => {
-    const products = await ctx.db.query("products").collect();
+  args: { shopId: v.optional(v.union(v.id("shops"), v.null())) },
+  handler: async (ctx, args) => {
+    const shopId = args.shopId ?? undefined;
+    const products = (await ctx.db.query("products").collect()).filter((product: Doc<"products">) =>
+      shopId ? product.shopId === shopId : product.shopId == null
+    );
     const facets = buildFacets(products);
-    const existing = await ctx.db.query("appSettings").withIndex("by_key", (q) => q.eq("key", PRODUCT_FACETS_KEY)).unique();
+    const existing = shopId
+      ? await ctx.db
+        .query("appSettings")
+        .withIndex("by_shop_and_key", (q) => q.eq("shopId", shopId).eq("key", PRODUCT_FACETS_KEY))
+        .unique()
+      : await ctx.db.query("appSettings").withIndex("by_key", (q) => q.eq("key", PRODUCT_FACETS_KEY)).unique();
     if (existing) {
       await ctx.db.patch(existing._id, { value: facets, updatedAt: Date.now() });
       return existing._id;
     }
-    return ctx.db.insert("appSettings", { key: PRODUCT_FACETS_KEY, value: facets, updatedAt: Date.now() });
+    return ctx.db.insert("appSettings", {
+      shopId,
+      key: PRODUCT_FACETS_KEY,
+      value: facets,
+      updatedAt: Date.now()
+    });
   }
 });
 

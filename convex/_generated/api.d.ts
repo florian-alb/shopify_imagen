@@ -20,7 +20,9 @@ import type * as products from "../products.js";
 import type * as promptDefaults from "../promptDefaults.js";
 import type * as prompts from "../prompts.js";
 import type * as settings from "../settings.js";
+import type * as shopScope from "../shopScope.js";
 import type * as shopify from "../shopify.js";
+import type * as shops from "../shops.js";
 import type * as users from "../users.js";
 
 import type {
@@ -42,7 +44,9 @@ declare const fullApi: ApiFromModules<{
   promptDefaults: typeof promptDefaults;
   prompts: typeof prompts;
   settings: typeof settings;
+  shopScope: typeof shopScope;
   shopify: typeof shopify;
+  shops: typeof shops;
   users: typeof users;
 }>;
 

@@ -172,40 +172,48 @@ function PromptSettingsPage() {
   return (
     <main className="page">
       <PageHeader
-        eyebrow="Settings"
-        title="Prompt templates"
+        eyebrow="Configuration"
+        title="Prompts"
         action={
           <div className="flex gap-2">
-            <Button variant="outline" size="lg" onClick={() => void seed()}>Seed defaults</Button>
-            <Button size="lg" onClick={() => setCreateOpen(true)}>
+            <Button variant="outline" size="sm" onClick={() => void seed()}>Seed</Button>
+            <Button size="sm" onClick={() => setCreateOpen(true)}>
               <Plus data-icon="inline-start" />
-              New template
+              Template
             </Button>
           </div>
         }
-      />
+      >
+        Editeur des prompts utilises par les generations image.
+      </PageHeader>
 
-      <Card className="mb-4 rounded-lg">
+      <Card className="studio-card mb-4 rounded-lg">
         <CardHeader>
-          <CardTitle>Supported variables</CardTitle>
+          <CardTitle>Variables disponibles</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-wrap gap-2">
           {supportedVariables.map((item) => (
-            <Badge key={item} variant="outline">{item}</Badge>
+            <Badge
+              key={item}
+              variant="secondary"
+              className="h-6 border border-border bg-secondary px-2.5 font-mono text-[0.72rem] text-secondary-foreground"
+            >
+              {item}
+            </Badge>
           ))}
         </CardContent>
       </Card>
 
       {orderedPrompts === undefined ? (
-        <EmptyState loading title="Loading prompts" body="Fetching prompt templates from Convex." />
+        <EmptyState loading title="Chargement des prompts" body="Lecture des templates depuis Convex." />
       ) : orderedPrompts.length === 0 ? (
-        <EmptyState title="No prompts yet" body="Seed default prompt templates to start generating images." />
+        <EmptyState title="Aucun prompt" body="Seed les templates par defaut pour demarrer." />
       ) : (
-        <Tabs value={currentTab} onValueChange={setActiveTab}>
-          <p className="text-xs text-muted-foreground">
-            Drag the tabs to set the order images are published to Shopify.
+        <Tabs value={currentTab} onValueChange={setActiveTab} className="grid gap-4 xl:grid-cols-[18rem_minmax(0,1fr)]">
+          <p className="text-xs text-muted-foreground xl:col-span-2">
+            Glissez les templates pour definir l'ordre de publication Shopify.
           </p>
-          <TabsList className="max-w-full flex-wrap overflow-x-auto">
+          <TabsList className="h-auto w-full max-w-full flex-wrap justify-start overflow-x-auto rounded-lg border border-white/10 bg-white/[0.03] p-2 xl:flex xl:flex-col xl:items-stretch xl:self-start xl:overflow-visible">
             {orderedPrompts.map((prompt) => (
               <TabsTrigger
                 key={prompt._id}
@@ -226,26 +234,26 @@ function PromptSettingsPage() {
                 }}
                 onDragEnd={() => void commitReorder()}
                 data-dragging={dragId === prompt._id ? "" : undefined}
-                className={`cursor-grab gap-1 active:cursor-grabbing data-dragging:opacity-50${
-                  prompt.isPreset ? " border border-primary" : ""
+                className={`min-h-10 w-full cursor-grab justify-start gap-2 rounded-md border border-transparent px-3 text-sm font-medium text-muted-foreground active:cursor-grabbing data-[dragging]:opacity-50 data-[state=active]:border-primary/30 data-[state=active]:bg-primary/15 data-[state=active]:text-foreground data-[state=inactive]:hover:bg-muted/70 data-[state=inactive]:hover:text-foreground${
+                  prompt.isPreset ? " after:ml-auto after:size-1.5 after:rounded-full after:bg-primary after:content-['']" : ""
                 }`}
               >
-                <GripVertical className="size-3 opacity-50" />
-                {prompt.label}
+                <GripVertical className="size-3 shrink-0 opacity-50" />
+                <span className="truncate">{prompt.label}</span>
               </TabsTrigger>
             ))}
           </TabsList>
 
           {orderedPrompts.map((prompt) => (
             <TabsContent key={prompt._id} value={prompt.imageType}>
-              <Card className="rounded-lg">
+              <Card className="studio-card rounded-lg">
                 <CardHeader className="flex flex-row items-start justify-between gap-2">
                   <div>
                     <CardTitle className="text-lg">{prompt.label}</CardTitle>
                     <p className="text-sm text-muted-foreground">{prompt.imageType}</p>
                   </div>
                   <div className="flex items-center gap-3">
-                    <Label className="flex h-8 cursor-pointer items-center gap-2 rounded-lg border px-3 text-sm">
+                    <Label className="flex h-8 cursor-pointer items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 text-sm">
                       <Checkbox
                         checked={prompt.isPreset === true}
                         onCheckedChange={(checked) => void togglePreset(prompt._id, checked === true)}
@@ -259,7 +267,7 @@ function PromptSettingsPage() {
                 </CardHeader>
                 <CardContent>
                   <Textarea
-                    className="min-h-56 font-mono text-xs leading-relaxed"
+                    className="min-h-[28rem] font-mono text-xs leading-relaxed"
                     value={drafts[prompt._id] ?? prompt.content}
                     onChange={(event) => setDrafts((current) => ({ ...current, [prompt._id]: event.target.value }))}
                   />
@@ -272,7 +280,7 @@ function PromptSettingsPage() {
                     <Button onClick={() => void save(prompt._id)} disabled={busy === prompt._id}>
                       <BusyIcon busy={busy === prompt._id} />
                       {busy !== prompt._id ? <Save data-icon="inline-start" /> : null}
-                      Save
+                      Enregistrer
                     </Button>
                   </div>
                 </CardContent>
@@ -319,17 +327,17 @@ function CreatePromptDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+    <DialogContent className="border-white/10 bg-card sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>New prompt template</DialogTitle>
-          <DialogDescription>Create a custom prompt template. The image type must be unique.</DialogDescription>
+          <DialogTitle>Nouveau template</DialogTitle>
+          <DialogDescription>Creer un prompt personnalise. Le type d'image doit etre unique.</DialogDescription>
         </DialogHeader>
         <div className="grid gap-3">
           <div className="grid gap-1.5">
-            <Label htmlFor="prompt-image-type">Image type</Label>
+            <Label htmlFor="prompt-image-type">Type image</Label>
             <Input
               id="prompt-image-type"
-              placeholder="e.g. detail-shot"
+              placeholder="ex. detail-shot"
               value={imageType}
               onChange={(event) => setImageType(event.target.value)}
             />
@@ -338,17 +346,17 @@ function CreatePromptDialog({
             <Label htmlFor="prompt-label">Label</Label>
             <Input
               id="prompt-label"
-              placeholder="e.g. Detail shot"
+              placeholder="ex. Detail shot"
               value={label}
               onChange={(event) => setLabel(event.target.value)}
             />
           </div>
           <div className="grid gap-1.5">
-            <Label htmlFor="prompt-content">Content</Label>
+            <Label htmlFor="prompt-content">Contenu</Label>
             <Textarea
               id="prompt-content"
               className="min-h-48 font-mono text-xs leading-relaxed"
-              placeholder="Describe the image to generate. Use variables like {{PRODUCT_TITLE}}."
+              placeholder="Decrivez l'image a generer. Utilisez {{PRODUCT_TITLE}} si besoin."
               value={content}
               onChange={(event) => setContent(event.target.value)}
             />
@@ -358,7 +366,7 @@ function CreatePromptDialog({
           <Button disabled={!canSubmit} onClick={() => onCreate({ imageType, label, content })}>
             <BusyIcon busy={busy} />
             {!busy ? <Plus data-icon="inline-start" /> : null}
-            Create template
+            Creer
           </Button>
         </DialogFooter>
       </DialogContent>
