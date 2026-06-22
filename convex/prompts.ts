@@ -150,6 +150,23 @@ export const update = mutation({
   }
 });
 
+export const remove = mutation({
+  args: { promptId: v.id("promptTemplates") },
+  handler: async (ctx, args) => {
+    const userId = await requireUserId(ctx);
+    const { prompt, scope } = await getPromptForActiveShop(ctx, args.promptId, userId);
+    await ctx.db.delete(prompt._id);
+
+    const remainingPrompts = await promptsForScope(ctx, scope);
+    const now = Date.now();
+    await Promise.all(
+      remainingPrompts.map((remainingPrompt, index) =>
+        ctx.db.patch(remainingPrompt._id, { position: index, updatedAt: now })
+      )
+    );
+  }
+});
+
 export const reorder = mutation({
   args: { orderedIds: v.array(v.id("promptTemplates")) },
   handler: async (ctx, args) => {
