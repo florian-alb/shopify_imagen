@@ -21,7 +21,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { api } from "../../../convex/_generated/api";
-import type { Doc } from "../../../convex/_generated/dataModel";
+import type { Doc, Id } from "../../../convex/_generated/dataModel";
 
 type ReviewSummary = {
   total: number;
@@ -55,6 +55,7 @@ type ProviderFilter = "all" | "openai" | "gemini";
 type ReviewState = "none" | "pending" | "approved" | "partial" | "rejected";
 type ReviewFilter = "all" | "to-review" | "approved" | "partial" | "rejected" | "no-review";
 type JobSearch = {
+  productId?: string;
   status?: Exclude<JobStatusFilter, "all">;
   executionMode?: Exclude<ExecutionModeFilter, "all">;
   provider?: Exclude<ProviderFilter, "all">;
@@ -80,7 +81,12 @@ function optionalEnum<T extends readonly string[]>(value: unknown, allowed: T): 
 function validateJobSearch(search: Record<string, unknown>): JobSearch {
   const page = parsePositiveInt(search.page);
   const pageSize = parsePageSize(search.pageSize);
+  const productId =
+    typeof search.productId === "string" && search.productId.trim()
+      ? search.productId
+      : undefined;
   return {
+    productId,
     status: optionalEnum(search.status, jobStatuses),
     executionMode: optionalEnum(search.executionMode, executionModes),
     provider: optionalEnum(search.provider, providers),
@@ -132,11 +138,12 @@ function JobsPage() {
   const pageSize = search.pageSize ?? 20;
   const offset = (page - 1) * pageSize;
   const jobsListArgs = useMemo(() => ({
+    productId: search.productId as Id<"products"> | undefined,
     status: search.status,
     executionMode: search.executionMode,
     provider: search.provider,
     review: search.review
-  }), [search.executionMode, search.provider, search.review, search.status]);
+  }), [search.executionMode, search.productId, search.provider, search.review, search.status]);
   const jobsPage = useQuery(
     api.jobs.list,
     {
@@ -172,6 +179,7 @@ function JobsPage() {
   }
 
   const hasActiveFilters =
+    Boolean(search.productId) ||
     statusFilter !== "all" ||
     executionModeFilter !== "all" ||
     providerFilter !== "all" ||
@@ -182,6 +190,7 @@ function JobsPage() {
       status: undefined,
       executionMode: undefined,
       provider: undefined,
+      productId: undefined,
       review: undefined,
       page: undefined
     });

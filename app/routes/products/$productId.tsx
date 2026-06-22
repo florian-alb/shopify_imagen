@@ -8,6 +8,7 @@ import {
   ChevronRight,
   ExternalLink,
   GripVertical,
+  ListChecks,
   RefreshCw,
   Send,
   Trash2,
@@ -176,7 +177,7 @@ function ProductDetailPage() {
   const canReorderShopifyImages =
     shopifyImages.length > 1 &&
     shopifyImages.every((image) => shopifyMediaId(image));
-  const latestJobId = images[0]?.jobId;
+  const hasProductJobs = Boolean(product?.latestJobId ?? images[0]?.jobId);
   const shopifyAdminUrl = useMemo(() => {
     if (!product || !shopInfo?.storeHandle) return null;
     const numericId = product.shopifyProductId.split("/").pop();
@@ -494,11 +495,11 @@ function ProductDetailPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {latestJobId ? (
+          {hasProductJobs ? (
             <Button size="lg" variant="outline" asChild>
-              <Link to="/jobs/$jobId" params={{ jobId: latestJobId }}>
-                <ArrowLeft data-icon="inline-start" />
-                Voir le job
+              <Link to="/jobs" search={{ productId }}>
+                <ListChecks data-icon="inline-start" />
+                Jobs
               </Link>
             </Button>
           ) : null}
@@ -595,10 +596,11 @@ function ProductDetailPage() {
               <CardTitle className="text-lg">
                 Historique prompts et images
               </CardTitle>
-              {latestJobId ? (
+              {hasProductJobs ? (
                 <Button variant="outline" size="sm" asChild>
-                  <Link to="/jobs/$jobId" params={{ jobId: latestJobId }}>
-                    Voir le job
+                  <Link to="/jobs" search={{ productId }}>
+                    <ListChecks data-icon="inline-start" />
+                    Jobs
                     <ChevronRight data-icon="inline-end" />
                   </Link>
                 </Button>

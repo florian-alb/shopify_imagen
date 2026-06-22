@@ -1,9 +1,18 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
-import { GripVertical, Plus, RotateCcw, Save } from "lucide-react";
+import { GripVertical, Plus, RotateCcw, Save, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { BusyIcon, EmptyState, PageHeader, StateBadge } from "@/components/page";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -29,11 +38,13 @@ function PromptSettingsPage() {
   const updatePrompt = useMutation(api.prompts.update);
   const resetPrompt = useMutation(api.prompts.reset);
   const reorderPrompts = useMutation(api.prompts.reorder);
+  const removePrompt = useMutation(api.prompts.remove);
   const setPreset = useMutation(api.prompts.setPreset);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string | undefined>(undefined);
   const [createOpen, setCreateOpen] = useState(false);
+  const [deletePromptId, setDeletePromptId] = useState<Id<"promptTemplates"> | null>(null);
   // Drag-and-drop reordering state. `localOrder` holds an optimistic ordering of
   // prompt ids while dragging (and until Convex reflects the saved order), so the
   // tabs reorder live without a flash back to the server order on drop.
@@ -130,6 +141,32 @@ function PromptSettingsPage() {
     }
   }
 
+  async function deletePrompt(promptId: Id<"promptTemplates">) {
+    const prompt = orderedPrompts?.find((item) => item._id === promptId);
+    setBusy(promptId);
+    try {
+      await removePrompt({ promptId });
+      setDrafts((current) => {
+        const next = { ...current };
+        delete next[promptId];
+        return next;
+      });
+      setLocalOrder((current) => (current ? current.filter((id) => id !== promptId) : current));
+      if (prompt && activeTab === prompt.imageType) {
+        const nextPrompt = orderedPrompts?.find((item) => item._id !== promptId);
+        setActiveTab(nextPrompt?.imageType);
+      }
+      setDeletePromptId(null);
+      toast.success(`Deleted "${prompt?.label ?? "prompt"}" template`);
+    } catch (deleteError) {
+      toast.error("Failed to delete prompt", {
+        description: deleteError instanceof Error ? deleteError.message : String(deleteError)
+      });
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function togglePreset(promptId: Id<"promptTemplates">, isPreset: boolean) {
     try {
       await setPreset({ promptId, isPreset });
@@ -168,6 +205,7 @@ function PromptSettingsPage() {
   }
 
   const currentTab = activeTab ?? orderedPrompts?.[0]?.imageType;
+  const deleteTarget = orderedPrompts?.find((prompt) => prompt._id === deletePromptId) ?? null;
 
   return (
     <main className="page">
@@ -272,6 +310,10 @@ function PromptSettingsPage() {
                     onChange={(event) => setDrafts((current) => ({ ...current, [prompt._id]: event.target.value }))}
                   />
                   <div className="mt-3 flex justify-end gap-2">
+                    <Button variant="destructive" onClick={() => setDeletePromptId(prompt._id)} disabled={busy === prompt._id}>
+                      <Trash2 data-icon="inline-start" />
+                      Supprimer
+                    </Button>
                     <Button variant="outline" onClick={() => void reset(prompt._id)} disabled={busy === prompt._id}>
                       <BusyIcon busy={busy === prompt._id} />
                       {busy !== prompt._id ? <RotateCcw data-icon="inline-start" /> : null}
@@ -296,6 +338,35 @@ function PromptSettingsPage() {
         busy={busy === "create"}
         onCreate={(values) => void create(values)}
       />
+      {deleteTarget ? (
+        <AlertDialog
+          open={deletePromptId !== null}
+          onOpenChange={(open) => {
+            if (!open && busy !== deleteTarget._id) setDeletePromptId(null);
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Supprimer ce prompt ?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Cette action supprime uniquement le prompt de la boutique active. Les autres boutiques gardent leurs propres prompts.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={busy === deleteTarget._id}>Annuler</AlertDialogCancel>
+              <Button
+                variant="destructive"
+                disabled={busy === deleteTarget._id}
+                onClick={() => void deletePrompt(deleteTarget._id)}
+              >
+                <BusyIcon busy={busy === deleteTarget._id} />
+                {busy !== deleteTarget._id ? <Trash2 data-icon="inline-start" /> : null}
+                Supprimer
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      ) : null}
     </main>
   );
 }

@@ -169,6 +169,7 @@ function AuthShell({ children }: { children: ReactNode }) {
 
 const navGroups = [
   {
+    label: "Navigation",
     items: [
       { to: "/products", label: "Produits", icon: Boxes },
       { to: "/jobs", label: "Generations", icon: ListChecks },
@@ -416,7 +417,7 @@ function Topbar() {
 
   return (
     <header className="hidden h-16 items-center justify-between gap-4 px-5 md:flex">
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 w-full justify-end">
         <Badge
           variant="outline"
           className="border-primary/25 bg-primary/10 text-primary"

@@ -185,6 +185,7 @@ async function currentGenerationEngine(ctx: MutationCtx, scope: ShopScope) {
 
 export const list = query({
   args: {
+    productId: v.optional(v.id("products")),
     status: jobStatusFilter,
     executionMode: executionModeFilter,
     provider: providerFilter,
@@ -205,6 +206,7 @@ export const list = query({
       .order("desc");
     for await (const job of jobs) {
       if (!shopMatchesScope(job, scope)) continue;
+      if (args.productId && !job.productIds.includes(args.productId)) continue;
       const effectiveExecutionMode = job.executionMode ?? "realtime";
       if (args.status && job.status !== args.status) continue;
       if (args.executionMode && effectiveExecutionMode !== args.executionMode) continue;
