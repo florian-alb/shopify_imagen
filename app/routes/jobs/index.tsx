@@ -3,7 +3,7 @@ import { useQuery } from "convex/react";
 import { useMemo, type ReactNode } from "react";
 import { EmptyState, NumberedPaginator, PageHeader, StateBadge } from "@/components/page";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import {
   Select,
@@ -12,6 +12,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { api } from "../../../convex/_generated/api";
 import type { Doc } from "../../../convex/_generated/dataModel";
 
@@ -181,19 +189,21 @@ function JobsPage() {
 
   return (
     <main className="page">
-      <PageHeader eyebrow="Jobs" title="Background generation jobs" />
+      <PageHeader eyebrow={`${jobs.length} operations visibles`} title="Generations">
+        Suivi des jobs image, review et couts d'execution.
+      </PageHeader>
       {cost ? (
-        <Card className="mb-4 rounded-lg">
+        <Card className="studio-card mb-4 rounded-lg">
           <CardContent className="grid gap-4 pt-1 sm:grid-cols-3">
             <div>
-              <p className="text-sm text-muted-foreground">Total spent</p>
+              <p className="text-sm text-muted-foreground">Depense totale</p>
               <p className="text-2xl font-semibold">{formatUsd(cost.totalCost)}</p>
               <p className="text-xs text-muted-foreground">
                 {(cost.inputTokens + cost.outputTokens).toLocaleString()} tokens · {cost.pricedImageCount} images
               </p>
             </div>
             <div>
-              <p className="text-sm text-muted-foreground">Image generation</p>
+              <p className="text-sm text-muted-foreground">Generation image</p>
               <p className="text-2xl font-semibold">{formatUsd(cost.generationCost)}</p>
               <p className="text-xs text-muted-foreground">
                 Real-time {formatUsd(cost.realtimeGenerationCost)} · Batch {formatUsd(cost.batchGenerationCost)}
@@ -203,32 +213,32 @@ function JobsPage() {
               </p>
             </div>
             <div>
-              <p className="text-sm text-muted-foreground">Vibe analysis</p>
+              <p className="text-sm text-muted-foreground">Analyse visuelle</p>
               <p className="text-2xl font-semibold">{formatUsd(cost.analysisCost)}</p>
             </div>
           </CardContent>
         </Card>
       ) : null}
       {jobsPage === undefined ? (
-        <EmptyState loading title="Loading jobs" body="Fetching recent generation work from Convex." />
+        <EmptyState loading title="Chargement des generations" body="Lecture des operations recentes depuis Convex." />
       ) : (
         <>
-          <Card className="mb-4 rounded-lg py-3">
+          <Card className="studio-card mb-4 rounded-lg py-3">
             <CardContent className="grid gap-3 px-3 md:grid-cols-[1fr_1fr_1fr_1fr_auto]">
               <FilterSelect
                 value={statusFilter}
-                placeholder="All states"
+                placeholder="Tous statuts"
                 onChange={(value) => updateFilters({ status: value === "all" ? undefined : value as JobSearch["status"] })}
               >
-                <SelectItem value="queued">Queued</SelectItem>
-                <SelectItem value="running">Running</SelectItem>
-                <SelectItem value="completed">Completed</SelectItem>
-                <SelectItem value="failed">Failed</SelectItem>
-                <SelectItem value="cancelled">Cancelled</SelectItem>
+                <SelectItem value="queued">En file</SelectItem>
+                <SelectItem value="running">En cours</SelectItem>
+                <SelectItem value="completed">Termine</SelectItem>
+                <SelectItem value="failed">Echec</SelectItem>
+                <SelectItem value="cancelled">Annule</SelectItem>
               </FilterSelect>
               <FilterSelect
                 value={executionModeFilter}
-                placeholder="Batch + realtime"
+                placeholder="Execution"
                 onChange={(value) => updateFilters({ executionMode: value === "all" ? undefined : value as JobSearch["executionMode"] })}
               >
                 <SelectItem value="realtime">Real-time</SelectItem>
@@ -236,18 +246,18 @@ function JobsPage() {
               </FilterSelect>
               <FilterSelect
                 value={reviewFilter}
-                placeholder="All review states"
+                placeholder="Review"
                 onChange={(value) => updateFilters({ review: value === "all" ? undefined : value as JobSearch["review"] })}
               >
-                <SelectItem value="to-review">To review</SelectItem>
-                <SelectItem value="approved">Approved</SelectItem>
+                <SelectItem value="to-review">A verifier</SelectItem>
+                <SelectItem value="approved">Approuve</SelectItem>
                 <SelectItem value="partial">Partial</SelectItem>
-                <SelectItem value="rejected">Rejected</SelectItem>
-                <SelectItem value="no-review">No images to review</SelectItem>
+                <SelectItem value="rejected">Rejete</SelectItem>
+                <SelectItem value="no-review">Aucune review</SelectItem>
               </FilterSelect>
               <FilterSelect
                 value={providerFilter}
-                placeholder="All providers"
+                placeholder="Provider"
                 onChange={(value) => updateFilters({ provider: value === "all" ? undefined : value as JobSearch["provider"] })}
               >
                 <SelectItem value="gemini">Nano Banana Pro</SelectItem>
@@ -268,49 +278,84 @@ function JobsPage() {
 
           {jobs.length === 0 ? (
             <EmptyState
-              title={hasActiveFilters ? "No matching jobs" : "No jobs yet"}
+              title={hasActiveFilters ? "Aucune generation ne correspond" : "Aucun job"}
               body={
                 hasActiveFilters
-                  ? "Adjust the filters to show more generation jobs."
-                  : "Create a generation job from the products page."
+                  ? "Ajustez les filtres pour afficher plus de jobs."
+                  : "Lancez une generation depuis la page produits."
               }
             />
           ) : (
-            <section className="grid gap-3">
-              {jobs.map((job) => {
-                const pct = job.totalTasks ? Math.round(((job.completedTasks + job.failedTasks) / job.totalTasks) * 100) : 0;
-                const state = job.status === "completed" ? "success" : job.status === "failed" || job.status === "cancelled" ? "danger" : "warning";
-                const reviewSummary = job.reviewSummary ?? emptyReviewSummary;
-                const review = reviewBadge(reviewSummary);
-                return (
-                  <Card key={job._id} className="rounded-lg py-3">
-                    <Link to="/jobs/$jobId" params={{ jobId: job._id }} className="block">
-                      <CardHeader className="flex flex-row items-start justify-between gap-3 px-3 pb-2 pt-0">
-                        <div>
-                          <CardTitle className="text-base">{job.mode === "bulk" ? "Bulk generation" : "Single product generation"}</CardTitle>
-                          <p className="text-sm text-muted-foreground">{new Date(job.createdAt).toLocaleString()}</p>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <StateBadge state={job.executionMode === "batch" ? "success" : "neutral"}>{executionModeLabel(job.executionMode)}</StateBadge>
-                          <StateBadge>{job.imageProvider === "gemini" ? "Nano Banana Pro" : "OpenAI"}</StateBadge>
-                          <StateBadge state={state}>{job.status}</StateBadge>
-                          <StateBadge state={review.tone}>{review.label}</StateBadge>
-                        </div>
-                      </CardHeader>
-                      <CardContent className="px-3 pb-0 pt-0">
-                        <Progress value={pct} className="h-2" />
-                        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
-                          <span>{job.completedTasks} completed / {job.failedTasks} failed / {job.totalTasks} total</span>
-                          {reviewSummary.total > 0 ? (
-                            <span>{reviewSummary.approved} approved · {reviewSummary.pending} to review · {reviewSummary.rejected} rejected</span>
-                          ) : null}
-                        </div>
-                      </CardContent>
-                    </Link>
-                  </Card>
-                );
-              })}
-            </section>
+            <Card className="studio-card overflow-hidden rounded-lg">
+              <Table className="table-studio min-w-[900px]">
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead>Statut</TableHead>
+                    <TableHead>Cible</TableHead>
+                    <TableHead>En cours</TableHead>
+                    <TableHead>Review</TableHead>
+                    <TableHead>Cout</TableHead>
+                    <TableHead>Demarree</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {jobs.map((job) => {
+                    const pct = job.totalTasks ? Math.round(((job.completedTasks + job.failedTasks) / job.totalTasks) * 100) : 0;
+                    const state = job.status === "completed" ? "success" : job.status === "failed" || job.status === "cancelled" ? "danger" : "warning";
+                    const reviewSummary = job.reviewSummary ?? emptyReviewSummary;
+                    const review = reviewBadge(reviewSummary);
+                    return (
+                      <TableRow key={job._id}>
+                        <TableCell>
+                          <div className="flex flex-wrap gap-1">
+                            <StateBadge state={state}>{job.status}</StateBadge>
+                            <StateBadge state="neutral">{executionModeLabel(job.executionMode)}</StateBadge>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Link to="/jobs/$jobId" params={{ jobId: job._id }} className="font-medium hover:text-primary">
+                            {job.mode === "bulk" ? "Generation bulk" : "Produit unique"}
+                          </Link>
+                          <p className="mt-1 text-xs text-muted-foreground">{job.imageProvider === "gemini" ? "Nano Banana Pro" : "OpenAI"}</p>
+                        </TableCell>
+                        <TableCell>
+                          <div className="min-w-40 space-y-2">
+                            <Progress value={pct} className="h-2" />
+                            <p className="text-xs text-muted-foreground">
+                              {job.completedTasks} succes · {job.failedTasks} echecs · {job.totalTasks} total
+                            </p>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-wrap gap-1">
+                            <StateBadge state={review.tone}>{review.label}</StateBadge>
+                            {reviewSummary.total > 0 ? (
+                              <span className="text-xs text-muted-foreground">
+                                {reviewSummary.approved} ok · {reviewSummary.pending} a voir · {reviewSummary.rejected} rej.
+                              </span>
+                            ) : null}
+                          </div>
+                        </TableCell>
+                        <TableCell className="font-mono text-sm">
+                          {job.costSummary ? formatUsd(job.costSummary.generationCost) : "-"}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {new Date(job.createdAt).toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button variant="outline" size="sm" asChild>
+                            <Link to="/jobs/$jobId" params={{ jobId: job._id }}>
+                              Ouvrir
+                            </Link>
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </Card>
           )}
           <NumberedPaginator
             page={page}
@@ -340,7 +385,7 @@ function FilterSelect({
 }) {
   return (
     <Select value={value} onValueChange={onChange}>
-      <SelectTrigger className="h-10 w-full">
+      <SelectTrigger className="h-9 w-full">
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent>
