@@ -9,7 +9,8 @@ import {
 } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireUserId } from "./authz";
-import { renderPrompt } from "./lib";
+import { compilePrompt, renderPrompt } from "./lib";
+import { defaultMasterPrompt } from "./promptDefaults";
 import { BATCH_PRICE_MULTIPLIER } from "./pricing";
 import { refreshProductSummary } from "./products";
 import {
@@ -364,6 +365,10 @@ export const create = mutation({
     const prompts = (await ctx.db.query("promptTemplates").collect()).filter((prompt: Doc<"promptTemplates">) =>
       shopMatchesScope(prompt, scope)
     );
+    const promptSettings = (await ctx.db.query("promptSettings").collect()).find(
+      (settings: Doc<"promptSettings">) => shopMatchesScope(settings, scope)
+    );
+    const masterPrompt = promptSettings?.masterPrompt ?? defaultMasterPrompt;
     const promptByType = new Map(
       prompts
         .filter((prompt) => prompt.isActive)
@@ -392,8 +397,9 @@ export const create = mutation({
         const template = promptByType.get(imageType);
         if (!template)
           throw new Error(`No active prompt template found for ${imageType}.`);
+        const compiledPrompt = compilePrompt(masterPrompt, template.content);
         const promptUsed = appendRegenerationInstructions(
-          renderPrompt(template.content, {
+          renderPrompt(compiledPrompt, {
             PRODUCT_TITLE: product.title,
             PRODUCT_HANDLE: product.handle,
             IMAGE_TYPE: imageType,

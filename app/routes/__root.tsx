@@ -24,13 +24,12 @@ import {
   Menu,
   Moon,
   Settings,
-  Sparkles,
   Store,
   Sun,
   UserRound,
 } from "lucide-react";
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -56,7 +55,6 @@ import {
   SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
-  SidebarGroupLabel,
   SidebarHeader,
   SidebarInset,
   SidebarMenu,
@@ -86,7 +84,22 @@ export const Route = createRootRoute({
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "Image Studio" },
     ],
-    links: [{ rel: "stylesheet", href: appCss }],
+    links: [
+      { rel: "stylesheet", href: appCss },
+      { rel: "icon", href: "/favicon.ico", sizes: "any" },
+      { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
+      {
+        rel: "icon",
+        type: "image/png",
+        sizes: "32x32",
+        href: "/favicon-32x32.png",
+      },
+      {
+        rel: "apple-touch-icon",
+        sizes: "180x180",
+        href: "/apple-touch-icon.png",
+      },
+    ],
   }),
   component: RootComponent,
   notFoundComponent: () => <NotFound />,
@@ -345,6 +358,19 @@ function shopDisplayName(shop: ShopOption) {
   return shop.name || shop.storeHandle || shop.domain;
 }
 
+function AppLogo({ size = "md" }: { size?: "sm" | "md" }) {
+  const sizeClass = size === "sm" ? "size-7 rounded-md" : "size-10 rounded-lg";
+
+  return (
+    <img
+      src="/app-logo.svg"
+      alt=""
+      aria-hidden="true"
+      className={`shrink-0 ${sizeClass}`}
+    />
+  );
+}
+
 function DesktopNav() {
   return (
     <Sidebar
@@ -355,14 +381,14 @@ function DesktopNav() {
         <div className="flex items-start justify-between gap-2 group-data-[collapsible=icon]:justify-center">
           <Link
             to="/products"
-            className="min-w-0 group-data-[collapsible=icon]:hidden"
+            className="flex min-w-0 items-center gap-3 group-data-[collapsible=icon]:hidden"
           >
-            <p className="text-xs font-medium text-muted-foreground">
-              Image Studio
-            </p>
-            <p className="mt-1 whitespace-nowrap text-xl font-semibold">
-              Catalogue visuel
-            </p>
+            <AppLogo />
+            <span className="min-w-0">
+              <span className="mt-1 block whitespace-nowrap text-xl font-semibold">
+                Image Studio
+              </span>
+            </span>
           </Link>
           <SidebarTrigger className="mt-0.5 shrink-0 text-muted-foreground" />
         </div>
@@ -442,8 +468,9 @@ function MobileTopbar() {
 
   return (
     <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-white/10 bg-background/90 px-3 backdrop-blur md:hidden">
-      <Link to="/products" className="font-medium">
-        Image Studio
+      <Link to="/products" className="flex items-center gap-2 font-medium">
+        <AppLogo size="sm" />
+        <span>Image Studio</span>
       </Link>
       <div className="flex items-center gap-2">
         <ThemeToggle />
@@ -463,9 +490,11 @@ function MobileTopbar() {
           >
             <SheetTitle className="sr-only">Navigation</SheetTitle>
             <div className="flex h-full flex-col gap-5 p-4">
-              <div>
-                <p className="text-xs text-muted-foreground">Image Studio</p>
-                <p className="mt-1 text-lg font-semibold">Catalogue visuel</p>
+              <div className="flex items-center gap-3">
+                <AppLogo />
+                <div>
+                  <p className="mt-1 text-lg font-semibold">Image Studio</p>
+                </div>
               </div>
               <ShopSwitcher compact onNavigate={() => setOpen(false)} />
               <nav className="grid gap-4">

@@ -2,7 +2,7 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireUserId } from "./authz";
-import { defaultPrompts } from "./promptDefaults";
+import { defaultMasterPrompt, defaultPrompts } from "./promptDefaults";
 import {
   ensureActiveShop,
   getActiveShopScope,
@@ -27,6 +27,22 @@ async function promptsForScope(ctx: { db: any }, scope: ShopScope) {
     .sort(comparePrompts);
 }
 
+async function promptSettingsForScope(ctx: { db: any }, scope: ShopScope) {
+  const settings = await ctx.db.query("promptSettings").collect();
+  return (
+    (settings as Doc<"promptSettings">[]).find((setting) => shopMatchesScope(setting, scope)) ?? null
+  );
+}
+
+function masterPromptPayload(scope: ShopScope, settings: Doc<"promptSettings"> | null) {
+  return {
+    shopId: scope.shopId ?? null,
+    masterPrompt: settings?.masterPrompt ?? defaultMasterPrompt,
+    defaultMasterPrompt: settings?.defaultMasterPrompt ?? defaultMasterPrompt,
+    updatedAt: settings?.updatedAt ?? null
+  };
+}
+
 async function getPromptForActiveShop(ctx: { db: any }, promptId: Id<"promptTemplates">, userId: Id<"users">) {
   const scope = await getActiveShopScope(ctx, userId);
   const prompt = await ctx.db.get(promptId);
@@ -43,38 +59,72 @@ export const list = query({
   }
 });
 
-export const seedDefaults = mutation({
+export const master = query({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await requireUserId(ctx);
+    const scope = await getActiveShopScope(ctx, userId);
+    const settings = await promptSettingsForScope(ctx, scope);
+    return masterPromptPayload(scope, settings);
+  }
+});
+
+export const updateMaster = mutation({
+  args: { masterPrompt: v.string() },
+  handler: async (ctx, args) => {
+    const userId = await requireUserId(ctx);
+    const shop = await ensureActiveShop(ctx, userId);
+    const scope = await getActiveShopScope(ctx, userId);
+    const masterPrompt = args.masterPrompt.trim();
+    if (!masterPrompt) throw new Error("Master prompt cannot be empty.");
+
+    const existingSettings = await promptSettingsForScope(ctx, scope);
+    const now = Date.now();
+    if (existingSettings) {
+      await ctx.db.patch(existingSettings._id, {
+        shopId: shop._id,
+        masterPrompt,
+        defaultMasterPrompt,
+        updatedAt: now
+      });
+      return;
+    }
+
+    await ctx.db.insert("promptSettings", {
+      shopId: shop._id,
+      masterPrompt,
+      defaultMasterPrompt,
+      createdAt: now,
+      updatedAt: now
+    });
+  }
+});
+
+export const resetMaster = mutation({
   args: {},
   handler: async (ctx) => {
     const userId = await requireUserId(ctx);
     const shop = await ensureActiveShop(ctx, userId);
     const scope = await getActiveShopScope(ctx, userId);
+    const existingSettings = await promptSettingsForScope(ctx, scope);
     const now = Date.now();
-    const existingPrompts = await promptsForScope(ctx, scope);
-    let nextPosition = existingPrompts.reduce((max, prompt) => Math.max(max, (prompt.position ?? -1) + 1), 0);
-    let created = 0;
-    for (const prompt of defaultPrompts) {
-      const existing = existingPrompts.find((row) => row.imageType === prompt.imageType);
-      if (existing) {
-        if (!existing.shopId) await ctx.db.patch(existing._id, { shopId: shop._id, updatedAt: now });
-        continue;
-      }
-      await ctx.db.insert("promptTemplates", {
+    if (existingSettings) {
+      await ctx.db.patch(existingSettings._id, {
         shopId: shop._id,
-        imageType: prompt.imageType,
-        label: prompt.label,
-        content: prompt.content,
-        defaultContent: prompt.content,
-        isActive: true,
-        isPreset: prompt.isPreset ?? false,
-        position: nextPosition,
-        createdAt: now,
+        masterPrompt: defaultMasterPrompt,
+        defaultMasterPrompt,
         updatedAt: now
       });
-      nextPosition += 1;
-      created += 1;
+      return;
     }
-    return { created };
+
+    await ctx.db.insert("promptSettings", {
+      shopId: shop._id,
+      masterPrompt: defaultMasterPrompt,
+      defaultMasterPrompt,
+      createdAt: now,
+      updatedAt: now
+    });
   }
 });
 
@@ -192,9 +242,12 @@ export const reset = mutation({
     const userId = await requireUserId(ctx);
     const shop = await ensureActiveShop(ctx, userId);
     const { prompt } = await getPromptForActiveShop(ctx, args.promptId, userId);
+    const defaultPrompt = defaultPrompts.find((item) => item.imageType === prompt.imageType);
+    const content = defaultPrompt?.content ?? prompt.defaultContent;
     await ctx.db.patch(args.promptId, {
       shopId: shop._id,
-      content: prompt.defaultContent,
+      content,
+      defaultContent: defaultPrompt?.content ?? prompt.defaultContent,
       updatedAt: Date.now()
     });
   }
