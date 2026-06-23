@@ -179,6 +179,13 @@ export default defineSchema({
     .index("by_image_type", ["imageType"])
     .index("by_shop_and_image_type", ["shopId", "imageType"])
     .index("by_shop_and_position", ["shopId", "position"]),
+  promptSettings: defineTable({
+    shopId: v.optional(v.id("shops")),
+    masterPrompt: v.string(),
+    defaultMasterPrompt: v.string(),
+    createdAt: v.number(),
+    updatedAt: v.number()
+  }).index("by_shop", ["shopId"]),
   generationJobs: defineTable({
     shopId: v.optional(v.id("shops")),
     status: jobStatus,

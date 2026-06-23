@@ -26,6 +26,15 @@ export function buildSeoImageFilename(opts: { title: string; imageType: string; 
   return `${slug}.${opts.extension}`;
 }
 
+export function compilePrompt(masterPrompt: string | null | undefined, templatePrompt: string): string {
+  const master = String(masterPrompt ?? "").trim();
+  const template = templatePrompt.trim();
+  if (!master) return template;
+  if (!template) return master;
+  if (template.startsWith(master)) return template;
+  return `${master}\n\n${template}`;
+}
+
 export function renderPrompt(template: string, variables: Record<string, string>): string {
   return template.replace(/\{\{\s*([A-Z0-9_]+)\s*\}\}/g, (_match, key: string) => variables[key] ?? "");
 }
