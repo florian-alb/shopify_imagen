@@ -5,7 +5,7 @@ import { v } from "convex/values";
 import sharp from "sharp";
 import { internal } from "./_generated/api";
 import { action, internalAction, type ActionCtx } from "./_generated/server";
-import type { Doc } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { requireUserId } from "./authz";
 import {
   BACKGROUND_REMOVAL_COST_USD,
@@ -524,26 +524,103 @@ async function removeBackgroundWithFal(imageUrl: string) {
   };
 }
 
-async function softShadowFromCutout(cutoutPng: Buffer, width: number, height: number) {
-  const alpha = await sharp(cutoutPng)
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
+async function alphaBounds(cutoutPng: Buffer) {
+  const { data, info } = await sharp(cutoutPng)
     .ensureAlpha()
     .extractChannel("alpha")
-    .linear(0.22)
-    .blur(16)
-    .png()
-    .toBuffer();
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  let left = info.width;
+  let right = -1;
+  let top = info.height;
+  let bottom = -1;
+  const threshold = 8;
 
-  return sharp({
-    create: {
-      width,
-      height,
-      channels: 3,
-      background: "#000000",
-    },
-  })
-    .joinChannel(alpha)
-    .png()
-    .toBuffer();
+  for (let y = 0; y < info.height; y += 1) {
+    const row = y * info.width;
+    for (let x = 0; x < info.width; x += 1) {
+      if (data[row + x] <= threshold) continue;
+      if (x < left) left = x;
+      if (x > right) right = x;
+      if (y < top) top = y;
+      if (y > bottom) bottom = y;
+    }
+  }
+
+  if (right < left || bottom < top) return null;
+  return {
+    left,
+    right,
+    top,
+    bottom,
+    width: right - left + 1,
+    height: bottom - top + 1,
+  };
+}
+
+async function studioContactShadow(cutoutPng: Buffer, width: number, height: number) {
+  const bounds = await alphaBounds(cutoutPng);
+  if (!bounds) {
+    return sharp({
+      create: {
+        width,
+        height,
+        channels: 4,
+        background: { r: 0, g: 0, b: 0, alpha: 0 },
+      },
+    })
+      .png()
+      .toBuffer();
+  }
+
+  const ambientWidth = clamp(bounds.width * 0.88, width * 0.24, width * 0.92);
+  const ambientHeight = clamp(bounds.height * 0.09, height * 0.025, height * 0.11);
+  const coreWidth = ambientWidth * 0.52;
+  const coreHeight = ambientHeight * 0.34;
+  const centerX = clamp(
+    bounds.left + bounds.width * 0.54,
+    ambientWidth / 2,
+    width - ambientWidth / 2,
+  );
+  const centerY = clamp(
+    bounds.bottom + ambientHeight * 0.08,
+    ambientHeight / 2,
+    height - ambientHeight / 2,
+  );
+  const coreCenterX = clamp(
+    centerX + bounds.width * 0.035,
+    coreWidth / 2,
+    width - coreWidth / 2,
+  );
+  const coreCenterY = clamp(
+    bounds.bottom - coreHeight * 0.12,
+    coreHeight / 2,
+    height - coreHeight / 2,
+  );
+
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+      <defs>
+        <radialGradient id="ambient" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="#3a3128" stop-opacity="0.09"/>
+          <stop offset="58%" stop-color="#3a3128" stop-opacity="0.038"/>
+          <stop offset="100%" stop-color="#241f18" stop-opacity="0"/>
+        </radialGradient>
+        <radialGradient id="core" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="#2f2922" stop-opacity="0.11"/>
+          <stop offset="46%" stop-color="#2f2922" stop-opacity="0.048"/>
+          <stop offset="100%" stop-color="#18140f" stop-opacity="0"/>
+        </radialGradient>
+      </defs>
+      <ellipse cx="${centerX}" cy="${centerY}" rx="${ambientWidth / 2}" ry="${ambientHeight / 2}" fill="url(#ambient)"/>
+      <ellipse cx="${coreCenterX}" cy="${coreCenterY}" rx="${coreWidth / 2}" ry="${coreHeight / 2}" fill="url(#core)"/>
+    </svg>`;
+
+  return sharp(Buffer.from(svg)).png().toBuffer();
 }
 
 async function composeBackgroundFinal(args: {
@@ -565,9 +642,9 @@ async function composeBackgroundFinal(args: {
   const overlays: Array<{ input: Buffer; left?: number; top?: number }> = [];
   if (args.backgroundShadow) {
     overlays.push({
-      input: await softShadowFromCutout(cutoutPng, width, height),
+      input: await studioContactShadow(cutoutPng, width, height),
       left: 0,
-      top: Math.max(0, Math.round(height * 0.012)),
+      top: 0,
     });
   }
   overlays.push({ input: cutoutPng, left: 0, top: 0 });
@@ -723,6 +800,23 @@ type TerminalBatchResult =
   | ({ state: "partial" } & BatchIngestCounts)
   | ({ state: "done" } & BatchIngestCounts);
 type ManualPollResult = { state: "pending"; batchStatus?: string | null } | TerminalBatchResult;
+
+const BATCH_SUBMISSION_STUCK_MS = 10 * 60 * 1000;
+const BATCH_POLL_BACKOFF_MS = [10_000, 20_000, 45_000, 120_000] as const;
+
+function batchPollDelayMs(attempt: number): number {
+  const index = Math.max(0, Math.min(Math.floor(attempt), BATCH_POLL_BACKOFF_MS.length - 1));
+  return BATCH_POLL_BACKOFF_MS[index];
+}
+
+async function scheduleBatchPoll(
+  ctx: Pick<ActionCtx, "scheduler">,
+  jobId: Id<"generationJobs">,
+  attempt = 0,
+  delayMs = batchPollDelayMs(attempt),
+) {
+  await ctx.scheduler.runAfter(delayMs, internal.generation.pollBatchJob, { jobId, attempt });
+}
 
 function isTransientPollStatus(status: number): boolean {
   return status === 408 || status === 409 || status === 429 || status >= 500;
@@ -1126,6 +1220,7 @@ export const submitBatch = internalAction({
       });
       await ctx.runMutation(internal.jobs.markImagesGenerating, { jobId: args.jobId, providerBatchId: submitted.batchId });
       log("batch", "submitted", { jobId: args.jobId, batchId: submitted.batchId, count: images.length });
+      await scheduleBatchPoll(ctx, args.jobId, 0);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       log("batch", "submit failed", { jobId: args.jobId, error: message, stack: error instanceof Error ? error.stack : undefined });
@@ -1365,12 +1460,17 @@ async function consumeFirstInlineResponseArray(response: Response, onItem: (item
   return true;
 }
 
-const GEMINI_INGEST_CHUNK_SIZE = 2;
+function geminiIngestChunkSize(pending: Doc<"generatedImages">[]) {
+  const override = Number(process.env.GEMINI_INGEST_CHUNK_SIZE);
+  if (Number.isFinite(override) && override > 0) return Math.floor(override);
+  return pending.some((image) => image.removeBackground) ? 2 : 6;
+}
 
 async function ingestGeminiStream(
   ctx: ActionCtx,
   job: Doc<"generationJobs">,
   pending: Doc<"generatedImages">[],
+  chunkSize: number,
   consume: (onItem: (item: unknown) => Promise<boolean>) => Promise<boolean>
 ): Promise<BatchIngestResult> {
   const byId = new Map(pending.map((image) => [image._id as string, image]));
@@ -1390,7 +1490,7 @@ async function ingestGeminiStream(
     ingested += count.ingested;
     failed += count.failed;
     processed += 1;
-    return processed < GEMINI_INGEST_CHUNK_SIZE;
+    return processed < chunkSize;
   });
   if (complete) {
     for (const image of pending) {
@@ -1429,7 +1529,8 @@ async function ingestBatchResults(
       log("batch", "Gemini result file ignored range request, restarting cursor", { jobId: job._id, requestedOffset });
       await ctx.runMutation(internal.jobs.setBatchResultOffset, { jobId: job._id, offset: 0 });
     }
-    return ingestGeminiStream(ctx, job, pending, (onItem) =>
+    const chunkSize = geminiIngestChunkSize(pending);
+    return ingestGeminiStream(ctx, job, pending, chunkSize, (onItem) =>
       consumeJsonLines(
         response,
         startOffset,
@@ -1444,7 +1545,7 @@ async function ingestBatchResults(
     headers: { "x-goog-api-key": apiKey }
   });
   if (!response.ok) throw new Error(`Gemini legacy inline batch download failed (${response.status}).`);
-  return ingestGeminiStream(ctx, job, pending, (onItem) => consumeFirstInlineResponseArray(response, onItem));
+  return ingestGeminiStream(ctx, job, pending, geminiIngestChunkSize(pending), (onItem) => consumeFirstInlineResponseArray(response, onItem));
 }
 
 async function cleanupGeminiBatchFiles(job: Doc<"generationJobs">) {
@@ -1515,39 +1616,97 @@ async function processTerminalBatch(
   }
 }
 
+type PollBatchOptions = {
+  attempt?: number;
+  schedulePending?: boolean;
+  schedulePartial?: boolean;
+  throwPollErrors?: boolean;
+};
+
+async function pollOneBatch(
+  ctx: ActionCtx,
+  job: Doc<"generationJobs">,
+  options: PollBatchOptions = {},
+): Promise<ManualPollResult | null> {
+  if (!job.batchId) {
+    if (Date.now() - job.updatedAt > BATCH_SUBMISSION_STUCK_MS) {
+      log("batch", "stuck job detected, failing", { jobId: job._id, updatedAt: job.updatedAt });
+      await ctx.runMutation(internal.jobs.failStuckJob, {
+        jobId: job._id,
+        error: "Batch submission timed out — action was interrupted before batch ID assigned."
+      });
+    }
+    return null;
+  }
+
+  const attempt = Math.max(0, Math.floor(options.attempt ?? 0));
+  const provider = job.imageProvider === "gemini" ? "gemini" : "openai";
+  const settings = (await ctx.runQuery(internal.settings.internalList, { shopId: job.shopId ?? null })) as Record<string, unknown>;
+  let poll: BatchPollResult;
+  try {
+    poll =
+      provider === "gemini"
+        ? await pollGeminiBatch(job.batchId, job.batchInputFileName)
+        : await pollOpenAiBatch(job.batchId, settings);
+  } catch (error) {
+    log("batch", "poll error (will retry)", {
+      jobId: job._id,
+      batchId: job.batchId,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    if (options.schedulePending) {
+      const nextAttempt = attempt + 1;
+      await scheduleBatchPoll(ctx, job._id, nextAttempt, batchPollDelayMs(nextAttempt));
+    }
+    if (options.throwPollErrors) {
+      throw new Error(`Poll failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    return null;
+  }
+
+  if (poll.batchStatus !== undefined) {
+    await ctx.runMutation(internal.jobs.setBatchStatus, { jobId: job._id, batchStatus: poll.batchStatus });
+  }
+
+  if (poll.state === "pending") {
+    if (options.schedulePending) {
+      const nextAttempt = attempt + 1;
+      await scheduleBatchPoll(ctx, job._id, nextAttempt, batchPollDelayMs(nextAttempt));
+    }
+    return { state: "pending", batchStatus: poll.batchStatus };
+  }
+
+  const result = await processTerminalBatch(ctx, job, poll);
+  if (result.state === "partial" && options.schedulePartial) {
+    await scheduleBatchPoll(ctx, job._id, 0, 1_000);
+  }
+  return result;
+}
+
 export const pollBatches = internalAction({
   args: {},
   handler: async (ctx) => {
     const jobs = (await ctx.runQuery(internal.jobs.pendingBatchJobs, {})) as Doc<"generationJobs">[];
     if (jobs.length) log("batch", "polling", { jobs: jobs.length });
-    const STUCK_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes
     for (const job of jobs) {
-      if (!job.batchId) {
-        if (Date.now() - job.updatedAt > STUCK_THRESHOLD_MS) {
-          log("batch", "stuck job detected, failing", { jobId: job._id, updatedAt: job.updatedAt });
-          await ctx.runMutation(internal.jobs.failStuckJob, {
-            jobId: job._id,
-            error: "Batch submission timed out — action was interrupted before a batch ID was assigned."
-          });
-        }
-        continue;
-      }
-      const provider = job.imageProvider === "gemini" ? "gemini" : "openai";
-      const settings = (await ctx.runQuery(internal.settings.internalList, { shopId: job.shopId ?? null })) as Record<string, unknown>;
-      let poll: BatchPollResult;
-      try {
-        poll = provider === "gemini" ? await pollGeminiBatch(job.batchId, job.batchInputFileName) : await pollOpenAiBatch(job.batchId, settings);
-      } catch (error) {
-        // Transient poll/network error — leave the job pending and retry next tick.
-        log("batch", "poll error (will retry)", { jobId: job._id, batchId: job.batchId, error: error instanceof Error ? error.message : String(error) });
-        continue;
-      }
-      if (poll.batchStatus !== undefined) {
-        await ctx.runMutation(internal.jobs.setBatchStatus, { jobId: job._id, batchStatus: poll.batchStatus });
-      }
-      if (poll.state === "pending") continue;
-      await processTerminalBatch(ctx, job, poll);
+      await pollOneBatch(ctx, job, { schedulePartial: true });
     }
+  }
+});
+
+export const pollBatchJob = internalAction({
+  args: {
+    jobId: v.id("generationJobs"),
+    attempt: v.optional(v.number())
+  },
+  handler: async (ctx, args): Promise<ManualPollResult | null> => {
+    const job = (await ctx.runQuery(internal.jobs.getJobInternal, { jobId: args.jobId })) as Doc<"generationJobs"> | null;
+    if (!job || job.status !== "running" || job.executionMode !== "batch") return null;
+    return pollOneBatch(ctx, job, {
+      attempt: args.attempt ?? 0,
+      schedulePending: true,
+      schedulePartial: true
+    });
   }
 });
 
@@ -1560,22 +1719,14 @@ export const pollJob = action({
     if (job.executionMode !== "batch") throw new Error("Job is not a batch job.");
     if (job.status !== "running") throw new Error("Job is not running.");
     if (!job.batchId) throw new Error("Job has no batch ID yet.");
-    const batchId = job.batchId;
-    if (!batchId) throw new Error("Job has no batch ID yet.");
-    const settings = (await ctx.runQuery(internal.settings.internalList, { shopId: job.shopId ?? null })) as Record<string, unknown>;
-    const provider = job.imageProvider === "gemini" ? "gemini" : "openai";
-    let poll: BatchPollResult;
-    try {
-      poll = provider === "gemini" ? await pollGeminiBatch(batchId, job.batchInputFileName) : await pollOpenAiBatch(batchId, settings);
-    } catch (error) {
-      throw new Error(`Poll failed: ${error instanceof Error ? error.message : String(error)}`);
-    }
-    log("batch", "manual poll", { jobId: job._id, batchId, state: poll.state, batchStatus: poll.batchStatus });
-    if (poll.batchStatus !== undefined) {
-      await ctx.runMutation(internal.jobs.setBatchStatus, { jobId: job._id, batchStatus: poll.batchStatus });
-    }
-    if (poll.state === "pending") return { state: "pending", batchStatus: poll.batchStatus };
-    return processTerminalBatch(ctx, job, poll);
+    const result = await pollOneBatch(ctx, job, {
+      schedulePending: true,
+      schedulePartial: true,
+      throwPollErrors: true
+    });
+    if (!result) throw new Error("Poll did not return a batch state.");
+    log("batch", "manual poll", { jobId: job._id, batchId: job.batchId, state: result.state, batchStatus: "batchStatus" in result ? result.batchStatus : undefined });
+    return result;
   }
 });
 
