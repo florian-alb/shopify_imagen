@@ -87,8 +87,9 @@ function PromptSettingsPage() {
   const [masterDraft, setMasterDraft] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string | undefined>(undefined);
-  const [newPromptDraft, setNewPromptDraft] =
-    useState<NewPromptDraft | null>(null);
+  const [newPromptDraft, setNewPromptDraft] = useState<NewPromptDraft | null>(
+    null,
+  );
   const [deletePromptId, setDeletePromptId] =
     useState<Id<"promptTemplates"> | null>(null);
   // Drag-and-drop reordering state. `localOrder` holds an optimistic ordering of
@@ -290,8 +291,8 @@ function PromptSettingsPage() {
   }
 
   function startCreate() {
-    setNewPromptDraft((current) =>
-      current ?? { imageType: "", label: "", content: "" },
+    setNewPromptDraft(
+      (current) => current ?? { imageType: "", label: "", content: "" },
     );
     setActiveTab(newPromptTabValue);
   }
@@ -342,12 +343,13 @@ function PromptSettingsPage() {
     masterPromptValue.trim() !== masterPrompt.masterPrompt.trim(),
   );
   const currentTab =
-    activeTab ?? (newPromptDraft ? newPromptTabValue : orderedPrompts?.[0]?.imageType);
+    activeTab ??
+    (newPromptDraft ? newPromptTabValue : orderedPrompts?.[0]?.imageType);
   const canCreatePrompt = Boolean(
     newPromptDraft?.imageType.trim() &&
-      newPromptDraft.label.trim() &&
-      newPromptDraft.content.trim() &&
-      busy !== "create",
+    newPromptDraft.label.trim() &&
+    newPromptDraft.content.trim() &&
+    busy !== "create",
   );
   const deleteTarget =
     orderedPrompts?.find((prompt) => prompt._id === deletePromptId) ?? null;
@@ -413,7 +415,7 @@ function PromptSettingsPage() {
           </AccordionTrigger>
           <AccordionContent className="pb-4">
             {masterPrompt === undefined ? (
-              <div className="flex min-h-32 items-center gap-2 text-sm text-muted-foreground">
+              <div className="flex min-h-32 h-full items-center gap-2 text-sm text-muted-foreground">
                 <BusyIcon busy />
                 Chargement du master prompt.
               </div>
@@ -527,7 +529,10 @@ function PromptSettingsPage() {
                       Brouillon non enregistre
                     </p>
                   </div>
-                  <Badge variant="secondary" className="border border-border bg-secondary px-2.5">
+                  <Badge
+                    variant="secondary"
+                    className="border border-border bg-secondary px-2.5"
+                  >
                     Creation
                   </Badge>
                 </CardHeader>
@@ -540,7 +545,9 @@ function PromptSettingsPage() {
                         placeholder="ex. detail-shot"
                         value={newPromptDraft.imageType}
                         onChange={(event) =>
-                          updateNewPromptDraft({ imageType: event.target.value })
+                          updateNewPromptDraft({
+                            imageType: event.target.value,
+                          })
                         }
                       />
                     </div>
@@ -581,7 +588,9 @@ function PromptSettingsPage() {
                       disabled={!canCreatePrompt}
                     >
                       <BusyIcon busy={busy === "create"} />
-                      {busy !== "create" ? <Plus data-icon="inline-start" /> : null}
+                      {busy !== "create" ? (
+                        <Plus data-icon="inline-start" />
+                      ) : null}
                       Creer
                     </Button>
                   </div>
