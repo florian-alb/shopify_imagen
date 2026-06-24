@@ -415,12 +415,12 @@ function PromptSettingsPage() {
           </AccordionTrigger>
           <AccordionContent className="pb-4">
             {masterPrompt === undefined ? (
-              <div className="flex min-h-32 h-full items-center gap-2 text-sm text-muted-foreground">
+              <div className="flex min-h-32 items-center gap-2 text-sm text-muted-foreground">
                 <BusyIcon busy />
                 Chargement du master prompt.
               </div>
             ) : (
-              <>
+              <div className="flex flex-col gap-2 h-96">
                 <Textarea
                   className="min-h-[16rem] font-mono text-xs leading-relaxed"
                   value={masterPromptValue}
@@ -449,7 +449,7 @@ function PromptSettingsPage() {
                     Enregistrer
                   </Button>
                 </div>
-              </>
+              </div>
             )}
           </AccordionContent>
         </AccordionItem>
