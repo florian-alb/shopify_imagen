@@ -67,6 +67,8 @@ const reviewStatus = v.union(
   v.literal("approved"),
   v.literal("rejected")
 );
+const backgroundMode = v.union(v.literal("solid"), v.literal("transparent"));
+const backgroundRemovalProvider = v.union(v.literal("fal_ideogram"), v.null());
 
 export default defineSchema({
   ...authTables,
@@ -173,6 +175,11 @@ export default defineSchema({
     // Display + Shopify publish order. Optional so pre-existing rows keep working;
     // rows without a position sort after positioned ones (see prompts.list).
     position: v.optional(v.number()),
+    removeBackground: v.optional(v.boolean()),
+    backgroundRemovalProvider: v.optional(backgroundRemovalProvider),
+    backgroundMode: v.optional(backgroundMode),
+    backgroundColor: v.optional(v.string()),
+    backgroundShadow: v.optional(v.boolean()),
     createdAt: v.number(),
     updatedAt: v.number()
   })
@@ -237,9 +244,20 @@ export default defineSchema({
     sourceImageUrl2: v.optional(v.union(v.string(), v.null())),
     generatedImageUrl: v.optional(v.union(v.string(), v.null())),
     storageUrl: v.optional(v.union(v.string(), v.null())),
+    backgroundRemovalInputUrl: v.optional(v.union(v.string(), v.null())),
+    backgroundRemovalInputContentType: v.optional(v.union(v.string(), v.null())),
+    backgroundRemovalInputExtension: v.optional(v.union(v.string(), v.null())),
+    transparentCutoutUrl: v.optional(v.union(v.string(), v.null())),
     providerBatchId: v.optional(v.union(v.string(), v.null())),
     providerRequestId: v.optional(v.union(v.string(), v.null())),
     providerResponseId: v.optional(v.union(v.string(), v.null())),
+    removeBackground: v.optional(v.boolean()),
+    backgroundRemovalProvider: v.optional(backgroundRemovalProvider),
+    backgroundMode: v.optional(backgroundMode),
+    backgroundColor: v.optional(v.string()),
+    backgroundShadow: v.optional(v.boolean()),
+    backgroundRemovalCostUsd: v.optional(v.number()),
+    backgroundRemovalRequestId: v.optional(v.union(v.string(), v.null())),
     status: imageStatus,
     reviewStatus: v.optional(reviewStatus),
     reviewedAt: v.optional(v.number()),

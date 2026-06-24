@@ -38,7 +38,11 @@ it. Gemini also expires File API files automatically.
 
 ## Poll and ingestion flow
 
-The cron in `convex/crons.ts` runs every two minutes.
+`generation.submitBatch` schedules `generation.pollBatchJob` about 10 seconds
+after a provider batch is created. If the provider is still pending, the job
+polls again with a safe backoff: 10s, 20s, 45s, then 120s. The cron in
+`convex/crons.ts` still runs every two minutes as a fallback for interrupted or
+older jobs.
 
 1. Polling requests only `name`, `done`, and `error` through the Google partial
    response `fields` parameter.
@@ -72,8 +76,15 @@ recovered automatically through a compatibility path:
 3. Parse only the first inline response array incrementally.
 4. Stop reading before Gemini sends the duplicate copy of the results.
 
-Recovery can require several cron runs if one Convex action cannot process all
+Recovery can require several action runs if one Convex action cannot process all
 images before its execution limit. Completed images are retained between runs.
+
+## Chunk sizing
+
+Gemini JSONL ingestion uses small chunks so a Convex action does not hold too
+much image data in memory. Default chunk size is 6 images, or 2 images when any
+pending image requires background removal. Set `GEMINI_INGEST_CHUNK_SIZE` in the
+Convex environment to override this temporarily during operations.
 
 ## Operations
 

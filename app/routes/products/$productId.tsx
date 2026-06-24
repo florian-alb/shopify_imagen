@@ -8,6 +8,7 @@ import {
   ChevronRight,
   ExternalLink,
   GripVertical,
+  Loader2,
   ListChecks,
   RefreshCw,
   Send,
@@ -191,6 +192,11 @@ function ProductDetailPage() {
   // Include already-pushed ("uploaded") images so they can be re-pushed, e.g.
   // after regenerating them as optimized WebP.
   const generatedGalleryImages = images.filter((image) => image.storageUrl);
+  const generatingGalleryImages = images.filter(
+    (image) =>
+      !image.storageUrl &&
+      (image.status === "queued" || image.status === "generating"),
+  );
   const reviewableImages = images.filter(isReviewable);
   const approvedImages = reviewableImages.filter(
     (image) => getReviewStatus(image) === "approved",
@@ -585,6 +591,11 @@ function ProductDetailPage() {
                 onApprove: () => void setImageReview(image, "approved"),
                 onReject: () => void setImageReview(image, "rejected"),
                 onDelete: () => setDeleteTarget(image),
+              }))}
+              pendingItems={generatingGalleryImages.map((image) => ({
+                id: image._id,
+                caption: image.imageType,
+                statusLabel: "Generation en cours",
               }))}
               emptyText="Aucune image generee."
               onZoom={openLightbox}
@@ -1020,6 +1031,12 @@ type GalleryItem = {
   onDelete?: () => void;
 };
 
+type PendingGalleryItem = {
+  id: string;
+  caption?: string;
+  statusLabel: string;
+};
+
 type GalleryReorder = {
   dragId: string | null;
   disabled: boolean;
@@ -1032,6 +1049,7 @@ function Gallery({
   title,
   description,
   items,
+  pendingItems = [],
   emptyText,
   onZoom,
   reorder,
@@ -1039,10 +1057,12 @@ function Gallery({
   title: string;
   description?: string;
   items: GalleryItem[];
+  pendingItems?: PendingGalleryItem[];
   emptyText: string;
   onZoom: (images: LightboxImage[], index: number) => void;
   reorder?: GalleryReorder;
 }) {
+  const itemCount = items.length + pendingItems.length;
   const lightboxImages = items.map((item) => ({
     url: item.url,
     label: item.label,
@@ -1053,7 +1073,7 @@ function Gallery({
         <CardTitle className="text-lg">{title}</CardTitle>
         <div className="flex items-center gap-2">
           {reorder?.disabled ? <BusyIcon busy /> : null}
-          <StateBadge>{items.length}</StateBadge>
+          <StateBadge>{itemCount}</StateBadge>
         </div>
       </CardHeader>
       <CardContent>
@@ -1061,8 +1081,9 @@ function Gallery({
           <p className="mb-3 text-xs text-muted-foreground">{description}</p>
         ) : null}
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-          {items.length ? (
-            items.map((item, index) => {
+          {itemCount ? (
+            <>
+              {items.map((item, index) => {
               const canDrag = Boolean(reorder && item.id && !reorder.disabled);
               return (
                 <figure
@@ -1175,7 +1196,11 @@ function Gallery({
                   ) : null}
                 </figure>
               );
-            })
+              })}
+              {pendingItems.map((item) => (
+                <GeneratingGalleryCard key={item.id} item={item} />
+              ))}
+            </>
           ) : (
             <p className="col-span-2 text-sm text-muted-foreground">
               {emptyText}
@@ -1184,6 +1209,35 @@ function Gallery({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function GeneratingGalleryCard({ item }: { item: PendingGalleryItem }) {
+  return (
+    <figure className="relative overflow-hidden rounded-lg bg-muted/30 ring-1 ring-border">
+      <div className="image-tile relative flex w-full flex-col items-center justify-center gap-3 overflow-hidden rounded-none bg-muted/40 p-4 text-center">
+        <div className="absolute inset-0 bg-gradient-to-br from-transparent via-primary/15 to-transparent opacity-80 motion-safe:animate-pulse" />
+        <div className="relative grid size-14 place-items-center rounded-full border border-primary/20 bg-background/70 shadow-sm backdrop-blur-sm">
+          <span className="absolute inset-1 rounded-full border border-primary/20 border-t-primary motion-safe:animate-spin" />
+          <Loader2 className="size-5 animate-spin text-primary" />
+        </div>
+        <div className="relative flex items-end gap-1.5" aria-hidden="true">
+          <span className="size-1.5 rounded-full bg-primary/80 motion-safe:animate-bounce" />
+          <span className="size-1.5 rounded-full bg-primary/80 motion-safe:animate-bounce [animation-delay:120ms]" />
+          <span className="size-1.5 rounded-full bg-primary/80 motion-safe:animate-bounce [animation-delay:240ms]" />
+        </div>
+      </div>
+      <figcaption className="grid gap-1.5 px-2 py-2">
+        {item.caption ? (
+          <span className="truncate text-xs font-medium" title={item.caption}>
+            {item.caption}
+          </span>
+        ) : null}
+        <div className="min-w-0">
+          <StateBadge state="warning">{item.statusLabel}</StateBadge>
+        </div>
+      </figcaption>
+    </figure>
   );
 }
 

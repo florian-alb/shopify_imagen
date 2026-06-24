@@ -36,6 +36,11 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { api } from "../../../convex/_generated/api";
 import type { Doc, Id } from "../../../convex/_generated/dataModel";
 
@@ -108,8 +113,11 @@ function executionModeRateLabel(mode?: "realtime" | "batch") {
 
 function imageDisplayCost(image: Doc<"generatedImages">, job: Doc<"generationJobs">) {
   const cost = image.costUsd ?? 0;
-  if (job.executionMode === "batch" && image.costRateMultiplier == null) return cost * 0.5;
-  return cost;
+  const generationCost =
+    job.executionMode === "batch" && image.costRateMultiplier == null
+      ? cost * 0.5
+      : cost;
+  return generationCost + (image.backgroundRemovalCostUsd ?? 0);
 }
 
 function getShopifyAdminUrl(product: Doc<"products">, storeHandle?: string | null) {
@@ -130,10 +138,11 @@ function JobDetailPage() {
   const pollJob = useAction(api.generation.pollJob);
   const cancelJob = useAction(api.generation.cancelJob);
   const pushImages = useAction(api.shopify.pushProductImages);
-  const [filter, setFilter] = useState<ReviewFilter>("all");
-  const [polling, setPolling] = useState(false);
-  const [cancelling, setCancelling] = useState(false);
-  const [reviewing, setReviewing] = useState(false);
+const [filter, setFilter] = useState<ReviewFilter>("all");
+const [polling, setPolling] = useState(false);
+const [cancelling, setCancelling] = useState(false);
+const [retrying, setRetrying] = useState(false);
+const [reviewing, setReviewing] = useState(false);
   const [regeneratingId, setRegeneratingId] = useState<Id<"generatedImages"> | null>(null);
   const [regenerationTarget, setRegenerationTarget] = useState<Doc<"generatedImages"> | null>(null);
   const [regenerationInstructions, setRegenerationInstructions] = useState("");
@@ -211,19 +220,33 @@ function JobDetailPage() {
     }
   }
 
-  async function handleCancelJob() {
-    setCancelling(true);
-    try {
-      const result = await cancelJob({ jobId: job._id });
-      toast.info(`Job cancelled${result.batchStatus ? ` (${result.batchStatus})` : ""}.`);
+async function handleCancelJob() {
+  setCancelling(true);
+  try {
+    const result = await cancelJob({ jobId: job._id });
+    toast.info(`Job cancelled${result.batchStatus ? ` (${result.batchStatus})` : ""}.`);
     } catch (error) {
       toast.error("Cancel failed", { description: error instanceof Error ? error.message : String(error) });
     } finally {
-      setCancelling(false);
-    }
+    setCancelling(false);
   }
+}
 
-  async function setReview(imageIds: Id<"generatedImages">[], reviewStatus: "approved" | "rejected") {
+async function handleRetryJob() {
+  setRetrying(true);
+  try {
+    await retryJob({ jobId: job._id });
+    toast.success("Retry started");
+  } catch (error) {
+    toast.error("Retry failed", {
+      description: error instanceof Error ? error.message : String(error),
+    });
+  } finally {
+    setRetrying(false);
+  }
+}
+
+async function setReview(imageIds: Id<"generatedImages">[], reviewStatus: "approved" | "rejected") {
     if (!imageIds.length) return;
     setReviewing(true);
     try {
@@ -332,9 +355,9 @@ function JobDetailPage() {
               </Button>
             ) : null}
             {job.status === "failed" || job.status === "cancelled" ? (
-              <Button size="sm" variant="outline" onClick={() => retryJob({ jobId: job._id })}>
-                <RefreshCw data-icon="inline-start" />
-            Relancer
+              <Button size="sm" variant="outline" onClick={handleRetryJob} disabled={retrying}>
+                {retrying ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <RefreshCw data-icon="inline-start" />}
+                Relancer
               </Button>
             ) : null}
           </div>
@@ -410,12 +433,14 @@ function JobDetailPage() {
               product={product}
               shopifyAdminUrl={getShopifyAdminUrl(product, shopInfo?.storeHandle)}
               images={rowImages}
-              reviewing={reviewing}
-              regeneratingId={regeneratingId}
-              onPreview={setPreviewId}
-              onReview={(imageIds, reviewStatus) => void setReview(imageIds, reviewStatus)}
-              onRegenerate={openRegeneration}
-            />
+          reviewing={reviewing}
+          retrying={retrying}
+          regeneratingId={regeneratingId}
+          onPreview={setPreviewId}
+          onReview={(imageIds, reviewStatus) => void setReview(imageIds, reviewStatus)}
+          onRegenerate={openRegeneration}
+          onRetry={() => void handleRetryJob()}
+        />
           ))}
         </section>
       ) : (
@@ -608,21 +633,25 @@ function RegenerateDialog({
 function ProductReviewCard({
   product,
   shopifyAdminUrl,
-  images,
-  reviewing,
-  regeneratingId,
-  onPreview,
-  onReview,
-  onRegenerate
+ images,
+ reviewing,
+ retrying,
+ regeneratingId,
+ onPreview,
+ onReview,
+ onRegenerate,
+ onRetry
 }: {
-  product: Doc<"products">;
-  shopifyAdminUrl: string | null;
-  images: Doc<"generatedImages">[];
-  reviewing: boolean;
-  regeneratingId: Id<"generatedImages"> | null;
-  onPreview: (imageId: Id<"generatedImages">) => void;
-  onReview: (imageIds: Id<"generatedImages">[], reviewStatus: "approved" | "rejected") => void;
-  onRegenerate: (image: Doc<"generatedImages">) => void;
+ product: Doc<"products">;
+ shopifyAdminUrl: string | null;
+ images: Doc<"generatedImages">[];
+ reviewing: boolean;
+ retrying: boolean;
+ regeneratingId: Id<"generatedImages"> | null;
+ onPreview: (imageId: Id<"generatedImages">) => void;
+ onReview: (imageIds: Id<"generatedImages">[], reviewStatus: "approved" | "rejected") => void;
+ onRegenerate: (image: Doc<"generatedImages">) => void;
+ onRetry: () => void;
 }) {
   const reviewable = images.filter(isReviewable);
   const approved = reviewable.filter((image) => getReviewStatus(image) === "approved").length;
@@ -670,10 +699,12 @@ function ProductReviewCard({
               key={image._id}
               image={image}
               reviewing={reviewing}
+              retrying={retrying}
               regenerating={regeneratingId === image._id}
               onPreview={() => onPreview(image._id)}
               onReview={(reviewStatus) => onReview([image._id], reviewStatus)}
               onRegenerate={() => onRegenerate(image)}
+              onRetry={onRetry}
             />
           ))}
         </div>
@@ -685,17 +716,21 @@ function ProductReviewCard({
 function ReviewTile({
   image,
   reviewing,
+  retrying,
   regenerating,
   onPreview,
   onReview,
-  onRegenerate
+  onRegenerate,
+  onRetry
 }: {
   image: Doc<"generatedImages">;
   reviewing: boolean;
+  retrying: boolean;
   regenerating: boolean;
   onPreview: () => void;
   onReview: (reviewStatus: "approved" | "rejected") => void;
   onRegenerate: () => void;
+  onRetry: () => void;
 }) {
   const reviewable = isReviewable(image);
   return (
@@ -723,6 +758,22 @@ function ReviewTile({
           <ImageStateBadge image={image} />
         </div>
         {image.error ? <p className="line-clamp-2 text-xs text-destructive">{image.error}</p> : null}
+        {image.status === "failed" ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                aria-label={`Retry ${image.imageType}`}
+                variant="outline"
+                size="icon-sm"
+                disabled={retrying}
+                onClick={onRetry}
+              >
+                {retrying ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>retry</TooltipContent>
+          </Tooltip>
+        ) : null}
         {reviewable ? (
           <div className="grid grid-cols-3 gap-1">
             <Button
