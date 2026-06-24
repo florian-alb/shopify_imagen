@@ -1,11 +1,15 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import type { Doc, Id } from "./_generated/dataModel";
 import { requireUserId } from "./authz";
-import { defaultPrompts } from "./promptDefaults";
+import { defaultMasterPrompt, defaultPrompts } from "./promptDefaults";
+import {
+  ensureActiveShop,
+  getActiveShopScope,
+  shopMatchesScope,
+  type ShopScope
+} from "./shopScope";
 
-// Orders templates by their explicit `position`, falling back to imageType for
-// rows that predate positioning (or ties). This is the canonical order used both
-// in the settings UI and when publishing images to Shopify.
 function comparePrompts(
   a: { position?: number; imageType: string },
   b: { position?: number; imageType: string }
@@ -16,41 +20,111 @@ function comparePrompts(
   return a.imageType.localeCompare(b.imageType);
 }
 
+async function promptsForScope(ctx: { db: any }, scope: ShopScope) {
+  const prompts = await ctx.db.query("promptTemplates").collect();
+  return (prompts as Doc<"promptTemplates">[])
+    .filter((prompt) => shopMatchesScope(prompt, scope))
+    .sort(comparePrompts);
+}
+
+async function promptSettingsForScope(ctx: { db: any }, scope: ShopScope) {
+  const settings = await ctx.db.query("promptSettings").collect();
+  return (
+    (settings as Doc<"promptSettings">[]).find((setting) => shopMatchesScope(setting, scope)) ?? null
+  );
+}
+
+function masterPromptPayload(scope: ShopScope, settings: Doc<"promptSettings"> | null) {
+  return {
+    shopId: scope.shopId ?? null,
+    masterPrompt: settings?.masterPrompt ?? defaultMasterPrompt,
+    defaultMasterPrompt: settings?.defaultMasterPrompt ?? defaultMasterPrompt,
+    updatedAt: settings?.updatedAt ?? null
+  };
+}
+
+async function getPromptForActiveShop(ctx: { db: any }, promptId: Id<"promptTemplates">, userId: Id<"users">) {
+  const scope = await getActiveShopScope(ctx, userId);
+  const prompt = await ctx.db.get(promptId);
+  if (!prompt || !shopMatchesScope(prompt, scope)) throw new Error("Prompt not found.");
+  return { prompt: prompt as Doc<"promptTemplates">, scope };
+}
+
 export const list = query({
   args: {},
   handler: async (ctx) => {
-    await requireUserId(ctx);
-    const prompts = await ctx.db.query("promptTemplates").collect();
-    return prompts.sort(comparePrompts);
+    const userId = await requireUserId(ctx);
+    const scope = await getActiveShopScope(ctx, userId);
+    return promptsForScope(ctx, scope);
   }
 });
 
-export const seedDefaults = mutation({
+export const master = query({
   args: {},
   handler: async (ctx) => {
-    await requireUserId(ctx);
+    const userId = await requireUserId(ctx);
+    const scope = await getActiveShopScope(ctx, userId);
+    const settings = await promptSettingsForScope(ctx, scope);
+    return masterPromptPayload(scope, settings);
+  }
+});
+
+export const updateMaster = mutation({
+  args: { masterPrompt: v.string() },
+  handler: async (ctx, args) => {
+    const userId = await requireUserId(ctx);
+    const shop = await ensureActiveShop(ctx, userId);
+    const scope = await getActiveShopScope(ctx, userId);
+    const masterPrompt = args.masterPrompt.trim();
+    if (!masterPrompt) throw new Error("Master prompt cannot be empty.");
+
+    const existingSettings = await promptSettingsForScope(ctx, scope);
     const now = Date.now();
-    const existingPrompts = await ctx.db.query("promptTemplates").collect();
-    let nextPosition = existingPrompts.reduce((max, prompt) => Math.max(max, (prompt.position ?? -1) + 1), 0);
-    let created = 0;
-    for (const prompt of defaultPrompts) {
-      const existing = existingPrompts.find((row) => row.imageType === prompt.imageType);
-      if (existing) continue;
-      await ctx.db.insert("promptTemplates", {
-        imageType: prompt.imageType,
-        label: prompt.label,
-        content: prompt.content,
-        defaultContent: prompt.content,
-        isActive: true,
-        isPreset: prompt.isPreset ?? false,
-        position: nextPosition,
-        createdAt: now,
+    if (existingSettings) {
+      await ctx.db.patch(existingSettings._id, {
+        shopId: shop._id,
+        masterPrompt,
+        defaultMasterPrompt,
         updatedAt: now
       });
-      nextPosition += 1;
-      created += 1;
+      return;
     }
-    return { created };
+
+    await ctx.db.insert("promptSettings", {
+      shopId: shop._id,
+      masterPrompt,
+      defaultMasterPrompt,
+      createdAt: now,
+      updatedAt: now
+    });
+  }
+});
+
+export const resetMaster = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await requireUserId(ctx);
+    const shop = await ensureActiveShop(ctx, userId);
+    const scope = await getActiveShopScope(ctx, userId);
+    const existingSettings = await promptSettingsForScope(ctx, scope);
+    const now = Date.now();
+    if (existingSettings) {
+      await ctx.db.patch(existingSettings._id, {
+        shopId: shop._id,
+        masterPrompt: defaultMasterPrompt,
+        defaultMasterPrompt,
+        updatedAt: now
+      });
+      return;
+    }
+
+    await ctx.db.insert("promptSettings", {
+      shopId: shop._id,
+      masterPrompt: defaultMasterPrompt,
+      defaultMasterPrompt,
+      createdAt: now,
+      updatedAt: now
+    });
   }
 });
 
@@ -62,20 +136,22 @@ export const create = mutation({
     isPreset: v.optional(v.boolean())
   },
   handler: async (ctx, args) => {
-    await requireUserId(ctx);
+    const userId = await requireUserId(ctx);
+    const shop = await ensureActiveShop(ctx, userId);
+    const scope = await getActiveShopScope(ctx, userId);
     const imageType = args.imageType.trim();
     const label = args.label.trim();
     const content = args.content.trim();
     if (!imageType || !label || !content) throw new Error("Image type, label, and content are required.");
-    const existing = await ctx.db
-      .query("promptTemplates")
-      .withIndex("by_image_type", (q) => q.eq("imageType", imageType))
-      .unique();
-    if (existing) throw new Error(`A prompt template for "${imageType}" already exists.`);
+
+    const existingPrompts = await promptsForScope(ctx, scope);
+    const existing = existingPrompts.find((row) => row.imageType === imageType);
+    if (existing) throw new Error(`A prompt template for "${imageType}" already exists in this shop.`);
+
     const now = Date.now();
-    const all = await ctx.db.query("promptTemplates").collect();
-    const position = all.reduce((max, prompt) => Math.max(max, (prompt.position ?? -1) + 1), 0);
+    const position = existingPrompts.reduce((max, prompt) => Math.max(max, (prompt.position ?? -1) + 1), 0);
     return ctx.db.insert("promptTemplates", {
+      shopId: shop._id,
       imageType,
       label,
       content,
@@ -89,12 +165,23 @@ export const create = mutation({
   }
 });
 
-// Toggles whether a template is pre-checked in the generation chooser.
+export const setActive = mutation({
+  args: { promptId: v.id("promptTemplates"), isActive: v.boolean() },
+  handler: async (ctx, args) => {
+    const userId = await requireUserId(ctx);
+    const shop = await ensureActiveShop(ctx, userId);
+    await getPromptForActiveShop(ctx, args.promptId, userId);
+    await ctx.db.patch(args.promptId, { shopId: shop._id, isActive: args.isActive, updatedAt: Date.now() });
+  }
+});
+
 export const setPreset = mutation({
   args: { promptId: v.id("promptTemplates"), isPreset: v.boolean() },
   handler: async (ctx, args) => {
-    await requireUserId(ctx);
-    await ctx.db.patch(args.promptId, { isPreset: args.isPreset, updatedAt: Date.now() });
+    const userId = await requireUserId(ctx);
+    const shop = await ensureActiveShop(ctx, userId);
+    await getPromptForActiveShop(ctx, args.promptId, userId);
+    await ctx.db.patch(args.promptId, { shopId: shop._id, isPreset: args.isPreset, updatedAt: Date.now() });
   }
 });
 
@@ -104,26 +191,47 @@ export const update = mutation({
     content: v.string()
   },
   handler: async (ctx, args) => {
-    await requireUserId(ctx);
+    const userId = await requireUserId(ctx);
+    const shop = await ensureActiveShop(ctx, userId);
+    await getPromptForActiveShop(ctx, args.promptId, userId);
     const content = args.content.trim();
     if (!content) throw new Error("Prompt content cannot be empty.");
-    await ctx.db.patch(args.promptId, {
-      content,
-      updatedAt: Date.now()
-    });
+    await ctx.db.patch(args.promptId, { shopId: shop._id, content, updatedAt: Date.now() });
   }
 });
 
-// Persists a new ordering of templates. `orderedIds` is the full list of prompt
-// ids in the desired order; each row's `position` is set to its array index so
-// list() and the Shopify publish step follow the same sequence.
+export const remove = mutation({
+  args: { promptId: v.id("promptTemplates") },
+  handler: async (ctx, args) => {
+    const userId = await requireUserId(ctx);
+    const { prompt, scope } = await getPromptForActiveShop(ctx, args.promptId, userId);
+    await ctx.db.delete(prompt._id);
+
+    const remainingPrompts = await promptsForScope(ctx, scope);
+    const now = Date.now();
+    await Promise.all(
+      remainingPrompts.map((remainingPrompt, index) =>
+        ctx.db.patch(remainingPrompt._id, { position: index, updatedAt: now })
+      )
+    );
+  }
+});
+
 export const reorder = mutation({
   args: { orderedIds: v.array(v.id("promptTemplates")) },
   handler: async (ctx, args) => {
-    await requireUserId(ctx);
+    const userId = await requireUserId(ctx);
+    const shop = await ensureActiveShop(ctx, userId);
+    const scope = await getActiveShopScope(ctx, userId);
+    const prompts = await Promise.all(args.orderedIds.map((promptId) => ctx.db.get(promptId)));
+    if (prompts.some((prompt) => !prompt || !shopMatchesScope(prompt, scope))) {
+      throw new Error("Prompt order contains a template from another shop.");
+    }
     const now = Date.now();
     await Promise.all(
-      args.orderedIds.map((promptId, index) => ctx.db.patch(promptId, { position: index, updatedAt: now }))
+      args.orderedIds.map((promptId, index) =>
+        ctx.db.patch(promptId, { shopId: shop._id, position: index, updatedAt: now })
+      )
     );
   }
 });
@@ -131,11 +239,15 @@ export const reorder = mutation({
 export const reset = mutation({
   args: { promptId: v.id("promptTemplates") },
   handler: async (ctx, args) => {
-    await requireUserId(ctx);
-    const prompt = await ctx.db.get(args.promptId);
-    if (!prompt) throw new Error("Prompt not found.");
+    const userId = await requireUserId(ctx);
+    const shop = await ensureActiveShop(ctx, userId);
+    const { prompt } = await getPromptForActiveShop(ctx, args.promptId, userId);
+    const defaultPrompt = defaultPrompts.find((item) => item.imageType === prompt.imageType);
+    const content = defaultPrompt?.content ?? prompt.defaultContent;
     await ctx.db.patch(args.promptId, {
-      content: prompt.defaultContent,
+      shopId: shop._id,
+      content,
+      defaultContent: defaultPrompt?.content ?? prompt.defaultContent,
       updatedAt: Date.now()
     });
   }

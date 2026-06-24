@@ -797,7 +797,7 @@ export const submitBatch = internalAction({
     await ctx.runMutation(internal.jobs.markRunning, { jobId: args.jobId });
     const job = (await ctx.runQuery(internal.jobs.getJobInternal, { jobId: args.jobId })) as Doc<"generationJobs"> | null;
     if (!job || job.status === "cancelled") return;
-    const settings = (await ctx.runQuery(internal.settings.internalList, {})) as Record<string, unknown>;
+    const settings = (await ctx.runQuery(internal.settings.internalList, { shopId: job.shopId ?? null })) as Record<string, unknown>;
     const allImages = (await ctx.runQuery(internal.jobs.imagesForJob, { jobId: args.jobId })) as Doc<"generatedImages">[];
     const images = allImages.filter((img) => img.status === "queued");
     if (!images.length) {
@@ -1202,7 +1202,6 @@ export const pollBatches = internalAction({
   args: {},
   handler: async (ctx) => {
     const jobs = (await ctx.runQuery(internal.jobs.pendingBatchJobs, {})) as Doc<"generationJobs">[];
-    const settings = (await ctx.runQuery(internal.settings.internalList, {})) as Record<string, unknown>;
     if (jobs.length) log("batch", "polling", { jobs: jobs.length });
     const STUCK_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes
     for (const job of jobs) {
@@ -1217,6 +1216,7 @@ export const pollBatches = internalAction({
         continue;
       }
       const provider = job.imageProvider === "gemini" ? "gemini" : "openai";
+      const settings = (await ctx.runQuery(internal.settings.internalList, { shopId: job.shopId ?? null })) as Record<string, unknown>;
       let poll: BatchPollResult;
       try {
         poll = provider === "gemini" ? await pollGeminiBatch(job.batchId, job.batchInputFileName) : await pollOpenAiBatch(job.batchId, settings);
@@ -1245,7 +1245,7 @@ export const pollJob = action({
     if (!job.batchId) throw new Error("Job has no batch ID yet.");
     const batchId = job.batchId;
     if (!batchId) throw new Error("Job has no batch ID yet.");
-    const settings = (await ctx.runQuery(internal.settings.internalList, {})) as Record<string, unknown>;
+    const settings = (await ctx.runQuery(internal.settings.internalList, { shopId: job.shopId ?? null })) as Record<string, unknown>;
     const provider = job.imageProvider === "gemini" ? "gemini" : "openai";
     let poll: BatchPollResult;
     try {
@@ -1274,7 +1274,7 @@ export const cancelJob = action({
 
     let batchStatus = job.batchStatus ?? null;
     if (job.executionMode === "batch" && job.batchId) {
-      const settings = (await ctx.runQuery(internal.settings.internalList, {})) as Record<string, unknown>;
+      const settings = (await ctx.runQuery(internal.settings.internalList, { shopId: job.shopId ?? null })) as Record<string, unknown>;
       const provider = job.imageProvider === "gemini" ? "gemini" : "openai";
       const poll = provider === "gemini" ? await pollGeminiBatch(job.batchId, job.batchInputFileName) : await pollOpenAiBatch(job.batchId, settings);
       if (poll.batchStatus !== undefined) {
@@ -1312,7 +1312,7 @@ export const processJob = internalAction({
     await ctx.runMutation(internal.jobs.markRunning, { jobId: args.jobId });
     const job = (await ctx.runQuery(internal.jobs.getJobInternal, { jobId: args.jobId })) as Doc<"generationJobs"> | null;
     if (!job || job.status === "cancelled") return;
-    const settings = (await ctx.runQuery(internal.settings.internalList, {})) as Record<string, unknown>;
+    const settings = (await ctx.runQuery(internal.settings.internalList, { shopId: job.shopId ?? null })) as Record<string, unknown>;
     const vibeEnabled = job?.vibeAnalysis ?? String(settings.VIBE_ANALYSIS ?? "on") !== "off";
     const maxRetries = intEnv("MAX_RETRIES", 2);
     log("realtime", "job start", { jobId: args.jobId, provider: job?.imageProvider, model: job?.imageModel, tasks: job?.totalTasks });

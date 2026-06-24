@@ -8,6 +8,7 @@ import {
   ChevronRight,
   ExternalLink,
   GripVertical,
+  ListChecks,
   RefreshCw,
   Send,
   Trash2,
@@ -16,11 +17,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Dialog as DialogPrimitive } from "radix-ui";
-import {
-  BusyIcon,
-  EmptyState,
-  StateBadge,
-} from "@/components/page";
+import { BusyIcon, EmptyState, StateBadge } from "@/components/page";
 import {
   Accordion,
   AccordionContent,
@@ -180,7 +177,7 @@ function ProductDetailPage() {
   const canReorderShopifyImages =
     shopifyImages.length > 1 &&
     shopifyImages.every((image) => shopifyMediaId(image));
-  const latestJobId = images[0]?.jobId;
+  const hasProductJobs = Boolean(product?.latestJobId ?? images[0]?.jobId);
   const shopifyAdminUrl = useMemo(() => {
     if (!product || !shopInfo?.storeHandle) return null;
     const numericId = product.shopifyProductId.split("/").pop();
@@ -205,10 +202,13 @@ function ProductDetailPage() {
     (image) => getReviewStatus(image) === "pending",
   );
   const readyImages = images.filter(isPushReady);
-  const primaryAction = (product?.primaryAction ?? "generate") as ProductPrimaryAction;
-  const generationState = (product?.generationState ?? "not_started") as ProductGenerationState;
+  const primaryAction = (product?.primaryAction ??
+    "generate") as ProductPrimaryAction;
+  const generationState = (product?.generationState ??
+    "not_started") as ProductGenerationState;
   const reviewState = (product?.reviewState ?? "none") as ProductReviewState;
-  const publishState = (product?.publishState ?? "not_ready") as ProductPublishState;
+  const publishState = (product?.publishState ??
+    "not_ready") as ProductPublishState;
 
   useEffect(() => {
     if (!localShopifyOrder || localShopifyOrder.productId !== productId) return;
@@ -426,7 +426,7 @@ function ProductDetailPage() {
 
   return (
     <main className="page">
-      <header className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+      <header className="mb-4 flex flex-col gap-4 border-b border-white/10 pb-4 xl:flex-row xl:items-end xl:justify-between">
         <div className="min-w-0">
           <div className="mb-2 flex flex-wrap items-center gap-2">
             <Breadcrumb>
@@ -440,7 +440,7 @@ function ProductDetailPage() {
                   >
                     <Link to="/products" search={search}>
                       <ArrowLeft data-icon="inline-start" />
-                      Products
+                      Produits
                     </Link>
                   </Button>
                 </BreadcrumbItem>
@@ -462,7 +462,7 @@ function ProductDetailPage() {
               {productPublishStateLabels[publishState]}
             </StateBadge>
             <Badge variant="outline">
-              {product.productType || "No category"}
+              {product.productType || "Sans categorie"}
             </Badge>
             {product.shopifyStatus ? (
               <Badge variant="outline">
@@ -495,11 +495,11 @@ function ProductDetailPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {latestJobId ? (
+          {hasProductJobs ? (
             <Button size="lg" variant="outline" asChild>
-              <Link to="/jobs/$jobId" params={{ jobId: latestJobId }}>
-                <ArrowLeft data-icon="inline-start" />
-                Back to job
+              <Link to="/jobs" search={{ productId }}>
+                <ListChecks data-icon="inline-start" />
+                Jobs
               </Link>
             </Button>
           ) : null}
@@ -517,165 +517,140 @@ function ProductDetailPage() {
             <Button size="lg" variant="outline" asChild>
               <a href={shopifyAdminUrl} target="_blank" rel="noreferrer">
                 <ExternalLink data-icon="inline-start" />
-                View on Shopify
+                Shopify
               </a>
             </Button>
           ) : null}
           <Button size="lg" onClick={openGenerate}>
             <WandSparkles data-icon="inline-start" />
-            Generate
+            Generer
           </Button>
+          {readyImages.length ? (
+            <Button size="lg" disabled={!readyImages.length} onClick={openPush}>
+              <Send data-icon="inline-start" />
+              Publier
+            </Button>
+          ) : null}
         </div>
       </header>
 
-      <section className="mb-4 grid gap-4 lg:grid-cols-2">
-        <Gallery
-          title="Current Shopify images"
-          description="Drag images to reorder them in Shopify. Image 1 is the exact product reference for prompts; image 2 can guide the scene."
-          items={shopifyImages.map((image) => ({
-            id: shopifyMediaId(image),
-            url: image.url,
-            label: image.altText ?? "Shopify product",
-          }))}
-          emptyText="No images found."
-          onZoom={openLightbox}
-          reorder={
-            canReorderShopifyImages
-              ? {
-                  dragId: dragShopifyMediaId,
-                  disabled: shopifyReorderBusy,
-                  onDragStart: startShopifyImageReorder,
-                  onDragOver: reorderShopifyImageOver,
-                  onCommit: commitShopifyImageReorder,
-                }
-              : undefined
-          }
-        />
-        <Gallery
-          title="Generated images"
-          description={`${approvedImages.length} approved · ${pendingImages.length} to review · ${rejectedImages.length} rejected`}
-          items={generatedGalleryImages.map((image) => ({
-            url: image.storageUrl!,
-            label: image.imageType,
-            caption: image.imageType,
-            reviewStatus: getReviewStatus(image),
-            statusLabel: generatedImageStateLabel(image),
-            statusTone: generatedImageStateTone(image),
-            reviewable: isReviewable(image),
-            reviewing: reviewingImageId === image._id,
-            onApprove: () => void setImageReview(image, "approved"),
-            onReject: () => void setImageReview(image, "rejected"),
-            onDelete: () => setDeleteTarget(image),
-          }))}
-          emptyText="No generated images yet."
-          onZoom={openLightbox}
-        />
-      </section>
-
-      <Card className="mb-4 rounded-lg">
-        <CardHeader className="flex flex-row items-center justify-between gap-3">
-          <CardTitle className="text-lg">Prompt and image history</CardTitle>
-          {latestJobId ? (
-            <Button variant="outline" size="sm" asChild>
-              <Link to="/jobs/$jobId" params={{ jobId: latestJobId }}>
-                View job
-                <ChevronRight data-icon="inline-end" />
-              </Link>
-            </Button>
-          ) : null}
-        </CardHeader>
-        <CardContent>
-          {images.length ? (
-            <Accordion type="multiple" className="gap-3">
-              {images.map((image) => (
-                <HistoryItem
-                  key={image._id}
-                  image={image}
-                  onDelete={() => setDeleteTarget(image)}
-                />
-              ))}
-            </Accordion>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              No generated image records yet.
-            </p>
-          )}
-        </CardContent>
-      </Card>
-
-      <section className="mb-5 px-1 py-3">
-        <div className="mb-4 flex flex-wrap gap-2">
-          <StateBadge state={primaryActionTone(primaryAction)}>
-            {productPrimaryActionLabels[primaryAction]}
-          </StateBadge>
-          <StateBadge state={generationStateTone(generationState)}>
-            {productGenerationStateLabels[generationState]}
-          </StateBadge>
-          <StateBadge state={reviewStateTone(reviewState)}>
-            {productReviewStateLabels[reviewState]}
-          </StateBadge>
-          <StateBadge state={publishStateTone(publishState)}>
-            {productPublishStateLabels[publishState]}
-          </StateBadge>
-          <Badge variant="outline">
-            {product.productType || "No category"}
-          </Badge>
-          {product.shopifyStatus ? (
-            <Badge variant="outline">
-              {shopifyStatusLabel(product.shopifyStatus)}
-            </Badge>
-          ) : null}
-          {product.vendor ? (
-            <Badge variant="outline">{product.vendor}</Badge>
-          ) : null}
-        </div>
-        <dl className="grid gap-x-10 gap-y-4 text-sm sm:grid-cols-2">
-          <Fact
-            label="Collections"
-            value={
-              product.collections
-                .map((collection: any) => collection.title)
-                .join(", ") || "None"
-            }
-          />
-          <Fact
-            label="Shopify status"
-            value={shopifyStatusLabel(product.shopifyStatus)}
-          />
-          <Fact
-            label="Last synced"
-            value={
-              product.lastSyncedAt
-                ? new Date(product.lastSyncedAt).toLocaleString()
-                : "Never"
-            }
-          />
-          <Fact
-            label="Generated history"
-            value={`${images.length} image records`}
-          />
-        </dl>
-      </section>
-
-      <div className="sticky-actions">
-        <Card
-          size="sm"
-          className="flex-row items-center justify-between gap-3 rounded-lg p-3 shadow-md"
-        >
+      <div className="grid gap-4">
+        <div className="min-w-0 space-y-4">
           <div>
             <p className="text-sm font-medium">
-              {readyImages.length} generated image
-              {readyImages.length === 1 ? "" : "s"} ready
+              {readyImages.length} image
+              {readyImages.length === 1 ? "" : "s"} prete
+              {readyImages.length === 1 ? "" : "s"}
             </p>
             <p className="text-xs text-muted-foreground">
-              Only approved images are pushed.
+              Seules les images approuvees sont publiees.
             </p>
           </div>
-          <Button disabled={!readyImages.length} onClick={openPush}>
-            <Send data-icon="inline-start" />
-            Push
-          </Button>
-        </Card>
+
+          <section className="grid gap-4 lg:grid-cols-2">
+            <Gallery
+              title="Images Shopify"
+              description="Glissez pour changer l'ordre Shopify. La premiere image sert de reference produit."
+              items={shopifyImages.map((image) => ({
+                id: shopifyMediaId(image),
+                url: image.url,
+                label: image.altText ?? "Shopify product",
+              }))}
+              emptyText="Aucune image Shopify."
+              onZoom={openLightbox}
+              reorder={
+                canReorderShopifyImages
+                  ? {
+                      dragId: dragShopifyMediaId,
+                      disabled: shopifyReorderBusy,
+                      onDragStart: startShopifyImageReorder,
+                      onDragOver: reorderShopifyImageOver,
+                      onCommit: commitShopifyImageReorder,
+                    }
+                  : undefined
+              }
+            />
+            <Gallery
+              title="Images generees"
+              description={`${approvedImages.length} approved · ${pendingImages.length} to review · ${rejectedImages.length} rejected`}
+              items={generatedGalleryImages.map((image) => ({
+                url: image.storageUrl!,
+                label: image.imageType,
+                caption: image.imageType,
+                reviewStatus: getReviewStatus(image),
+                statusLabel: generatedImageStateLabel(image),
+                statusTone: generatedImageStateTone(image),
+                reviewable: isReviewable(image),
+                reviewing: reviewingImageId === image._id,
+                onApprove: () => void setImageReview(image, "approved"),
+                onReject: () => void setImageReview(image, "rejected"),
+                onDelete: () => setDeleteTarget(image),
+              }))}
+              emptyText="Aucune image generee."
+              onZoom={openLightbox}
+            />
+          </section>
+
+          <Card className="studio-card mb-4 rounded-lg">
+            <CardHeader className="flex flex-row items-center justify-between gap-3">
+              <CardTitle className="text-lg">
+                Historique prompts et images
+              </CardTitle>
+              {hasProductJobs ? (
+                <Button variant="outline" size="sm" asChild>
+                  <Link to="/jobs" search={{ productId }}>
+                    <ListChecks data-icon="inline-start" />
+                    Jobs
+                    <ChevronRight data-icon="inline-end" />
+                  </Link>
+                </Button>
+              ) : null}
+            </CardHeader>
+            <CardContent>
+              {images.length ? (
+                <Accordion type="multiple" className="gap-3">
+                  {images.map((image) => (
+                    <HistoryItem
+                      key={image._id}
+                      image={image}
+                      onDelete={() => setDeleteTarget(image)}
+                    />
+                  ))}
+                </Accordion>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Aucun historique de generation.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
+          <section className="studio-card rounded-lg border p-4">
+            <dl className="grid gap-x-10 gap-y-4 text-sm sm:grid-cols-2">
+              <Fact
+                label="Collections"
+                value={
+                  product.collections
+                    .map((collection: any) => collection.title)
+                    .join(", ") || "Aucune"
+                }
+              />
+              <Fact
+                label="Statut Shopify"
+                value={shopifyStatusLabel(product.shopifyStatus)}
+              />
+              <Fact
+                label="Dernier sync"
+                value={
+                  product.lastSyncedAt
+                    ? new Date(product.lastSyncedAt).toLocaleString()
+                    : "Jamais"
+                }
+              />
+              <Fact label="Historique" value={`${images.length} images`} />
+            </dl>
+          </section>
+        </div>
       </div>
 
       <GenerateDialog

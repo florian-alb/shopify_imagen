@@ -9,9 +9,16 @@ import {
 } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireUserId } from "./authz";
-import { renderPrompt } from "./lib";
+import { compilePrompt, renderPrompt } from "./lib";
+import { defaultMasterPrompt } from "./promptDefaults";
 import { BATCH_PRICE_MULTIPLIER } from "./pricing";
 import { refreshProductSummary } from "./products";
+import {
+  ensureActiveShop,
+  getActiveShopScope,
+  shopMatchesScope,
+  type ShopScope
+} from "./shopScope";
 
 type ImageProvider = "openai" | "gemini";
 type ExecutionMode = "realtime" | "batch";
@@ -158,8 +165,10 @@ export async function refreshJobSummary(ctx: { db: any }, jobId: Id<"generationJ
   return patch;
 }
 
-async function currentGenerationEngine(ctx: MutationCtx) {
-  const rows = await ctx.db.query("appSettings").collect();
+async function currentGenerationEngine(ctx: MutationCtx, scope: ShopScope) {
+  const rows = (await ctx.db.query("appSettings").collect()).filter((row: Doc<"appSettings">) =>
+    shopMatchesScope(row, scope)
+  );
   const settings = Object.fromEntries(
     rows.map((row: Doc<"appSettings">) => [row.key, row.value]),
   );
@@ -177,6 +186,7 @@ async function currentGenerationEngine(ctx: MutationCtx) {
 
 export const list = query({
   args: {
+    productId: v.optional(v.id("products")),
     status: jobStatusFilter,
     executionMode: executionModeFilter,
     provider: providerFilter,
@@ -185,7 +195,8 @@ export const list = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    await requireUserId(ctx);
+    const userId = await requireUserId(ctx);
+    const scope = await getActiveShopScope(ctx, userId);
     const offset = Math.max(0, Math.floor(args.offset ?? 0));
     const limit = Math.max(1, Math.min(Math.floor(args.limit ?? DEFAULT_PAGE_SIZE), MAX_PAGE_SIZE));
     const page: Doc<"generationJobs">[] = [];
@@ -195,6 +206,8 @@ export const list = query({
       .withIndex("by_created")
       .order("desc");
     for await (const job of jobs) {
+      if (!shopMatchesScope(job, scope)) continue;
+      if (args.productId && !job.productIds.includes(args.productId)) continue;
       const effectiveExecutionMode = job.executionMode ?? "realtime";
       if (args.status && job.status !== args.status) continue;
       if (args.executionMode && effectiveExecutionMode !== args.executionMode) continue;
@@ -217,9 +230,14 @@ export const list = query({
 export const costSummary = query({
   args: {},
   handler: async (ctx) => {
-    await requireUserId(ctx);
-    const jobs = await ctx.db.query("generationJobs").collect();
-    const products = await ctx.db.query("products").collect();
+    const userId = await requireUserId(ctx);
+    const scope = await getActiveShopScope(ctx, userId);
+    const jobs = (await ctx.db.query("generationJobs").collect()).filter((job: Doc<"generationJobs">) =>
+      shopMatchesScope(job, scope)
+    );
+    const products = (await ctx.db.query("products").collect()).filter((product: Doc<"products">) =>
+      shopMatchesScope(product, scope)
+    );
     const needsImageFallback = jobs.some(
       (job) =>
         job.generationCost == null ||
@@ -228,7 +246,9 @@ export const costSummary = query({
         job.pricedImageCount == null,
     );
     const images = needsImageFallback
-      ? await ctx.db.query("generatedImages").collect()
+      ? (await ctx.db.query("generatedImages").collect()).filter((image: Doc<"generatedImages">) =>
+        shopMatchesScope(image, scope)
+      )
       : [];
     const imagesByJob = new Map<Id<"generationJobs">, Doc<"generatedImages">[]>();
     for (const image of images) {
@@ -286,9 +306,10 @@ export const costSummary = query({
 export const get = query({
   args: { jobId: v.id("generationJobs") },
   handler: async (ctx, args) => {
-    await requireUserId(ctx);
+    const userId = await requireUserId(ctx);
+    const scope = await getActiveShopScope(ctx, userId);
     const job = await ctx.db.get(args.jobId);
-    if (!job) return null;
+    if (!job || !shopMatchesScope(job, scope)) return null;
     const images = await ctx.db
       .query("generatedImages")
       .withIndex("by_job", (q) => q.eq("jobId", args.jobId))
@@ -310,6 +331,8 @@ export const create = mutation({
   },
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
+    const shop = await ensureActiveShop(ctx, userId);
+    const scope = await getActiveShopScope(ctx, userId);
     if (!args.productIds.length)
       throw new Error("Select at least one product.");
     if (!args.selectedImageTypes.length)
@@ -327,11 +350,25 @@ export const create = mutation({
       await Promise.all(args.productIds.map((id) => ctx.db.get(id)))
     ).filter(Boolean) as Doc<"products">[];
     if (!products.length) throw new Error("No products found.");
+    if (products.some((product) => !shopMatchesScope(product, scope))) {
+      throw new Error("Selected products must belong to the active shop.");
+    }
+    await Promise.all(
+      products
+        .filter((product) => !product.shopId)
+        .map((product) => ctx.db.patch(product._id, { shopId: shop._id, updatedAt: Date.now() }))
+    );
 
     const { imageProvider, executionMode, imageModel, vibeAnalysisDefault } =
-      await currentGenerationEngine(ctx);
+      await currentGenerationEngine(ctx, scope);
     const vibeAnalysis = args.useVibeAnalysis ?? vibeAnalysisDefault;
-    const prompts = await ctx.db.query("promptTemplates").collect();
+    const prompts = (await ctx.db.query("promptTemplates").collect()).filter((prompt: Doc<"promptTemplates">) =>
+      shopMatchesScope(prompt, scope)
+    );
+    const promptSettings = (await ctx.db.query("promptSettings").collect()).find(
+      (settings: Doc<"promptSettings">) => shopMatchesScope(settings, scope)
+    );
+    const masterPrompt = promptSettings?.masterPrompt ?? defaultMasterPrompt;
     const promptByType = new Map(
       prompts
         .filter((prompt) => prompt.isActive)
@@ -360,8 +397,9 @@ export const create = mutation({
         const template = promptByType.get(imageType);
         if (!template)
           throw new Error(`No active prompt template found for ${imageType}.`);
+        const compiledPrompt = compilePrompt(masterPrompt, template.content);
         const promptUsed = appendRegenerationInstructions(
-          renderPrompt(template.content, {
+          renderPrompt(compiledPrompt, {
             PRODUCT_TITLE: product.title,
             PRODUCT_HANDLE: product.handle,
             IMAGE_TYPE: imageType,
@@ -386,6 +424,7 @@ export const create = mutation({
     }
 
     const jobId = await ctx.db.insert("generationJobs", {
+      shopId: shop._id,
       status: "queued",
       mode: products.length === 1 ? "single" : "bulk",
       executionMode,
@@ -420,6 +459,7 @@ export const create = mutation({
 
     for (const task of planned) {
       await ctx.db.insert("generatedImages", {
+        shopId: shop._id,
         productId: task.product._id,
         jobId,
         imageType: task.imageType,
@@ -789,6 +829,7 @@ export const reviewImages = mutation({
   },
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
+    const scope = await getActiveShopScope(ctx, userId);
     const now = Date.now();
     let updated = 0;
     const affectedProductIds = new Set<Id<"products">>();
@@ -797,6 +838,7 @@ export const reviewImages = mutation({
       const image = await ctx.db.get(imageId);
       if (
         !image ||
+        !shopMatchesScope(image, scope) ||
         !image.storageUrl ||
         (image.status !== "generated" && image.status !== "uploaded")
       )
@@ -824,9 +866,10 @@ export const reviewImages = mutation({
 export const retry = mutation({
   args: { jobId: v.id("generationJobs") },
   handler: async (ctx, args) => {
-    await requireUserId(ctx);
+    const userId = await requireUserId(ctx);
+    const scope = await getActiveShopScope(ctx, userId);
     const job = await ctx.db.get(args.jobId);
-    if (!job) throw new Error("Job not found.");
+    if (!job || !shopMatchesScope(job, scope)) throw new Error("Job not found.");
     if (job.status !== "failed" && job.status !== "cancelled")
       throw new Error("Only failed or cancelled jobs can be retried.");
 

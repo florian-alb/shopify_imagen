@@ -79,12 +79,27 @@ export default defineSchema({
     phoneVerificationTime: v.optional(v.number()),
     isAnonymous: v.optional(v.boolean()),
     role: v.optional(v.string()),
+    activeShopId: v.optional(v.union(v.id("shops"), v.null())),
     createdAt: v.optional(v.number()),
     updatedAt: v.optional(v.number())
   })
-    .index("email", ["email"])
-    .index("phone", ["phone"]),
+  .index("email", ["email"])
+  .index("phone", ["phone"]),
+  shops: defineTable({
+    domain: v.string(),
+    name: v.optional(v.union(v.string(), v.null())),
+    clientId: v.optional(v.union(v.string(), v.null())),
+    clientSecret: v.optional(v.union(v.string(), v.null())),
+    productQuery: v.optional(v.union(v.string(), v.null())),
+    createdByUserId: v.id("users"),
+    createdAt: v.number(),
+    updatedAt: v.number()
+  })
+    .index("by_domain", ["domain"])
+    .index("by_created_by_user", ["createdByUserId"])
+    .index("by_created_by_user_and_domain", ["createdByUserId", "domain"]),
   products: defineTable({
+    shopId: v.optional(v.id("shops")),
     shopifyProductId: v.string(),
     title: v.string(),
     handle: v.string(),
@@ -119,6 +134,19 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number()
   })
+    .index("by_shop", ["shopId"])
+    .index("by_shop_and_shopify_product_id", ["shopId", "shopifyProductId"])
+    .index("by_shop_and_handle", ["shopId", "handle"])
+    .index("by_shop_and_created", ["shopId", "createdAt"])
+    .index("by_shop_and_generation_status", ["shopId", "generationStatus"])
+    .index("by_shop_and_generation_state", ["shopId", "generationState"])
+    .index("by_shop_and_review_state", ["shopId", "reviewState"])
+    .index("by_shop_and_publish_state", ["shopId", "publishState"])
+    .index("by_shop_and_primary_action", ["shopId", "primaryAction"])
+    .index("by_shop_and_product_type", ["shopId", "productType"])
+    .index("by_shop_and_shopify_status", ["shopId", "shopifyStatus"])
+    .index("by_shop_and_generation_status_and_product_type", ["shopId", "generationStatus", "productType"])
+    .index("by_shop_and_primary_action_and_product_type", ["shopId", "primaryAction", "productType"])
     .index("by_shopify_product_id", ["shopifyProductId"])
     .index("by_handle", ["handle"])
     .index("by_created", ["createdAt"])
@@ -131,8 +159,9 @@ export default defineSchema({
     .index("by_shopify_status", ["shopifyStatus"])
     .index("by_generation_status_and_product_type", ["generationStatus", "productType"])
     .index("by_primary_action_and_product_type", ["primaryAction", "productType"])
-    .searchIndex("search_products", { searchField: "title", filterFields: ["generationStatus"] }),
+    .searchIndex("search_products", { searchField: "title", filterFields: ["shopId", "generationStatus"] }),
   promptTemplates: defineTable({
+    shopId: v.optional(v.id("shops")),
     imageType: v.string(),
     label: v.string(),
     content: v.string(),
@@ -146,8 +175,19 @@ export default defineSchema({
     position: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number()
-  }).index("by_image_type", ["imageType"]),
+  })
+    .index("by_image_type", ["imageType"])
+    .index("by_shop_and_image_type", ["shopId", "imageType"])
+    .index("by_shop_and_position", ["shopId", "position"]),
+  promptSettings: defineTable({
+    shopId: v.optional(v.id("shops")),
+    masterPrompt: v.string(),
+    defaultMasterPrompt: v.string(),
+    createdAt: v.number(),
+    updatedAt: v.number()
+  }).index("by_shop", ["shopId"]),
   generationJobs: defineTable({
+    shopId: v.optional(v.id("shops")),
     status: jobStatus,
     mode: v.union(v.literal("single"), v.literal("bulk")),
     executionMode: v.optional(v.union(v.literal("realtime"), v.literal("batch"))),
@@ -182,8 +222,11 @@ export default defineSchema({
     completedAt: v.optional(v.number())
   })
     .index("by_status", ["status"])
-    .index("by_created", ["createdAt"]),
+    .index("by_created", ["createdAt"])
+    .index("by_shop_and_status", ["shopId", "status"])
+    .index("by_shop_and_created", ["shopId", "createdAt"]),
   generatedImages: defineTable({
+    shopId: v.optional(v.id("shops")),
     productId: v.id("products"),
     jobId: v.id("generationJobs"),
     imageType: v.string(),
@@ -212,10 +255,16 @@ export default defineSchema({
   })
     .index("by_product", ["productId"])
     .index("by_job", ["jobId"])
-    .index("by_status", ["status"]),
+    .index("by_status", ["status"])
+    .index("by_shop_and_product", ["shopId", "productId"])
+    .index("by_shop_and_job", ["shopId", "jobId"])
+    .index("by_shop_and_status", ["shopId", "status"]),
   appSettings: defineTable({
+    shopId: v.optional(v.id("shops")),
     key: v.string(),
     value: v.any(),
     updatedAt: v.number()
-  }).index("by_key", ["key"])
+  })
+    .index("by_key", ["key"])
+    .index("by_shop_and_key", ["shopId", "key"])
 });

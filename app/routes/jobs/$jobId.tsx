@@ -306,15 +306,15 @@ function JobDetailPage() {
       <Button variant="ghost" size="sm" className="-ml-2 mb-3 text-muted-foreground" asChild>
         <Link to="/jobs">
           <ArrowLeft data-icon="inline-start" />
-          Jobs
+          Generations
         </Link>
       </Button>
       <PageHeader
-        eyebrow={job.mode}
+        eyebrow={job.mode === "bulk" ? "Operation bulk" : "Operation produit"}
         title={`Job ${job._id.slice(-6)}`}
         action={
           <div className="flex flex-wrap items-center gap-2">
-            <StateBadge state={job.executionMode === "batch" ? "success" : "neutral"}>{executionModeLabel(job.executionMode)}</StateBadge>
+            <StateBadge state="neutral">{executionModeLabel(job.executionMode)}</StateBadge>
             <StateBadge>{job.imageProvider === "gemini" ? "Nano Banana Pro" : "OpenAI"}</StateBadge>
             <StateBadge state={jobState}>{job.status}</StateBadge>
             {job.batchStatus ? <StateBadge>{job.batchStatus}</StateBadge> : null}
@@ -322,31 +322,31 @@ function JobDetailPage() {
             {canForcePoll ? (
               <Button size="sm" variant="outline" onClick={handleForcePoll} disabled={polling}>
                 {polling ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Zap data-icon="inline-start" />}
-                Force poll
+              Poll
               </Button>
             ) : null}
             {canCancelJob ? (
               <Button size="sm" variant="outline" onClick={handleCancelJob} disabled={cancelling}>
                 {cancelling ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <X data-icon="inline-start" />}
-                Cancel
+              Annuler
               </Button>
             ) : null}
             {job.status === "failed" || job.status === "cancelled" ? (
               <Button size="sm" variant="outline" onClick={() => retryJob({ jobId: job._id })}>
                 <RefreshCw data-icon="inline-start" />
-                Retry
+            Relancer
               </Button>
             ) : null}
           </div>
         }
       />
 
-      <Card className="mb-5 rounded-lg">
+      <Card className="studio-card mb-5 rounded-lg">
         <CardContent className="pt-1">
           <div className="mb-3 flex flex-wrap justify-between gap-2 text-sm">
-            <span>{pct}% complete</span>
+            <span>{pct}% termine</span>
             <span className="text-muted-foreground">
-              {job.completedTasks} done / {job.failedTasks} failed / {job.totalTasks} total · {formatUsd(jobCost)} · {executionModeRateLabel(job.executionMode)}
+              {job.completedTasks} succes / {job.failedTasks} echecs / {job.totalTasks} total · {formatUsd(jobCost)} · {executionModeRateLabel(job.executionMode)}
             </span>
           </div>
           <Progress value={pct} className="h-2" />
@@ -358,12 +358,12 @@ function JobDetailPage() {
         </CardContent>
       </Card>
 
-      <section className="mb-4">
+      <section className="studio-card mb-4 rounded-lg border p-4">
         <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <p className="mb-1 text-xs font-medium uppercase text-muted-foreground">{executionModeLabel(job.executionMode)} review</p>
-            <h2 className="text-xl font-semibold">Review generated images</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Approve the images you want to publish. Rejected images stay available for reference.</p>
+          <p className="mb-1 text-xs text-muted-foreground">{executionModeLabel(job.executionMode)} review</p>
+          <h2 className="text-xl font-semibold">Review des images</h2>
+          <p className="mt-1 text-sm text-muted-foreground">Approuvez les images a publier. Les rejets restent disponibles comme reference.</p>
           </div>
           <Button
             variant="outline"
@@ -371,7 +371,7 @@ function JobDetailPage() {
             onClick={() => void setReview(visibleReviewable.map((image) => image._id), "approved")}
           >
             <Check data-icon="inline-start" />
-            Approve visible
+          Approuver visibles
           </Button>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -470,18 +470,18 @@ function JobDetailPage() {
 
       {reviewableImages.length ? (
         <div className="sticky-actions">
-          <Card size="sm" className="flex-row items-center justify-between gap-3 rounded-lg p-3 shadow-md">
+          <Card size="sm" className="studio-card flex-row items-center justify-between gap-3 rounded-lg p-3 shadow-2xl">
             <div className="min-w-0">
               <p className="text-sm font-medium">
-                {approvedCount} approved · {pendingCount} to review · {rejectedCount} rejected
+                {approvedCount} approuvees · {pendingCount} a verifier · {rejectedCount} rejetees
               </p>
               <p className="truncate text-xs text-muted-foreground">
-                {pushableImages.length ? `${pushableImages.length} approved image${pushableImages.length === 1 ? "" : "s"} ready to push` : "No newly approved images to push"}
+                {pushableImages.length ? `${pushableImages.length} image${pushableImages.length === 1 ? "" : "s"} prete${pushableImages.length === 1 ? "" : "s"} a publier` : "Aucune nouvelle image a publier"}
               </p>
             </div>
             <Button disabled={!pushableImages.length} onClick={() => setPushOpen(true)}>
               <Send data-icon="inline-start" />
-              Push {pushableImages.length || ""}
+              Publier {pushableImages.length || ""}
             </Button>
           </Card>
         </div>

@@ -1,7 +1,7 @@
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
-import { Check, ImageIcon, RefreshCw, Search, WandSparkles } from "lucide-react";
+import { ImageIcon, RefreshCw, Search, SlidersHorizontal, WandSparkles } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
   BusyIcon,
@@ -32,6 +32,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import {
   generationStateTone,
   primaryActionTone,
@@ -217,166 +225,192 @@ function ProductsPage() {
   const allVisibleSelected = products?.length
     ? products.every((product) => selected.has(product._id))
     : false;
+  const actionTabs: Array<{ label: string; value?: ProductPrimaryAction }> = [
+    { label: "Tous" },
+    { label: "A traiter", value: "generate" },
+    { label: "A verifier", value: "review" },
+    { label: "Pret", value: "push" },
+    { label: "Publie", value: "done" },
+  ];
 
   return (
     <main className="page">
       <PageHeader
-        eyebrow="Products"
-        title="Shopify image generation"
+        eyebrow={`${productPage?.hasNext ? `${pageSize}+` : products.length} produits visibles`}
+        title="Produits"
         action={
-          <Button
-            variant="outline"
-            size="lg"
-            onClick={() => void runSync()}
-            disabled={syncing}
-          >
-            <BusyIcon busy={syncing} />
-            {!syncing ? <RefreshCw data-icon="inline-start" /> : null}
-            Sync Shopify
-          </Button>
+          <>
+            <Button variant="outline" size="sm" onClick={() => void runSync()} disabled={syncing}>
+              <BusyIcon busy={syncing} />
+              {!syncing ? <RefreshCw data-icon="inline-start" /> : null}
+              Synchroniser
+            </Button>
+            <Button size="sm" disabled={!selected.size} onClick={() => setChooserOpen(true)}>
+              <WandSparkles data-icon="inline-start" />
+              Generer
+            </Button>
+          </>
         }
-      />
+      >
+        Catalogue Shopify, generations image et publication en une seule table.
+      </PageHeader>
 
-      <Card className="mb-4 rounded-lg py-3">
-        <CardContent className="grid gap-3 px-3 md:grid-cols-[1.5fr_1fr_1fr_1fr] xl:grid-cols-[1.4fr_repeat(4,1fr)]">
-          <Label className="relative block">
-            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              className="h-10 pl-9"
-              value={search.q ?? ""}
-              onChange={(event) => updateFilters({ q: event.target.value || undefined })}
-              placeholder="Search name or handle"
-            />
-          </Label>
-          <FilterSelect
-            value={search.action ?? ""}
-            placeholder="All work queues"
-            onChange={(action) => updateFilters({ action: (action || undefined) as ProductSearch["action"] })}
-          >
-            {Object.entries(productPrimaryActionLabels).map(([value, label]) => (
-              <SelectItem key={value} value={value}>
-                {label}
-              </SelectItem>
-            ))}
-          </FilterSelect>
-          <FilterSelect
-            value={search.type ?? ""}
-            placeholder="All categories"
-            onChange={(type) => updateFilters({ type: type || undefined })}
-          >
-            {facets?.productTypes.map((item) => (
-              <SelectItem key={item} value={item}>
-                {item}
-              </SelectItem>
-            ))}
-          </FilterSelect>
-          <FilterSelect
-            value={search.collection ?? ""}
-            placeholder="All collections"
-            onChange={(collection) => updateFilters({ collection: collection || undefined })}
-          >
-            {facets?.collections.map((item) => (
-              <SelectItem key={item.id} value={item.id}>
-                {item.title}
-              </SelectItem>
-            ))}
-          </FilterSelect>
-          <FilterSelect
-            value={search.shopifyStatus ?? ""}
-            placeholder="All Shopify states"
-            onChange={(shopifyStatus) => updateFilters({ shopifyStatus: shopifyStatus || undefined })}
-          >
-            {facets?.shopifyStatuses.map((item) => (
-              <SelectItem key={item} value={item}>
-                {shopifyStatusLabel(item)}
-              </SelectItem>
-            ))}
-          </FilterSelect>
-          <FilterSelect
-            value={search.generation ?? ""}
-            placeholder="All generation"
-            onChange={(generation) => updateFilters({ generation: (generation || undefined) as ProductSearch["generation"] })}
-          >
-            {Object.entries(productGenerationStateLabels).map(([value, label]) => (
-              <SelectItem key={value} value={value}>
-                {label}
-              </SelectItem>
-            ))}
-          </FilterSelect>
-          <FilterSelect
-            value={search.review ?? ""}
-            placeholder="All review"
-            onChange={(review) => updateFilters({ review: (review || undefined) as ProductSearch["review"] })}
-          >
-            {Object.entries(productReviewStateLabels).map(([value, label]) => (
-              <SelectItem key={value} value={value}>
-                {label}
-              </SelectItem>
-            ))}
-          </FilterSelect>
-          <FilterSelect
-            value={search.publish ?? ""}
-            placeholder="All publish"
-            onChange={(publish) => updateFilters({ publish: (publish || undefined) as ProductSearch["publish"] })}
-          >
-            {Object.entries(productPublishStateLabels).map(([value, label]) => (
-              <SelectItem key={value} value={value}>
-                {label}
-              </SelectItem>
-            ))}
-          </FilterSelect>
+      <Card className="studio-card mb-4 rounded-lg">
+        <CardContent className="space-y-3 p-3">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+            <div className="flex flex-wrap gap-1">
+              {actionTabs.map((tab) => {
+                const active = search.action === tab.value || (!search.action && !tab.value);
+                return (
+                  <Button
+                    key={tab.label}
+                    variant={active ? "default" : "ghost"}
+                    size="sm"
+                    className={active ? "" : "text-muted-foreground"}
+                    onClick={() => updateFilters({ action: tab.value })}
+                  >
+                    {tab.label}
+                  </Button>
+                );
+              })}
+            </div>
+            <div className="flex min-w-0 flex-1 flex-col gap-2 md:flex-row xl:max-w-2xl">
+              <Label className="relative block min-w-0 flex-1">
+                <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  className="h-9 pl-9"
+                  value={search.q ?? ""}
+                  onChange={(event) => updateFilters({ q: event.target.value || undefined })}
+                  placeholder="Rechercher un produit ou handle"
+                />
+              </Label>
+              <Button variant="outline" size="sm" className="justify-start gap-2">
+                <SlidersHorizontal className="size-4" />
+                Filtres
+              </Button>
+            </div>
+          </div>
+          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-6">
+            <FilterSelect
+              value={search.type ?? ""}
+              placeholder="Categorie"
+              onChange={(type) => updateFilters({ type: type || undefined })}
+            >
+              {facets?.productTypes.map((item) => (
+                <SelectItem key={item} value={item}>
+                  {item}
+                </SelectItem>
+              ))}
+            </FilterSelect>
+            <FilterSelect
+              value={search.collection ?? ""}
+              placeholder="Collection"
+              onChange={(collection) => updateFilters({ collection: collection || undefined })}
+            >
+              {facets?.collections.map((item) => (
+                <SelectItem key={item.id} value={item.id}>
+                  {item.title}
+                </SelectItem>
+              ))}
+            </FilterSelect>
+            <FilterSelect
+              value={search.shopifyStatus ?? ""}
+              placeholder="Shopify"
+              onChange={(shopifyStatus) => updateFilters({ shopifyStatus: shopifyStatus || undefined })}
+            >
+              {facets?.shopifyStatuses.map((item) => (
+                <SelectItem key={item} value={item}>
+                  {shopifyStatusLabel(item)}
+                </SelectItem>
+              ))}
+            </FilterSelect>
+            <FilterSelect
+              value={search.generation ?? ""}
+              placeholder="Generation"
+              onChange={(generation) => updateFilters({ generation: (generation || undefined) as ProductSearch["generation"] })}
+            >
+              {Object.entries(productGenerationStateLabels).map(([value, label]) => (
+                <SelectItem key={value} value={value}>
+                  {label}
+                </SelectItem>
+              ))}
+            </FilterSelect>
+            <FilterSelect
+              value={search.review ?? ""}
+              placeholder="Review"
+              onChange={(review) => updateFilters({ review: (review || undefined) as ProductSearch["review"] })}
+            >
+              {Object.entries(productReviewStateLabels).map(([value, label]) => (
+                <SelectItem key={value} value={value}>
+                  {label}
+                </SelectItem>
+              ))}
+            </FilterSelect>
+            <FilterSelect
+              value={search.publish ?? ""}
+              placeholder="Publication"
+              onChange={(publish) => updateFilters({ publish: (publish || undefined) as ProductSearch["publish"] })}
+            >
+              {Object.entries(productPublishStateLabels).map(([value, label]) => (
+                <SelectItem key={value} value={value}>
+                  {label}
+                </SelectItem>
+              ))}
+            </FilterSelect>
+          </div>
         </CardContent>
       </Card>
-
-      <section className="mb-3 flex items-center justify-between gap-3">
-        <Button
-          variant="outline"
-          size="lg"
-          onClick={toggleVisible}
-          disabled={!products?.length}
-        >
-          <span className="grid size-4 place-items-center rounded border border-input bg-background" aria-hidden>
-            {allVisibleSelected ? <Check className="size-3" /> : null}
-          </span>
-          {selected.size} selected
-        </Button>
-        <Button
-          size="lg"
-          disabled={!selected.size}
-          onClick={() => setChooserOpen(true)}
-        >
-          <WandSparkles data-icon="inline-start" />
-          Generate
-        </Button>
-      </section>
 
       {!loaded ? (
         <EmptyState
           loading
-          title="Loading products"
-          body="Fetching synced Shopify catalog data from Convex."
+          title="Chargement des produits"
+          body="Lecture du catalogue synchronise depuis Convex."
         />
       ) : products.length === 0 ? (
         <EmptyState
-          title="No products yet"
-          body="Sync Shopify to import active products."
+          title="Aucun produit"
+          body="Synchronisez Shopify pour importer les produits actifs."
         />
       ) : (
-        <section className="grid gap-3">
-          {products.map((product) => (
-            <ProductRow
-              key={product._id}
-              product={product}
-              search={search}
-              selected={selected.has(product._id)}
-              onToggle={() => toggleProduct(product._id)}
-              onGenerateOne={() => {
-                setSelected(new Set([product._id]));
-                setChooserOpen(true);
-              }}
-            />
-          ))}
-        </section>
+        <Card className="studio-card overflow-hidden rounded-lg">
+          <Table className="table-studio min-w-[980px]">
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="w-10">
+                  <Checkbox
+                    checked={allVisibleSelected}
+                    onCheckedChange={toggleVisible}
+                    aria-label="Selectionner la page"
+                  />
+                </TableHead>
+                <TableHead>Produit</TableHead>
+                <TableHead>Action</TableHead>
+                <TableHead>Generation</TableHead>
+                <TableHead>Review</TableHead>
+                <TableHead>Publication</TableHead>
+                <TableHead>Images</TableHead>
+                <TableHead>Shopify</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {products.map((product) => (
+                <ProductTableRow
+                  key={product._id}
+                  product={product}
+                  search={search}
+                  selected={selected.has(product._id)}
+                  onToggle={() => toggleProduct(product._id)}
+                  onGenerateOne={() => {
+                    setSelected(new Set([product._id]));
+                    setChooserOpen(true);
+                  }}
+                />
+              ))}
+            </TableBody>
+          </Table>
+        </Card>
       )}
 
       <NumberedPaginator
@@ -393,17 +427,17 @@ function ProductsPage() {
         <div className="sticky-actions">
           <Card
             size="sm"
-            className="flex-row items-center justify-between gap-3 rounded-lg p-3 shadow-md"
+            className="studio-card flex-row items-center justify-between gap-3 rounded-lg p-3 shadow-2xl"
           >
             <div>
               <p className="text-sm font-medium">
-                {selected.size} product{selected.size === 1 ? "" : "s"} selected
+                {selected.size} produit{selected.size === 1 ? "" : "s"} selectionne{selected.size === 1 ? "" : "s"}
               </p>
               <p className="text-xs text-muted-foreground">
-                Choose image types before the job starts.
+                Choisissez les formats avant de lancer le job.
               </p>
             </div>
-            <Button onClick={() => setChooserOpen(true)}>
+            <Button size="sm" onClick={() => setChooserOpen(true)}>
               <ImageIcon data-icon="inline-start" />
               Types
             </Button>
@@ -441,7 +475,7 @@ function FilterSelect({
       value={value || "all"}
       onValueChange={(next) => onChange(next === "all" ? "" : next)}
     >
-      <SelectTrigger className="h-10 w-full">
+      <SelectTrigger className="h-9 w-full">
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent>
@@ -452,7 +486,7 @@ function FilterSelect({
   );
 }
 
-function ProductRow({
+function ProductTableRow({
   product,
   search,
   selected,
@@ -467,75 +501,101 @@ function ProductRow({
 }) {
   const image = product.featuredImageUrl;
   return (
-    <Card
-      size="sm"
-      className="grid grid-cols-[auto_72px_1fr] gap-3 rounded-lg p-3 md:grid-cols-[auto_84px_1fr_auto] md:items-center"
-    >
-      <Checkbox
-        className="mt-7 md:mt-0"
-        checked={selected}
-        onCheckedChange={onToggle}
-        aria-label={`Select ${product.title}`}
-      />
-      <Link
-        to="/products/$productId"
-        params={{ productId: product._id }}
-        search={search}
-        className="image-tile"
-      >
-        {image ? (
-          <img src={image} alt={product.title} />
-        ) : (
-          <div className="grid size-full place-items-center text-xs text-muted-foreground">
-            No image
-          </div>
-        )}
-      </Link>
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
+    <TableRow data-state={selected ? "selected" : undefined} className="group">
+      <TableCell>
+        <Checkbox
+          checked={selected}
+          onCheckedChange={onToggle}
+          aria-label={`Selectionner ${product.title}`}
+        />
+      </TableCell>
+      <TableCell className="min-w-[20rem]">
+        <div className="flex min-w-0 items-center gap-3">
           <Link
             to="/products/$productId"
             params={{ productId: product._id }}
             search={search}
-            className="min-w-0"
+            className="image-tile size-12 shrink-0"
           >
-            <h2 className="truncate text-base font-medium">{product.title}</h2>
+            {image ? (
+              <img src={image} alt={product.title} />
+            ) : (
+              <div className="grid size-full place-items-center text-[10px] text-muted-foreground">
+                Sans image
+              </div>
+            )}
           </Link>
-          <StateBadge state={primaryActionTone(product.primaryAction)}>
-            {productPrimaryActionLabels[product.primaryAction]}
-          </StateBadge>
+          <div className="min-w-0">
+            <Link
+              to="/products/$productId"
+              params={{ productId: product._id }}
+              search={search}
+              className="block min-w-0 hover:text-primary"
+            >
+              <span className="block truncate font-medium">{product.title}</span>
+            </Link>
+            <div className="mt-1 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+              <span className="truncate font-mono">{product.handle}</span>
+              <span className="text-white/20">/</span>
+              <span className="truncate">{product.productType || "Sans categorie"}</span>
+            </div>
+          </div>
         </div>
-        <p className="truncate text-sm text-muted-foreground">
-          {product.handle}
-        </p>
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          <Badge variant="outline">
-            {product.productType || "No category"}
+      </TableCell>
+      <TableCell>
+        <StateBadge state={primaryActionTone(product.primaryAction)}>
+          {productPrimaryActionLabels[product.primaryAction]}
+        </StateBadge>
+      </TableCell>
+      <TableCell>
+        <StateBadge state={generationStateTone(product.generationState)}>
+          {productGenerationStateLabels[product.generationState]}
+        </StateBadge>
+      </TableCell>
+      <TableCell>
+        <StateBadge state={reviewStateTone(product.reviewState)}>
+          {productReviewStateLabels[product.reviewState]}
+        </StateBadge>
+      </TableCell>
+      <TableCell>
+        <StateBadge state={publishStateTone(product.publishState)}>
+          {productPublishStateLabels[product.publishState]}
+        </StateBadge>
+      </TableCell>
+      <TableCell>
+        <div className="flex flex-wrap gap-1">
+          <Badge variant="outline" className="border-white/10 bg-white/[0.04]">
+            {product.generatedImageCount ?? 0} gen.
           </Badge>
-          {product.shopifyStatus ? <Badge variant="outline">{shopifyStatusLabel(product.shopifyStatus)}</Badge> : null}
-          <StateBadge state={generationStateTone(product.generationState)}>
-            {productGenerationStateLabels[product.generationState]}
-          </StateBadge>
-          <StateBadge state={reviewStateTone(product.reviewState)}>
-            {productReviewStateLabels[product.reviewState]}
-          </StateBadge>
-          <StateBadge state={publishStateTone(product.publishState)}>
-            {productPublishStateLabels[product.publishState]}
-          </StateBadge>
-          <Badge variant="outline">{product.shopifyImageCount} Shopify</Badge>
-          <Badge variant="outline">{product.generatedImageCount ?? 0} generated</Badge>
-          {product.failedImageCount ? <Badge variant="outline">{product.failedImageCount} failed</Badge> : null}
+          {product.failedImageCount ? (
+            <Badge variant="outline" className="border-red-400/25 bg-red-400/10 text-red-200">
+              {product.failedImageCount} err.
+            </Badge>
+          ) : null}
+          {product.pendingReviewCount ? (
+            <Badge variant="outline" className="border-amber-400/25 bg-amber-400/10 text-amber-200">
+              {product.pendingReviewCount} review
+            </Badge>
+          ) : null}
         </div>
-      </div>
-      <Button
-        className="col-span-3 md:col-span-1"
-        variant="outline"
-        onClick={onGenerateOne}
-      >
-        <WandSparkles data-icon="inline-start" />
-        Generate
-      </Button>
-    </Card>
+      </TableCell>
+      <TableCell>
+        <div className="space-y-1">
+          {product.shopifyStatus ? (
+            <Badge variant="outline" className="border-white/10 bg-white/[0.04]">
+              {shopifyStatusLabel(product.shopifyStatus)}
+            </Badge>
+          ) : null}
+          <p className="text-xs text-muted-foreground">{product.shopifyImageCount} images</p>
+        </div>
+      </TableCell>
+      <TableCell className="text-right">
+        <Button variant="outline" size="sm" onClick={onGenerateOne}>
+          <WandSparkles data-icon="inline-start" />
+          Generer
+        </Button>
+      </TableCell>
+    </TableRow>
   );
 }
 
@@ -581,28 +641,28 @@ function ImageTypeChooser({
   }
 
   return (
-    <DialogContent className="sm:max-w-xl">
+    <DialogContent className="border-white/10 bg-card sm:max-w-xl">
       <DialogHeader>
-        <DialogTitle>Choose image types</DialogTitle>
+        <DialogTitle>Types d'images</DialogTitle>
         <DialogDescription>
-          {products.length} product{products.length === 1 ? "" : "s"} selected.
-          Each image type maps to a prompt template.
+          {products.length} produit{products.length === 1 ? "" : "s"} selectionne{products.length === 1 ? "" : "s"}.
+          Chaque type utilise son prompt actif.
         </DialogDescription>
       </DialogHeader>
       <div className="flex flex-wrap items-center gap-2">
-        <Label className="flex h-8 items-center gap-2 rounded-lg border px-3">
+        <Label className="flex h-8 items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3">
           <Checkbox
             checked={useVibe}
             onCheckedChange={(checked) => setUseVibe(checked === true)}
           />
-          Scene vibe analysis
+          Analyse visuelle
         </Label>
       </div>
       <div className="grid gap-2">
         {types.map((type) => (
           <Label
             key={type.imageType}
-            className="flex min-h-11 justify-between rounded-lg border px-3"
+            className="flex min-h-11 justify-between rounded-lg border border-white/10 bg-white/[0.03] px-3"
           >
             <span>{type.label}</span>
             <Checkbox
@@ -619,7 +679,7 @@ function ImageTypeChooser({
         >
           <BusyIcon busy={submitting} />
           {!submitting ? <WandSparkles data-icon="inline-start" /> : null}
-          Start background job
+          Lancer le job
         </Button>
       </DialogFooter>
     </DialogContent>

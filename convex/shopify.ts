@@ -5,6 +5,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { requireUserId } from "./authz";
 import { refreshProductSummary } from "./products";
 import { refreshJobSummary } from "./jobs";
+import { envShopDomain, type ShopifyCredentials } from "./shopScope";
 
 type GraphQlResponse<T> = { data?: T; errors?: Array<{ message: string }> };
 
@@ -18,10 +19,10 @@ function normalizeShopDomain(domain: string) {
   return trimmed.includes(".") ? trimmed : `${trimmed}.myshopify.com`;
 }
 
-async function getAccessToken() {
-  const domain = normalizeShopDomain(env("SHOPIFY_SHOP_DOMAIN"));
-  const clientId = env("SHOPIFY_CLIENT_ID");
-  const clientSecret = env("SHOPIFY_CLIENT_SECRET");
+async function getAccessToken(credentials?: ShopifyCredentials) {
+  const domain = credentials?.domain ?? normalizeShopDomain(env("SHOPIFY_SHOP_DOMAIN"));
+  const clientId = credentials?.clientId ?? env("SHOPIFY_CLIENT_ID");
+  const clientSecret = credentials?.clientSecret ?? env("SHOPIFY_CLIENT_SECRET");
   if (!clientId || !clientSecret) throw new Error("SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET are required.");
   const body = new URLSearchParams({
     grant_type: "client_credentials",
@@ -40,10 +41,15 @@ async function getAccessToken() {
   return payload.access_token;
 }
 
-async function shopifyGraphql<T>(query: string, variables: Record<string, unknown>, accessToken?: string) {
-  const domain = normalizeShopDomain(env("SHOPIFY_SHOP_DOMAIN"));
+async function shopifyGraphql<T>(
+  query: string,
+  variables: Record<string, unknown>,
+  accessToken?: string,
+  credentials?: ShopifyCredentials
+) {
+  const domain = credentials?.domain ?? normalizeShopDomain(env("SHOPIFY_SHOP_DOMAIN"));
   const version = env("SHOPIFY_API_VERSION", "2026-04");
-  const token = accessToken ?? await getAccessToken();
+  const token = accessToken ?? await getAccessToken(credentials);
   const response = await fetch(`https://${domain}/admin/api/${version}/graphql.json`, {
     method: "POST",
     headers: {
@@ -186,9 +192,11 @@ function mapImages(product: any) {
   return images;
 }
 
-function mapProductForUpsert(product: any) {
+function mapProductForUpsert(product: any, credentials: ShopifyCredentials) {
   const currentShopifyImages = mapImages(product);
   return {
+    shopId: credentials.shopId,
+    adoptLegacy: Boolean(credentials.shopId && credentials.domain === envShopDomain()),
     shopifyProductId: product.id,
     title: product.title,
     handle: product.handle,
@@ -208,27 +216,33 @@ function mapProductForUpsert(product: any) {
 export const syncProducts = action({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
-    await requireUserId(ctx);
+    const userId = await requireUserId(ctx);
+    const credentials = (await ctx.runMutation(internal.shops.ensureActiveForAction, { userId })) as ShopifyCredentials;
     const limit = Math.max(1, Math.min(args.limit ?? 100, 250));
     const syncedIds: Id<"products">[] = [];
     let after: string | null = null;
 
     while (syncedIds.length < limit) {
       const first = Math.min(50, limit - syncedIds.length);
-      const data: ProductsResponse = await shopifyGraphql<ProductsResponse>(PRODUCTS_QUERY, {
-        first,
-        after,
-        query: env("SHOPIFY_PRODUCT_QUERY", "status:active,draft,archived")
-      });
+      const data: ProductsResponse = await shopifyGraphql<ProductsResponse>(
+        PRODUCTS_QUERY,
+        {
+          first,
+          after,
+          query: credentials.productQuery
+        },
+        undefined,
+        credentials
+      );
       for (const product of data.products.nodes) {
-        const id = await ctx.runMutation(internal.products.upsertSynced, mapProductForUpsert(product));
+        const id = await ctx.runMutation(internal.products.upsertSynced, mapProductForUpsert(product, credentials));
         syncedIds.push(id);
       }
       if (!data.products.pageInfo.hasNextPage) break;
       after = data.products.pageInfo.endCursor;
     }
 
-    await ctx.runMutation(internal.products.refreshFacets, {});
+    await ctx.runMutation(internal.products.refreshFacets, { shopId: credentials.shopId ?? null });
     return { synced: syncedIds.length };
   }
 });
@@ -236,13 +250,25 @@ export const syncProducts = action({
 export const syncProduct = action({
   args: { productId: v.id("products") },
   handler: async (ctx, args): Promise<{ productId: Id<"products"> }> => {
-    await requireUserId(ctx);
+    const userId = await requireUserId(ctx);
     const product = (await ctx.runQuery(internal.products.internalGet, { productId: args.productId })) as Doc<"products"> | null;
     if (!product) throw new Error("Product not found.");
-    const data = await shopifyGraphql<{ product: any | null }>(PRODUCT_QUERY, { id: product.shopifyProductId });
+    const credentials = (await ctx.runQuery(internal.shops.getShopifyCredentials, {
+      shopId: product.shopId ?? null,
+      userId
+    })) as ShopifyCredentials;
+    const data = await shopifyGraphql<{ product: any | null }>(
+      PRODUCT_QUERY,
+      { id: product.shopifyProductId },
+      undefined,
+      credentials
+    );
     if (!data.product) throw new Error("Product no longer exists in Shopify.");
-    const id: Id<"products"> = await ctx.runMutation(internal.products.upsertSynced, mapProductForUpsert(data.product));
-    await ctx.runMutation(internal.products.refreshFacets, {});
+    const id: Id<"products"> = await ctx.runMutation(
+      internal.products.upsertSynced,
+      mapProductForUpsert(data.product, credentials)
+    );
+    await ctx.runMutation(internal.products.refreshFacets, { shopId: credentials.shopId ?? null });
     return { productId: id };
   }
 });
@@ -290,12 +316,21 @@ export const reorderProductImages = action({
     orderedMediaIds: v.array(v.string())
   },
   handler: async (ctx, args): Promise<{ reordered: number; pending: boolean }> => {
-    await requireUserId(ctx);
+    const userId = await requireUserId(ctx);
     const product = (await ctx.runQuery(internal.products.internalGet, { productId: args.productId })) as Doc<"products"> | null;
     if (!product) throw new Error("Product not found.");
 
-    const accessToken = await getAccessToken();
-    const before = await shopifyGraphql<{ product: any | null }>(PRODUCT_QUERY, { id: product.shopifyProductId }, accessToken);
+    const credentials = (await ctx.runQuery(internal.shops.getShopifyCredentials, {
+      shopId: product.shopId ?? null,
+      userId
+    })) as ShopifyCredentials;
+    const accessToken = await getAccessToken(credentials);
+    const before = await shopifyGraphql<{ product: any | null }>(
+      PRODUCT_QUERY,
+      { id: product.shopifyProductId },
+      accessToken,
+      credentials
+    );
     if (!before.product) throw new Error("Product no longer exists in Shopify.");
     const mediaNodes = (before.product.media?.nodes ?? []) as Array<{ id: string; mediaContentType: string }>;
     const currentImageIds = mediaNodes.filter((media) => media.mediaContentType === "IMAGE").map((media) => media.id);
@@ -312,7 +347,8 @@ export const reorderProductImages = action({
         id: product.shopifyProductId,
         moves
       },
-      accessToken
+      accessToken,
+      credentials
     );
     throwUserErrors(data.productReorderMedia.mediaUserErrors, "Shopify product media reorder failed");
 
@@ -324,10 +360,15 @@ export const reorderProductImages = action({
     const jobId = data.productReorderMedia.job?.id as string | undefined;
     const completed = jobId ? await waitForShopifyJob(jobId, accessToken) : true;
     if (completed) {
-      const after = await shopifyGraphql<{ product: any | null }>(PRODUCT_QUERY, { id: product.shopifyProductId }, accessToken);
+      const after = await shopifyGraphql<{ product: any | null }>(
+        PRODUCT_QUERY,
+        { id: product.shopifyProductId },
+        accessToken,
+        credentials
+      );
       if (after.product) {
-        await ctx.runMutation(internal.products.upsertSynced, mapProductForUpsert(after.product));
-        await ctx.runMutation(internal.products.refreshFacets, {});
+        await ctx.runMutation(internal.products.upsertSynced, mapProductForUpsert(after.product, credentials));
+        await ctx.runMutation(internal.products.refreshFacets, { shopId: credentials.shopId ?? null });
       }
     }
 
@@ -342,9 +383,13 @@ export const pushProductImages = action({
     replaceExisting: v.boolean()
   },
   handler: async (ctx, args) => {
-    await requireUserId(ctx);
+    const userId = await requireUserId(ctx);
     const product = (await ctx.runQuery(internal.products.internalGet, { productId: args.productId })) as Doc<"products"> | null;
     if (!product) throw new Error("Product not found.");
+    const credentials = (await ctx.runQuery(internal.shops.getShopifyCredentials, {
+      shopId: product.shopId ?? null,
+      userId
+    })) as ShopifyCredentials;
     const allImages = (await ctx.runQuery(internal.shopify.generatedImagesForPush, { productId: args.productId })) as Doc<"generatedImages">[];
     const selected = args.imageIds?.length ? allImages.filter((image) => args.imageIds!.includes(image._id)) : allImages;
     // Allow re-pushing images already marked "uploaded" (e.g. after a WebP
@@ -360,7 +405,9 @@ export const pushProductImages = action({
     // Publish in the order defined by the prompt templates in settings/prompts,
     // so the Shopify gallery mirrors that sequence. Images whose imageType has no
     // matching template fall back to the end, ordered by their original index.
-    const promptOrder = (await ctx.runQuery(internal.shopify.promptOrder, {})) as Record<string, number>;
+    const promptOrder = (await ctx.runQuery(internal.shopify.promptOrder, {
+      shopId: product.shopId ?? null
+    })) as Record<string, number>;
     ready.sort((a, b) => {
       const oa = promptOrder[a.imageType] ?? Number.POSITIVE_INFINITY;
       const ob = promptOrder[b.imageType] ?? Number.POSITIVE_INFINITY;
@@ -371,14 +418,19 @@ export const pushProductImages = action({
       originalSource: image.storageUrl!,
       alt: `${product.title} - ${image.imageType}`
     }));
-    const data = await shopifyGraphql<any>(PRODUCT_UPDATE_MEDIA_MUTATION, {
-      product: { id: product.shopifyProductId },
-      media: mediaInputs.map((item) => ({
-        originalSource: item.originalSource,
-        alt: item.alt,
-        mediaContentType: "IMAGE"
-      }))
-    });
+    const data = await shopifyGraphql<any>(
+      PRODUCT_UPDATE_MEDIA_MUTATION,
+      {
+        product: { id: product.shopifyProductId },
+        media: mediaInputs.map((item) => ({
+          originalSource: item.originalSource,
+          alt: item.alt,
+          mediaContentType: "IMAGE"
+        }))
+      },
+      undefined,
+      credentials
+    );
     throwUserErrors(data.productUpdate.userErrors, "Shopify product media update failed");
     const mediaNodes = data.productUpdate.product?.media.nodes ?? [];
 
@@ -399,10 +451,15 @@ export const pushProductImages = action({
         .map(String)
         .filter((id: string) => !createdIds.has(id));
       if (existingMediaIds.length) {
-        const deleted = await shopifyGraphql<any>(PRODUCT_DELETE_MEDIA_MUTATION, {
-          productId: product.shopifyProductId,
-          mediaIds: existingMediaIds
-        });
+        const deleted = await shopifyGraphql<any>(
+          PRODUCT_DELETE_MEDIA_MUTATION,
+          {
+            productId: product.shopifyProductId,
+            mediaIds: existingMediaIds
+          },
+          undefined,
+          credentials
+        );
         throwUserErrors(deleted.productDeleteMedia.mediaUserErrors, "Shopify product media deletion failed");
       }
     }
@@ -425,9 +482,11 @@ export const generatedImagesForPush = internalQuery({
 // Maps each prompt template's imageType to its display/publish position so
 // pushProductImages can order the Shopify gallery to match settings/prompts.
 export const promptOrder = internalQuery({
-  args: {},
-  handler: async (ctx) => {
-    const prompts = await ctx.db.query("promptTemplates").collect();
+  args: { shopId: v.optional(v.union(v.id("shops"), v.null())) },
+  handler: async (ctx, args) => {
+    const prompts = (await ctx.db.query("promptTemplates").collect()).filter((prompt: Doc<"promptTemplates">) =>
+      args.shopId ? prompt.shopId === args.shopId : prompt.shopId == null
+    );
     const order: Record<string, number> = {};
     for (const prompt of prompts) {
       order[prompt.imageType] = prompt.position ?? Number.POSITIVE_INFINITY;
@@ -526,17 +585,26 @@ export const deleteImageRecord = internalMutation({
 export const deleteImage = action({
   args: { imageId: v.id("generatedImages") },
   handler: async (ctx, args): Promise<{ deleted: true }> => {
-    await requireUserId(ctx);
+    const userId = await requireUserId(ctx);
     const image = (await ctx.runQuery(internal.shopify.internalGetImage, { imageId: args.imageId })) as Doc<"generatedImages"> | null;
     if (!image) throw new Error("Image not found.");
 
     if (image.shopifyMediaId && image.shopifyMediaId.startsWith("gid://")) {
       const product = (await ctx.runQuery(internal.products.internalGet, { productId: image.productId })) as Doc<"products"> | null;
       if (product) {
-        const deleted = await shopifyGraphql<any>(PRODUCT_DELETE_MEDIA_MUTATION, {
-          productId: product.shopifyProductId,
-          mediaIds: [image.shopifyMediaId]
-        });
+        const credentials = (await ctx.runQuery(internal.shops.getShopifyCredentials, {
+          shopId: product.shopId ?? null,
+          userId
+        })) as ShopifyCredentials;
+        const deleted = await shopifyGraphql<any>(
+          PRODUCT_DELETE_MEDIA_MUTATION,
+          {
+            productId: product.shopifyProductId,
+            mediaIds: [image.shopifyMediaId]
+          },
+          undefined,
+          credentials
+        );
         throwUserErrors(deleted.productDeleteMedia.mediaUserErrors, "Shopify product media deletion failed");
       }
     }

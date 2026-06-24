@@ -1,5 +1,5 @@
-import { Fragment, type ReactNode } from "react";
-import { LoaderCircle } from "lucide-react";
+import { Fragment, type MouseEvent, type ReactNode } from "react";
+import { LoaderCircle, PackageOpen } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Field, FieldLabel } from "@/components/ui/field";
@@ -10,7 +10,7 @@ import {
   PaginationItem,
   PaginationLink,
   PaginationNext,
-  PaginationPrevious,
+  PaginationPrevious
 } from "@/components/ui/pagination";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -19,25 +19,34 @@ import {
   SelectGroup,
   SelectItem,
   SelectTrigger,
-  SelectValue,
+  SelectValue
 } from "@/components/ui/select";
 import type { GenerationStatus } from "@/lib/status";
 
+const readableBadgeBase = "h-6 border px-2.5 text-xs font-medium";
+
 const statusClasses: Record<GenerationStatus, string> = {
-  not_started: "border-border bg-muted text-muted-foreground",
-  generating: "border-amber-200 bg-amber-50 text-amber-700",
-  partial: "border-amber-200 bg-amber-50 text-amber-700",
-  ready: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  pushed: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  canceled: "border-red-200 bg-red-50 text-red-700",
-  failed: "border-red-200 bg-red-50 text-red-700",
+ not_started:
+  "border-stone-300 bg-stone-100 text-stone-800 dark:border-stone-600/60 dark:bg-stone-800 dark:text-stone-200",
+ generating:
+  "border-amber-300 bg-amber-100 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-200",
+ partial:
+  "border-amber-300 bg-amber-100 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-200",
+ ready:
+  "border-emerald-300 bg-emerald-100 text-emerald-950 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-200",
+ pushed:
+  "border-emerald-300 bg-emerald-100 text-emerald-950 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-200",
+ canceled:
+  "border-red-300 bg-red-100 text-red-950 dark:border-red-500/30 dark:bg-red-500/15 dark:text-red-200",
+ failed:
+  "border-red-300 bg-red-100 text-red-950 dark:border-red-500/30 dark:bg-red-500/15 dark:text-red-200"
 };
 
 export function PageHeader({
   title,
   eyebrow,
   action,
-  children,
+  children
 }: {
   title: string;
   eyebrow?: string;
@@ -45,30 +54,26 @@ export function PageHeader({
   children?: ReactNode;
 }) {
   return (
-    <header className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+    <header className="mb-4 flex flex-col gap-3 border-b border-white/10 pb-4 lg:flex-row lg:items-end lg:justify-between">
       <div className="min-w-0">
-        {eyebrow ? (
-          <p className="mb-1 text-xs font-medium uppercase text-muted-foreground">
-            {eyebrow}
-          </p>
-        ) : null}
-        <h1 className="truncate text-2xl font-semibold sm:text-3xl">{title}</h1>
-        {children}
+        {eyebrow ? <p className="mb-1 text-sm text-muted-foreground">{eyebrow}</p> : null}
+        <h1 className="truncate text-2xl font-semibold leading-tight sm:text-3xl">{title}</h1>
+        {children ? <div className="mt-2 text-sm text-muted-foreground">{children}</div> : null}
       </div>
-      {action}
+      {action ? <div className="flex shrink-0 flex-wrap items-center gap-2">{action}</div> : null}
     </header>
   );
 }
 
 export function StatusBadge({
   status,
-  label,
+  label
 }: {
   status: GenerationStatus;
   label: string;
 }) {
   return (
-    <Badge variant="outline" className={statusClasses[status]}>
+ <Badge variant="outline" className={`${readableBadgeBase} ${statusClasses[status]}`}>
       {label}
     </Badge>
   );
@@ -76,21 +81,21 @@ export function StatusBadge({
 
 export function StateBadge({
   children,
-  state = "neutral",
+  state = "neutral"
 }: {
   children: ReactNode;
   state?: "neutral" | "success" | "warning" | "danger";
 }) {
-  const className =
-    state === "success"
-      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-      : state === "warning"
-        ? "border-amber-200 bg-amber-50 text-amber-700"
-        : state === "danger"
-          ? "border-red-200 bg-red-50 text-red-700"
-          : "border-border bg-muted/60 text-muted-foreground";
-  return (
-    <Badge variant="outline" className={className}>
+ const className =
+ state === "success"
+ ? "border-emerald-300 bg-emerald-100 text-emerald-950 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-200"
+ : state === "warning"
+ ? "border-amber-300 bg-amber-100 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-200"
+ : state === "danger"
+ ? "border-red-300 bg-red-100 text-red-950 dark:border-red-500/30 dark:bg-red-500/15 dark:text-red-200"
+ : "border-stone-300 bg-stone-100 text-stone-800 dark:border-stone-600/60 dark:bg-stone-800 dark:text-stone-200";
+ return (
+ <Badge variant="outline" className={`${readableBadgeBase} ${className}`}>
       {children}
     </Badge>
   );
@@ -99,27 +104,36 @@ export function StateBadge({
 export function EmptyState({
   title,
   body,
-  loading = false,
+  loading = false
 }: {
   title: string;
   body: string;
   loading?: boolean;
 }) {
   return (
-    <Card className="min-h-48 justify-center rounded-lg">
-      <CardContent className="mx-auto max-w-md text-center">
-        {loading ? <Skeleton className="mx-auto mb-4 h-5 w-32" /> : null}
-        <h2 className="text-base font-medium">{title}</h2>
-        <p className="mt-2 text-sm text-muted-foreground">{body}</p>
+    <Card className="studio-card min-h-56 justify-center rounded-lg">
+      <CardContent className="mx-auto max-w-md p-8 text-center">
+        <div className="mx-auto mb-4 grid size-12 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-primary">
+          {loading ? <LoaderCircle className="size-5 animate-spin" /> : <PackageOpen className="size-5" />}
+        </div>
+        {loading ? (
+          <div className="space-y-3">
+            <Skeleton className="mx-auto h-5 w-40" />
+            <Skeleton className="mx-auto h-4 w-64 max-w-full" />
+          </div>
+        ) : (
+          <>
+            <h2 className="text-base font-medium">{title}</h2>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">{body}</p>
+          </>
+        )}
       </CardContent>
     </Card>
   );
 }
 
 export function BusyIcon({ busy }: { busy: boolean }) {
-  return busy ? (
-    <LoaderCircle data-icon="inline-start" className="animate-spin" />
-  ) : null;
+  return busy ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : null;
 }
 
 export function NumberedPaginator({
@@ -129,7 +143,7 @@ export function NumberedPaginator({
   hasNext,
   loading = false,
   onPageChange,
-  onPageSizeChange,
+  onPageSizeChange
 }: {
   page: number;
   pageSize: number;
@@ -146,34 +160,35 @@ export function NumberedPaginator({
       Math.max(1, currentPage - 2),
       Math.max(1, currentPage - 1),
       currentPage,
-      ...(hasNext ? [currentPage + 1] : []),
-    ]),
+      ...(hasNext ? [currentPage + 1] : [])
+    ])
   ).sort((a, b) => a - b);
+
   const goToPage = (nextPage: number) => onPageChange(Math.max(1, nextPage));
-  const pageClick =
-    (nextPage: number) => (event: React.MouseEvent<HTMLAnchorElement>) => {
-      event.preventDefault();
-      if (!loading) goToPage(nextPage);
-    };
-  const navClick =
-    (nextPage: number) => (event: React.MouseEvent<HTMLAnchorElement>) => {
-      event.preventDefault();
-      if (!loading) goToPage(nextPage);
-    };
+  const pageClick = (nextPage: number) => (event: MouseEvent<HTMLAnchorElement>) => {
+    event.preventDefault();
+    if (!loading) goToPage(nextPage);
+  };
+  const navClick = (nextPage: number) => (event: MouseEvent<HTMLAnchorElement>) => {
+    event.preventDefault();
+    if (!loading) goToPage(nextPage);
+  };
   const changePageSize = (value: string) => {
     const size = Number.parseInt(value, 10);
     if (Number.isFinite(size)) {
-      onPageSizeChange!(size);
+      onPageSizeChange?.(size);
     }
   };
 
   return (
-    <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
+    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
       {onPageSizeChange ? (
         <Field orientation="horizontal" className="w-fit">
-          <FieldLabel htmlFor="select-rows-per-page">Rows per page</FieldLabel>
+          <FieldLabel htmlFor="select-rows-per-page" className="text-xs text-muted-foreground">
+            Lignes
+          </FieldLabel>
           <Select value={String(pageSize)} onValueChange={changePageSize}>
-            <SelectTrigger className="w-20" id="select-rows-per-page">
+            <SelectTrigger className="h-8 w-20" id="select-rows-per-page">
               <SelectValue />
             </SelectTrigger>
             <SelectContent align="start">
@@ -185,25 +200,22 @@ export function NumberedPaginator({
             </SelectContent>
           </Select>
         </Field>
-      ) : null}
-
+      ) : (
+        <span className="text-xs text-muted-foreground">Page {currentPage}</span>
+      )}
       <Pagination className="mx-0 w-auto">
         <PaginationContent>
           <PaginationItem>
             <PaginationPrevious
               href="#"
               aria-disabled={loading || !hasPrevious}
-              className={
-                !hasPrevious || loading
-                  ? "pointer-events-none opacity-50"
-                  : undefined
-              }
+              className={!hasPrevious || loading ? "pointer-events-none opacity-50" : undefined}
               onClick={navClick(currentPage - 1)}
             />
           </PaginationItem>
-          {pages.map((page, i) => (
-            <Fragment key={page}>
-              {i > 0 && page > pages[i - 1] + 1 ? (
+          {pages.map((pageNumber, i) => (
+            <Fragment key={pageNumber}>
+              {i > 0 && pageNumber > pages[i - 1] + 1 ? (
                 <PaginationItem>
                   <PaginationEllipsis />
                 </PaginationItem>
@@ -211,32 +223,21 @@ export function NumberedPaginator({
               <PaginationItem>
                 <PaginationLink
                   href="#"
-                  isActive={page === currentPage}
+                  isActive={pageNumber === currentPage}
                   aria-disabled={loading}
-                  className={
-                    loading ? "pointer-events-none opacity-50" : undefined
-                  }
-                  onClick={pageClick(page)}
+                  className={loading ? "pointer-events-none opacity-50" : undefined}
+                  onClick={pageClick(pageNumber)}
                 >
-                  {page}
+                  {pageNumber}
                 </PaginationLink>
               </PaginationItem>
             </Fragment>
           ))}
-          {hasNext ? (
-            <PaginationItem>
-              <PaginationEllipsis />
-            </PaginationItem>
-          ) : null}
           <PaginationItem>
             <PaginationNext
               href="#"
               aria-disabled={loading || !hasNext}
-              className={
-                !hasNext || loading
-                  ? "pointer-events-none opacity-50"
-                  : undefined
-              }
+              className={!hasNext || loading ? "pointer-events-none opacity-50" : undefined}
               onClick={navClick(currentPage + 1)}
             />
           </PaginationItem>

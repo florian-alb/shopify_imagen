@@ -1,6 +1,13 @@
 import { v } from "convex/values";
 import { internalQuery, mutation, query } from "./_generated/server";
+import type { Doc, Id } from "./_generated/dataModel";
 import { requireUserId } from "./authz";
+import {
+  ensureActiveShop,
+  getActiveShopScope,
+  shopMatchesScope,
+  type ShopScope
+} from "./shopScope";
 
 const DEFAULT_SETTINGS: Record<string, unknown> = {
   IMAGE_PROVIDER: "openai",
@@ -19,56 +26,74 @@ const DEFAULT_SETTINGS: Record<string, unknown> = {
   GENERATION_CONCURRENCY: 1
 };
 
+async function settingsForScope(ctx: { db: any }, scope: ShopScope) {
+  const rows = await ctx.db.query("appSettings").collect();
+  return rows.filter((row: { shopId?: Id<"shops"> }) => shopMatchesScope(row, scope));
+}
+
+async function settingForShop(ctx: { db: any }, shopId: Id<"shops">, key: string) {
+  return ctx.db
+    .query("appSettings")
+    .withIndex("by_shop_and_key", (q: any) => q.eq("shopId", shopId).eq("key", key))
+    .unique();
+}
+
 export const list = query({
   args: {},
   handler: async (ctx) => {
-    await requireUserId(ctx);
-    const rows = await ctx.db.query("appSettings").collect();
-    return { ...DEFAULT_SETTINGS, ...Object.fromEntries(rows.map((row) => [row.key, row.value])) };
+    const userId = await requireUserId(ctx);
+    const scope = await getActiveShopScope(ctx, userId);
+    const rows = await settingsForScope(ctx, scope);
+    return { ...DEFAULT_SETTINGS, ...Object.fromEntries(rows.map((row: Doc<"appSettings">) => [row.key, row.value])) };
   }
 });
 
 export const shopInfo = query({
   args: {},
   handler: async (ctx) => {
-    await requireUserId(ctx);
-    const raw = (process.env.SHOPIFY_SHOP_DOMAIN ?? "").trim().replace(/^https?:\/\//, "").replace(/\/$/, "");
-    if (!raw) return { domain: null as string | null, storeHandle: null as string | null };
-    const domain = raw.includes(".") ? raw : `${raw}.myshopify.com`;
-    const storeHandle = domain.replace(/\.myshopify\.com$/, "");
-    return { domain, storeHandle };
+    const userId = await requireUserId(ctx);
+    const scope = await getActiveShopScope(ctx, userId);
+    return { domain: scope.domain, storeHandle: scope.storeHandle, shopId: scope.shopId ?? null };
   }
 });
 
 export const internalList = internalQuery({
-  args: {},
-  handler: async (ctx) => {
+  args: { shopId: v.optional(v.union(v.id("shops"), v.null())) },
+  handler: async (ctx, args) => {
     const rows = await ctx.db.query("appSettings").collect();
-    return { ...DEFAULT_SETTINGS, ...Object.fromEntries(rows.map((row) => [row.key, row.value])) };
+    const scopedRows = rows.filter((row: { shopId?: Id<"shops"> }) =>
+      args.shopId ? row.shopId === args.shopId : row.shopId == null
+    );
+    return { ...DEFAULT_SETTINGS, ...Object.fromEntries(scopedRows.map((row) => [row.key, row.value])) };
   }
 });
 
 export const set = mutation({
-  args: {
-    key: v.string(),
-    value: v.any()
-  },
+  args: { key: v.string(), value: v.any() },
   handler: async (ctx, args) => {
-    await requireUserId(ctx);
-    if (args.key === "IMAGE_PROVIDER" && args.value !== "openai" && args.value !== "gemini") {
-      throw new Error("IMAGE_PROVIDER must be openai or gemini.");
-    }
-    if (args.key === "GENERATION_EXECUTION_MODE" && args.value !== "realtime" && args.value !== "batch") {
-      throw new Error("GENERATION_EXECUTION_MODE must be realtime or batch.");
-    }
-    if (args.key === "VIBE_ANALYSIS" && args.value !== "on" && args.value !== "off") {
-      throw new Error("VIBE_ANALYSIS must be on or off.");
-    }
-    const existing = await ctx.db.query("appSettings").withIndex("by_key", (q) => q.eq("key", args.key)).unique();
+    const userId = await requireUserId(ctx);
+    const shop = await ensureActiveShop(ctx, userId);
+    const existing = await settingForShop(ctx, shop._id, args.key);
     if (existing) {
       await ctx.db.patch(existing._id, { value: args.value, updatedAt: Date.now() });
       return existing._id;
     }
-    return ctx.db.insert("appSettings", { key: args.key, value: args.value, updatedAt: Date.now() });
+
+    const legacy = await ctx.db.query("appSettings").withIndex("by_key", (q) => q.eq("key", args.key)).unique();
+    if (legacy && legacy.shopId == null) {
+      await ctx.db.patch(legacy._id, {
+        shopId: shop._id,
+        value: args.value,
+        updatedAt: Date.now()
+      });
+      return legacy._id;
+    }
+
+    return ctx.db.insert("appSettings", {
+      shopId: shop._id,
+      key: args.key,
+      value: args.value,
+      updatedAt: Date.now()
+    });
   }
 });
