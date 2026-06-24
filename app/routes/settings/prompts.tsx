@@ -461,7 +461,7 @@ function PromptSettingsPage() {
           title="Chargement des prompts"
           body="Lecture des templates depuis Convex."
         />
-      ) : orderedPrompts.length > 0 && !newPromptDraft ? (
+      ) : orderedPrompts.length === 0 && !newPromptDraft ? (
         <EmptyState
           title="Aucun prompt"
           body="Creez un template pour demarrer les generations."
