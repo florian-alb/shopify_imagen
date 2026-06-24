@@ -465,6 +465,12 @@ function PromptSettingsPage() {
         <EmptyState
           title="Aucun prompt"
           body="Creez un template pour demarrer les generations."
+          children={
+            <Button size="sm" onClick={startCreate}>
+              <Plus data-icon="inline-start" />
+              Nouveau template
+            </Button>
+          }
         />
       ) : (
         <Tabs
