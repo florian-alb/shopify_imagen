@@ -2,6 +2,11 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireUserId } from "./authz";
+import {
+  backgroundConfigArgValidators,
+  backgroundConfigFrom,
+  hasBackgroundConfigInput,
+} from "./background";
 import { defaultMasterPrompt, defaultPrompts } from "./promptDefaults";
 import {
   ensureActiveShop,
@@ -133,7 +138,8 @@ export const create = mutation({
     imageType: v.string(),
     label: v.string(),
     content: v.string(),
-    isPreset: v.optional(v.boolean())
+    isPreset: v.optional(v.boolean()),
+    ...backgroundConfigArgValidators
   },
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
@@ -159,6 +165,7 @@ export const create = mutation({
       isActive: true,
       isPreset: args.isPreset ?? false,
       position,
+      ...backgroundConfigFrom(args),
       createdAt: now,
       updatedAt: now
     });
@@ -188,15 +195,43 @@ export const setPreset = mutation({
 export const update = mutation({
   args: {
     promptId: v.id("promptTemplates"),
-    content: v.string()
+    imageType: v.optional(v.string()),
+    content: v.string(),
+    ...backgroundConfigArgValidators
   },
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
     const shop = await ensureActiveShop(ctx, userId);
-    await getPromptForActiveShop(ctx, args.promptId, userId);
+    const { prompt, scope } = await getPromptForActiveShop(ctx, args.promptId, userId);
+    const imageType = args.imageType?.trim() ?? prompt.imageType;
     const content = args.content.trim();
+    if (!imageType) throw new Error("Image type cannot be empty.");
     if (!content) throw new Error("Prompt content cannot be empty.");
-    await ctx.db.patch(args.promptId, { shopId: shop._id, content, updatedAt: Date.now() });
+    if (imageType !== prompt.imageType) {
+      const existingPrompts = await promptsForScope(ctx, scope);
+      const existing = existingPrompts.find(
+        (row) => row._id !== prompt._id && row.imageType === imageType,
+      );
+      if (existing) {
+        throw new Error(`A prompt template for "${imageType}" already exists in shop.`);
+      }
+    }
+    const backgroundPatch = hasBackgroundConfigInput(args)
+      ? backgroundConfigFrom({
+          removeBackground: args.removeBackground ?? prompt.removeBackground,
+          backgroundMode: args.backgroundMode ?? prompt.backgroundMode,
+          backgroundColor: args.backgroundColor ?? prompt.backgroundColor,
+          backgroundShadow: args.backgroundShadow ?? prompt.backgroundShadow
+        })
+      : {};
+    await ctx.db.patch(args.promptId, {
+      shopId: shop._id,
+      imageType,
+      label: imageType,
+      content,
+      ...backgroundPatch,
+      updatedAt: Date.now()
+    });
   }
 });
 
@@ -248,6 +283,7 @@ export const reset = mutation({
       shopId: shop._id,
       content,
       defaultContent: defaultPrompt?.content ?? prompt.defaultContent,
+      ...backgroundConfigFrom(),
       updatedAt: Date.now()
     });
   }

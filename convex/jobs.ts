@@ -9,6 +9,7 @@ import {
 } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireUserId } from "./authz";
+import { backgroundConfigFrom } from "./background";
 import { compilePrompt, renderPrompt } from "./lib";
 import { defaultMasterPrompt } from "./promptDefaults";
 import { BATCH_PRICE_MULTIPLIER } from "./pricing";
@@ -75,9 +76,11 @@ function imageCostForJob(
   image: Doc<"generatedImages">,
 ) {
   const cost = image.costUsd ?? 0;
-  if (job.executionMode === "batch" && image.costRateMultiplier == null)
-    return cost * BATCH_PRICE_MULTIPLIER;
-  return cost;
+  const generationCost =
+    job.executionMode === "batch" && image.costRateMultiplier == null
+      ? cost * BATCH_PRICE_MULTIPLIER
+      : cost;
+  return generationCost + (image.backgroundRemovalCostUsd ?? 0);
 }
 
 function summarizeImageCosts(
@@ -97,7 +100,9 @@ function summarizeImageCosts(
       (sum, image) => sum + (image.outputTokens ?? 0),
       0,
     ),
-    pricedImageCount: images.filter((image) => image.costUsd != null).length,
+    pricedImageCount: images.filter(
+      (image) => image.costUsd != null || image.backgroundRemovalCostUsd != null,
+    ).length,
   };
 }
 
@@ -390,6 +395,7 @@ export const create = mutation({
       promptUsed: string;
       sourceImageUrl: string | null;
       sourceImageUrl2: string | null;
+      background: ReturnType<typeof backgroundConfigFrom>;
     }> = [];
 
     for (const product of products) {
@@ -413,6 +419,7 @@ export const create = mutation({
           promptUsed,
           sourceImageUrl: references[0] ?? null,
           sourceImageUrl2: references[1] ?? null,
+          background: backgroundConfigFrom(template),
         });
       }
     }
@@ -468,8 +475,11 @@ export const create = mutation({
         promptUsed: task.promptUsed,
         sourceImageUrl: task.sourceImageUrl,
         sourceImageUrl2: task.sourceImageUrl2,
+        ...task.background,
         generatedImageUrl: null,
         storageUrl: null,
+        transparentCutoutUrl: null,
+        backgroundRemovalRequestId: null,
         status: "queued",
         reviewStatus: "pending",
         shopifyMediaId: null,
@@ -731,6 +741,10 @@ export const completeImage = internalMutation({
     providerBatchId: v.optional(v.union(v.string(), v.null())),
     providerRequestId: v.optional(v.union(v.string(), v.null())),
     providerResponseId: v.optional(v.union(v.string(), v.null())),
+    transparentCutoutUrl: v.optional(v.union(v.string(), v.null())),
+    backgroundRemovalProvider: v.optional(v.union(v.literal("fal_ideogram"), v.null())),
+    backgroundRemovalCostUsd: v.optional(v.number()),
+    backgroundRemovalRequestId: v.optional(v.union(v.string(), v.null())),
     inputTokens: v.optional(v.number()),
     outputTokens: v.optional(v.number()),
     costUsd: v.optional(v.number()),
@@ -752,6 +766,10 @@ export const completeImage = internalMutation({
       providerBatchId: args.providerBatchId,
       providerRequestId: args.providerRequestId,
       providerResponseId: args.providerResponseId,
+      transparentCutoutUrl: args.transparentCutoutUrl,
+      backgroundRemovalProvider: args.backgroundRemovalProvider,
+      backgroundRemovalCostUsd: args.backgroundRemovalCostUsd,
+      backgroundRemovalRequestId: args.backgroundRemovalRequestId,
       status: "generated",
       reviewStatus: "pending",
       reviewedAt: undefined,
@@ -773,6 +791,46 @@ export const completeImage = internalMutation({
   },
 });
 
+export const markBackgroundRemovalStaged = internalMutation({
+  args: {
+    imageId: v.id("generatedImages"),
+    inputUrl: v.string(),
+    inputContentType: v.string(),
+    inputExtension: v.string(),
+    providerBatchId: v.optional(v.union(v.string(), v.null())),
+    providerRequestId: v.optional(v.union(v.string(), v.null())),
+    providerResponseId: v.optional(v.union(v.string(), v.null())),
+    inputTokens: v.optional(v.number()),
+    outputTokens: v.optional(v.number()),
+    costUsd: v.optional(v.number()),
+    costRateMultiplier: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const image = await ctx.db.get(args.imageId);
+    if (
+      !image ||
+      image.status === "generated" ||
+      image.status === "uploaded" ||
+      image.status === "canceled"
+    )
+      return false;
+    await ctx.db.patch(args.imageId, {
+      backgroundRemovalInputUrl: args.inputUrl,
+      backgroundRemovalInputContentType: args.inputContentType,
+      backgroundRemovalInputExtension: args.inputExtension,
+      providerBatchId: args.providerBatchId,
+      providerRequestId: args.providerRequestId,
+      providerResponseId: args.providerResponseId,
+      inputTokens: args.inputTokens,
+      outputTokens: args.outputTokens,
+      costUsd: args.costUsd,
+      costRateMultiplier: args.costRateMultiplier,
+      updatedAt: Date.now(),
+    });
+    return true;
+  },
+});
+
 export const failImage = internalMutation({
   args: {
     imageId: v.id("generatedImages"),
@@ -780,6 +838,7 @@ export const failImage = internalMutation({
     providerBatchId: v.optional(v.union(v.string(), v.null())),
     providerRequestId: v.optional(v.union(v.string(), v.null())),
     providerResponseId: v.optional(v.union(v.string(), v.null())),
+    backgroundRemovalRequestId: v.optional(v.union(v.string(), v.null())),
   },
   handler: async (ctx, args) => {
     const image = await ctx.db.get(args.imageId);
@@ -798,6 +857,7 @@ export const failImage = internalMutation({
       providerBatchId: args.providerBatchId,
       providerRequestId: args.providerRequestId,
       providerResponseId: args.providerResponseId,
+      backgroundRemovalRequestId: args.backgroundRemovalRequestId,
       updatedAt: Date.now(),
     });
     if (job) {
@@ -886,6 +946,9 @@ export const retry = mutation({
         img.status === "generating",
     );
     if (!toRetry.length) throw new Error("No failed images to retry.");
+    const canResumePostProcessing = toRetry.every(
+      (img) => img.removeBackground === true && Boolean(img.backgroundRemovalInputUrl),
+    );
 
     const now = Date.now();
     const affectedProductIds = new Set<Id<"products">>();
@@ -963,7 +1026,7 @@ export const retry = mutation({
 
     await ctx.scheduler.runAfter(
       0,
-      job.executionMode === "batch"
+      job.executionMode === "batch" && !canResumePostProcessing
         ? internal.generation.submitBatch
         : internal.generation.processJob,
       { jobId: args.jobId },

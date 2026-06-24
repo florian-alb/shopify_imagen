@@ -8,6 +8,7 @@ import {
   ChevronRight,
   ExternalLink,
   GripVertical,
+  Loader2,
   ListChecks,
   RefreshCw,
   Send,
@@ -191,6 +192,11 @@ function ProductDetailPage() {
   // Include already-pushed ("uploaded") images so they can be re-pushed, e.g.
   // after regenerating them as optimized WebP.
   const generatedGalleryImages = images.filter((image) => image.storageUrl);
+  const generatingGalleryImages = images.filter(
+    (image) =>
+      !image.storageUrl &&
+      (image.status === "queued" || image.status === "generating"),
+  );
   const reviewableImages = images.filter(isReviewable);
   const approvedImages = reviewableImages.filter(
     (image) => getReviewStatus(image) === "approved",
@@ -585,6 +591,11 @@ function ProductDetailPage() {
                 onApprove: () => void setImageReview(image, "approved"),
                 onReject: () => void setImageReview(image, "rejected"),
                 onDelete: () => setDeleteTarget(image),
+              }))}
+              pendingItems={generatingGalleryImages.map((image) => ({
+                id: image._id,
+                caption: image.imageType,
+                statusLabel: "Generation en cours",
               }))}
               emptyText="Aucune image generee."
               onZoom={openLightbox}
@@ -1020,6 +1031,12 @@ type GalleryItem = {
   onDelete?: () => void;
 };
 
+type PendingGalleryItem = {
+  id: string;
+  caption?: string;
+  statusLabel: string;
+};
+
 type GalleryReorder = {
   dragId: string | null;
   disabled: boolean;
@@ -1032,6 +1049,7 @@ function Gallery({
   title,
   description,
   items,
+  pendingItems = [],
   emptyText,
   onZoom,
   reorder,
@@ -1039,10 +1057,12 @@ function Gallery({
   title: string;
   description?: string;
   items: GalleryItem[];
+  pendingItems?: PendingGalleryItem[];
   emptyText: string;
   onZoom: (images: LightboxImage[], index: number) => void;
   reorder?: GalleryReorder;
 }) {
+  const itemCount = items.length + pendingItems.length;
   const lightboxImages = items.map((item) => ({
     url: item.url,
     label: item.label,
@@ -1053,7 +1073,7 @@ function Gallery({
         <CardTitle className="text-lg">{title}</CardTitle>
         <div className="flex items-center gap-2">
           {reorder?.disabled ? <BusyIcon busy /> : null}
-          <StateBadge>{items.length}</StateBadge>
+          <StateBadge>{itemCount}</StateBadge>
         </div>
       </CardHeader>
       <CardContent>
@@ -1061,8 +1081,9 @@ function Gallery({
           <p className="mb-3 text-xs text-muted-foreground">{description}</p>
         ) : null}
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-          {items.length ? (
-            items.map((item, index) => {
+          {itemCount ? (
+            <>
+              {items.map((item, index) => {
               const canDrag = Boolean(reorder && item.id && !reorder.disabled);
               return (
                 <figure
@@ -1175,7 +1196,11 @@ function Gallery({
                   ) : null}
                 </figure>
               );
-            })
+              })}
+              {pendingItems.map((item) => (
+                <GeneratingGalleryCard key={item.id} item={item} />
+              ))}
+            </>
           ) : (
             <p className="col-span-2 text-sm text-muted-foreground">
               {emptyText}

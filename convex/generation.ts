@@ -7,6 +7,11 @@ import { internal } from "./_generated/api";
 import { action, internalAction, type ActionCtx } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { requireUserId } from "./authz";
+import {
+  BACKGROUND_REMOVAL_COST_USD,
+  BACKGROUND_REMOVAL_PROVIDER,
+  backgroundConfigFrom,
+} from "./background";
 import { augmentPrompt, buildSeoImageFilename } from "./lib";
 import { BATCH_PRICE_MULTIPLIER, estimateCostUsd, type TokenUsage } from "./pricing";
 
@@ -74,7 +79,19 @@ type ProviderIds = {
   providerRequestId?: string | null;
   providerResponseId?: string | null;
 };
-type GeneratedImage = { bytes: Buffer; contentType: string; extension: string; usage: TokenUsage } & ProviderIds;
+type BackgroundPostProcessingMetadata = {
+  transparentCutoutUrl?: string | null;
+  backgroundRemovalProvider?: typeof BACKGROUND_REMOVAL_PROVIDER | null;
+  backgroundRemovalCostUsd?: number;
+  backgroundRemovalRequestId?: string | null;
+};
+type GeneratedImage = {
+  bytes: Buffer;
+  contentType: string;
+  extension: string;
+  usage: TokenUsage;
+} & ProviderIds &
+  BackgroundPostProcessingMetadata;
 
 function providerIdsFromResponse(response: Response, payload?: unknown): ProviderIds {
   // OpenAI reliably exposes x-request-id. Google APIs vary by surface, so keep
@@ -98,6 +115,15 @@ class ProviderGenerationError extends Error {
   constructor(message: string, providerIds: ProviderIds) {
     super(message);
     this.providerIds = providerIds;
+  }
+}
+
+class BackgroundRemovalError extends Error {
+  requestId: string | null;
+
+  constructor(message: string, requestId: string | null = null) {
+    super(message);
+    this.requestId = requestId;
   }
 }
 
@@ -365,6 +391,267 @@ async function uploadToR2(args: { bytes: Buffer; key: string; contentType: strin
     })
   );
   return `${publicBaseUrl}/${args.key}`;
+}
+
+async function downloadBinary(url: string) {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Download failed (${response.status}) for ${url}.`);
+  const contentType = response.headers.get("content-type")?.split(";")[0]?.trim() || "application/octet-stream";
+  return {
+    bytes: Buffer.from(await response.arrayBuffer()),
+    contentType,
+  };
+}
+
+function uniqueStorageToken() {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+async function prepareFalInputImage(generated: GeneratedImage) {
+  const maxBytes = 10 * 1024 * 1024;
+  const contentType = generated.contentType.toLowerCase();
+  if (
+    generated.bytes.length <= maxBytes &&
+    (contentType === "image/jpeg" || contentType === "image/png" || contentType === "image/webp")
+  ) {
+    return {
+      bytes: generated.bytes,
+      contentType: generated.contentType,
+      extension: generated.extension,
+    };
+  }
+
+  const webp = await sharp(generated.bytes)
+    .rotate()
+    .resize({ width: 2048, height: 2048, fit: "inside", withoutEnlargement: true })
+    .webp({ quality: 90, effort: 4 })
+    .toBuffer();
+  if (webp.length > maxBytes) {
+    throw new Error("Generated image is too large for fal background removal after WebP preparation.");
+  }
+  return { bytes: webp, contentType: "image/webp", extension: "webp" };
+}
+
+type FalQueueResponse = {
+  request_id?: string;
+  status?: string;
+  status_url?: string;
+  response_url?: string;
+  error?: { message?: string } | string;
+  detail?: unknown;
+  image?: { url?: string };
+};
+
+function falPayloadError(payload: FalQueueResponse | null) {
+  if (!payload) return "unknown error";
+  if (typeof payload.error === "string") return payload.error;
+  if (payload.error?.message) return payload.error.message;
+  if (typeof payload.detail === "string") return payload.detail;
+  return "unknown error";
+}
+
+async function removeBackgroundWithFal(imageUrl: string) {
+  const apiKey = env("FAL_KEY");
+  if (!apiKey) throw new Error("FAL_KEY is required for background removal.");
+
+  const submit = await fetch("https://queue.fal.run/fal-ai/ideogram/remove-background", {
+    method: "POST",
+    headers: {
+      Authorization: `Key ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ image_url: imageUrl }),
+  });
+  const submitted = (await submit.json().catch(() => null)) as FalQueueResponse | null;
+  const requestId = submitted?.request_id ?? null;
+  if (!submit.ok) {
+    throw new BackgroundRemovalError(`fal background removal submit failed (${submit.status}): ${falPayloadError(submitted)}`, requestId);
+  }
+
+  const statusUrl = submitted?.status_url;
+  let responseUrl = submitted?.response_url;
+  if (!statusUrl || !responseUrl) {
+    throw new BackgroundRemovalError("fal background removal submit returned no status_url or response_url.", requestId);
+  }
+
+  const maxPolls = intEnv("FAL_BACKGROUND_REMOVAL_MAX_POLLS", 120);
+  const pollIntervalMs = intEnv("FAL_BACKGROUND_REMOVAL_POLL_INTERVAL_MS", 1000);
+  let completed = false;
+  for (let attempt = 0; attempt < maxPolls; attempt += 1) {
+    const statusResponse = await fetch(statusUrl, {
+      headers: { Authorization: `Key ${apiKey}` },
+    });
+    const statusPayload = (await statusResponse.json().catch(() => null)) as FalQueueResponse | null;
+    if (!statusResponse.ok) {
+      throw new BackgroundRemovalError(
+        `fal background removal status failed (${statusResponse.status}): ${falPayloadError(statusPayload)}`,
+        requestId,
+      );
+    }
+
+    responseUrl = statusPayload?.response_url ?? responseUrl;
+    const status = statusPayload?.status ?? "";
+    if (status === "COMPLETED") {
+      completed = true;
+      break;
+    }
+    if (status === "FAILED" || status === "CANCELLED" || status === "CANCELED") {
+      throw new BackgroundRemovalError(`fal background removal ${status.toLowerCase()}: ${falPayloadError(statusPayload)}`, requestId);
+    }
+    await sleep(pollIntervalMs);
+  }
+  if (!completed) {
+    throw new BackgroundRemovalError("fal background removal timed out before completion.", requestId);
+  }
+
+  const response = await fetch(responseUrl, {
+    headers: { Authorization: `Key ${apiKey}` },
+  });
+  const output = (await response.json().catch(() => null)) as FalQueueResponse | null;
+  if (!response.ok) {
+    throw new BackgroundRemovalError(`fal background removal response failed (${response.status}): ${falPayloadError(output)}`, requestId);
+  }
+  const outputUrl = output?.image?.url;
+  if (!outputUrl) {
+    throw new BackgroundRemovalError("fal background removal returned no output image URL.", requestId);
+  }
+
+  const transparent = await downloadBinary(outputUrl);
+  return {
+    requestId,
+    bytes: transparent.bytes,
+    contentType: transparent.contentType || "image/png",
+  };
+}
+
+async function softShadowFromCutout(cutoutPng: Buffer, width: number, height: number) {
+  const alpha = await sharp(cutoutPng)
+    .ensureAlpha()
+    .extractChannel("alpha")
+    .linear(0.22)
+    .blur(16)
+    .png()
+    .toBuffer();
+
+  return sharp({
+    create: {
+      width,
+      height,
+      channels: 3,
+      background: "#000000",
+    },
+  })
+    .joinChannel(alpha)
+    .png()
+    .toBuffer();
+}
+
+async function composeBackgroundFinal(args: {
+  cutoutBytes: Buffer;
+  backgroundMode: "solid" | "transparent";
+  backgroundColor: string;
+  backgroundShadow: boolean;
+}) {
+  const cutoutPng = await sharp(args.cutoutBytes).rotate().ensureAlpha().png().toBuffer();
+  const metadata = await sharp(cutoutPng).metadata();
+  const width = metadata.width;
+  const height = metadata.height;
+  if (!width || !height) throw new Error("fal background removal returned an invalid image.");
+
+  if (args.backgroundMode === "transparent" && !args.backgroundShadow) {
+    return { bytes: cutoutPng, contentType: "image/png", extension: "png" };
+  }
+
+  const overlays: Array<{ input: Buffer; left?: number; top?: number }> = [];
+  if (args.backgroundShadow) {
+    overlays.push({
+      input: await softShadowFromCutout(cutoutPng, width, height),
+      left: 0,
+      top: Math.max(0, Math.round(height * 0.012)),
+    });
+  }
+  overlays.push({ input: cutoutPng, left: 0, top: 0 });
+
+  const background =
+    args.backgroundMode === "transparent"
+      ? { r: 0, g: 0, b: 0, alpha: 0 }
+      : args.backgroundColor;
+
+  const bytes = await sharp({
+    create: {
+      width,
+      height,
+      channels: 4,
+      background,
+    },
+  })
+    .composite(overlays)
+    .png()
+    .toBuffer();
+
+  return { bytes, contentType: "image/png", extension: "png" };
+}
+
+async function applyBackgroundPostProcessing(args: {
+  ctx: ActionCtx;
+  image: Doc<"generatedImages">;
+  generated: GeneratedImage;
+  safeHandle: string;
+  providerCostUsd?: number;
+  costRateMultiplier?: number;
+  providerBatchId?: string | null;
+}): Promise<GeneratedImage> {
+  const config = backgroundConfigFrom(args.image);
+  if (!config.removeBackground) return args.generated;
+
+  const token = uniqueStorageToken();
+  let inputUrl = args.image.backgroundRemovalInputUrl ?? null;
+  if (!inputUrl) {
+    const prepared = await prepareFalInputImage(args.generated);
+    const inputKey = `generated/${args.safeHandle}/${token}/fal-input.${prepared.extension}`;
+    inputUrl = await uploadToR2({
+      bytes: prepared.bytes,
+      key: inputKey,
+      contentType: prepared.contentType,
+    });
+    await args.ctx.runMutation(internal.jobs.markBackgroundRemovalStaged, {
+      imageId: args.image._id,
+      inputUrl,
+      inputContentType: prepared.contentType,
+      inputExtension: prepared.extension,
+      providerBatchId: args.providerBatchId ?? args.generated.providerBatchId,
+      providerRequestId: args.generated.providerRequestId,
+      providerResponseId: args.generated.providerResponseId,
+      inputTokens: args.generated.usage.inputTokens,
+      outputTokens: args.generated.usage.outputTokens,
+      costUsd: args.providerCostUsd,
+      costRateMultiplier: args.costRateMultiplier,
+    });
+  }
+
+  const removed = await removeBackgroundWithFal(inputUrl);
+  const cutoutPng = await sharp(removed.bytes).rotate().ensureAlpha().png().toBuffer();
+  const cutoutKey = `generated/${args.safeHandle}/${token}/transparent-cutout.png`;
+  const transparentCutoutUrl = await uploadToR2({
+    bytes: cutoutPng,
+    key: cutoutKey,
+    contentType: "image/png",
+  });
+  const final = await composeBackgroundFinal({
+    cutoutBytes: cutoutPng,
+    backgroundMode: config.backgroundMode,
+    backgroundColor: config.backgroundColor,
+    backgroundShadow: config.backgroundShadow,
+  });
+
+  return {
+    ...args.generated,
+    ...final,
+    transparentCutoutUrl,
+    backgroundRemovalProvider: BACKGROUND_REMOVAL_PROVIDER,
+    backgroundRemovalCostUsd: BACKGROUND_REMOVAL_COST_USD,
+    backgroundRemovalRequestId: removed.requestId,
+  };
 }
 
 async function deleteFromR2(storageUrl: string) {
@@ -874,31 +1161,61 @@ async function ingestBatchItem(
   }
   try {
     const product = (await ctx.runQuery(internal.products.internalGet, { productId: image.productId })) as Doc<"products"> | null;
-    const optimized = await optimizeForStorage(result.bytes, result.contentType ?? "image/png", mimeToExtension(result.contentType ?? "image/png"));
     const safeHandle = (product?.handle ?? "product").replace(/[^a-z0-9-]+/gi, "-").toLowerCase();
-    const filename = buildSeoImageFilename({ title: product?.title ?? safeHandle, imageType: image.imageType, extension: optimized.extension });
-    const key = `generated/${safeHandle}/${Date.now().toString(36)}/${filename}`;
-    const storageUrl = await uploadToR2({ bytes: optimized.bytes, key, contentType: optimized.contentType });
-    const usage = result.usage ?? {};
-    const costUsd = estimateCostUsd(job.imageModel ?? "", usage, { batch: job.executionMode === "batch" });
-    const changed: boolean = await ctx.runMutation(internal.jobs.completeImage, {
+    const generated: GeneratedImage = {
+      bytes: result.bytes,
+      contentType: result.contentType ?? "image/png",
+      extension: mimeToExtension(result.contentType ?? "image/png"),
+      usage: result.usage ?? {},
+      providerBatchId: result.providerBatchId,
+  providerRequestId: result.providerRequestId,
+  providerResponseId: result.providerResponseId,
+  };
+  const usage = result.usage ?? {};
+  const costUsd = estimateCostUsd(job.imageModel ?? "", usage, { batch: job.executionMode === "batch" });
+  const costRateMultiplier = job.executionMode === "batch" ? BATCH_PRICE_MULTIPLIER : 1;
+  const processed = await applyBackgroundPostProcessing({
+    ctx,
+    image,
+    generated,
+    safeHandle,
+    providerCostUsd: costUsd,
+    costRateMultiplier,
+    providerBatchId: job.batchId,
+  });
+  const optimized = await optimizeForStorage(processed.bytes, processed.contentType, processed.extension);
+  const filename = buildSeoImageFilename({ title: product?.title ?? safeHandle, imageType: image.imageType, extension: optimized.extension });
+  const key = `generated/${safeHandle}/${Date.now().toString(36)}/${filename}`;
+  const storageUrl = await uploadToR2({ bytes: optimized.bytes, key, contentType: optimized.contentType });
+  const changed: boolean = await ctx.runMutation(internal.jobs.completeImage, {
       imageId: image._id,
       generatedImageUrl: storageUrl,
       storageUrl,
       providerBatchId: job.batchId,
       providerRequestId: result.providerRequestId,
       providerResponseId: result.providerResponseId,
+      transparentCutoutUrl: processed.transparentCutoutUrl,
+      backgroundRemovalProvider: processed.backgroundRemovalProvider,
+      backgroundRemovalCostUsd: processed.backgroundRemovalCostUsd,
+      backgroundRemovalRequestId: processed.backgroundRemovalRequestId,
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
       costUsd,
-      costRateMultiplier: job.executionMode === "batch" ? BATCH_PRICE_MULTIPLIER : 1
-    });
+  costRateMultiplier
+  });
     log("batch", "stored", { jobId: job._id, handle: safeHandle, type: image.imageType, file: filename, kb: Math.round(optimized.bytes.length / 1024), costUsd });
     return { ingested: changed ? 1 : 0, failed: 0 };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     log("batch", "image failed", { jobId: job._id, type: image.imageType, error: message });
-    const changed: boolean = await ctx.runMutation(internal.jobs.failImage, { imageId: image._id, error: message, providerBatchId: job.batchId });
+    const changed: boolean = await ctx.runMutation(internal.jobs.failImage, {
+      imageId: image._id,
+      error: message,
+      providerBatchId: job.batchId,
+      providerRequestId: result.providerRequestId,
+      providerResponseId: result.providerResponseId,
+      backgroundRemovalRequestId: error instanceof BackgroundRemovalError ? error.requestId : undefined,
+    });
     return { ingested: 0, failed: changed ? 1 : 0 };
   }
 }
@@ -1331,42 +1648,75 @@ export const processJob = internalAction({
       const minimumIntervalMs = Math.ceil(60_000 / rpm);
       await ctx.runMutation(internal.jobs.markImageGenerating, { imageId: image._id });
       try {
-        if (!image.sourceImageUrl) throw new Error("Product has no Shopify supplier image to use as reference.");
         const product = (await ctx.runQuery(internal.products.internalGet, { productId: image.productId })) as Doc<"products"> | null;
         if (!product) throw new Error("Product not found.");
-        log("realtime", "generating", { handle: product.handle, type: image.imageType, provider: imageProvider, model: image.imageModel });
-        const vibe = await ensureProductVibe(ctx, product, image.sourceImageUrl, settings, vibeEnabled);
-        const prompt = augmentPrompt(image.promptUsed, { vibe, hasSecondReference: Boolean(image.sourceImageUrl2) });
+        const safeHandle = product.handle.replace(/[^a-z0-9-]+/gi, "-").toLowerCase();
         let result: GeneratedImage | null = null;
-        for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
-          try {
-            result =
-              imageProvider === "gemini"
-                ? await generateWithGemini({
-                    prompt,
-                    sourceImageUrl: image.sourceImageUrl,
-                    sourceImageUrl2: image.sourceImageUrl2,
-                    model: image.imageModel,
-                    settings
-                  })
-                : await generateWithOpenAi({
-                    prompt,
-                    sourceImageUrl: image.sourceImageUrl,
-                    sourceImageUrl2: image.sourceImageUrl2,
-                    model: image.imageModel,
-                    settings
-                  });
-            break;
-          } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            const canRetry = /rate limit|try again|429/i.test(message) && attempt < maxRetries;
-            if (!canRetry) throw error;
-            await sleep(waitFromRateLimitMessage(message, minimumIntervalMs));
+        let costUsd = image.costUsd ?? 0;
+        let costRateMultiplier = image.costRateMultiplier ?? 1;
+
+        if (image.backgroundRemovalInputUrl) {
+          log("realtime", "resuming background removal", { handle: product.handle, type: image.imageType });
+          const staged = await downloadBinary(image.backgroundRemovalInputUrl);
+          const contentType =
+            image.backgroundRemovalInputContentType ?? staged.contentType ?? "image/png";
+          result = {
+            bytes: staged.bytes,
+            contentType,
+            extension: image.backgroundRemovalInputExtension ?? mimeToExtension(contentType),
+            usage: {
+              inputTokens: image.inputTokens ?? 0,
+              outputTokens: image.outputTokens ?? 0,
+            },
+            providerBatchId: image.providerBatchId,
+            providerRequestId: image.providerRequestId,
+            providerResponseId: image.providerResponseId,
+          };
+        } else {
+          if (!image.sourceImageUrl) throw new Error("Product has no Shopify supplier image to use as reference.");
+          log("realtime", "generating", { handle: product.handle, type: image.imageType, provider: imageProvider, model: image.imageModel });
+          const vibe = await ensureProductVibe(ctx, product, image.sourceImageUrl, settings, vibeEnabled);
+          const prompt = augmentPrompt(image.promptUsed, { vibe, hasSecondReference: Boolean(image.sourceImageUrl2) });
+          for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+            try {
+              result =
+                imageProvider === "gemini"
+                  ? await generateWithGemini({
+                      prompt,
+                      sourceImageUrl: image.sourceImageUrl,
+                      sourceImageUrl2: image.sourceImageUrl2,
+                      model: image.imageModel,
+                      settings
+                    })
+                  : await generateWithOpenAi({
+                      prompt,
+                      sourceImageUrl: image.sourceImageUrl,
+                      sourceImageUrl2: image.sourceImageUrl2,
+                      model: image.imageModel,
+                      settings
+                    });
+              break;
+            } catch (error) {
+              const message = error instanceof Error ? error.message : String(error);
+              const canRetry = /rate limit|try again|429/i.test(message) && attempt < maxRetries;
+              if (!canRetry) throw error;
+              await sleep(waitFromRateLimitMessage(message, minimumIntervalMs));
+            }
           }
+          if (!result) throw new Error("Image generation failed.");
+          costUsd = estimateCostUsd(image.imageModel ?? "", result.usage);
+          costRateMultiplier = 1;
         }
         if (!result) throw new Error("Image generation failed.");
-        const optimized = await optimizeForStorage(result.bytes, result.contentType, result.extension);
-        const safeHandle = product.handle.replace(/[^a-z0-9-]+/gi, "-").toLowerCase();
+        const processed = await applyBackgroundPostProcessing({
+          ctx,
+          image,
+          generated: result,
+          safeHandle,
+          providerCostUsd: costUsd,
+          costRateMultiplier,
+        });
+        const optimized = await optimizeForStorage(processed.bytes, processed.contentType, processed.extension);
         const filename = buildSeoImageFilename({
           title: product.title,
           imageType: image.imageType,
@@ -1374,17 +1724,20 @@ export const processJob = internalAction({
         });
         const key = `generated/${safeHandle}/${Date.now().toString(36)}/${filename}`;
         const storageUrl = await uploadToR2({ bytes: optimized.bytes, key, contentType: optimized.contentType });
-        const costUsd = estimateCostUsd(image.imageModel ?? "", result.usage);
         await ctx.runMutation(internal.jobs.completeImage, {
           imageId: image._id,
           generatedImageUrl: storageUrl,
           storageUrl,
           providerRequestId: result.providerRequestId,
           providerResponseId: result.providerResponseId,
+          transparentCutoutUrl: processed.transparentCutoutUrl,
+          backgroundRemovalProvider: processed.backgroundRemovalProvider,
+          backgroundRemovalCostUsd: processed.backgroundRemovalCostUsd,
+          backgroundRemovalRequestId: processed.backgroundRemovalRequestId,
           inputTokens: result.usage.inputTokens,
           outputTokens: result.usage.outputTokens,
           costUsd,
-          costRateMultiplier: 1
+          costRateMultiplier
         });
         done += 1;
         log("realtime", "stored", { handle: product.handle, type: image.imageType, file: filename, kb: Math.round(optimized.bytes.length / 1024), costUsd });
@@ -1397,7 +1750,8 @@ export const processJob = internalAction({
           imageId: image._id,
           error: message,
           providerRequestId: providerIds.providerRequestId,
-          providerResponseId: providerIds.providerResponseId
+          providerResponseId: providerIds.providerResponseId,
+          backgroundRemovalRequestId: error instanceof BackgroundRemovalError ? error.requestId : undefined
         });
       }
       await sleep(minimumIntervalMs);

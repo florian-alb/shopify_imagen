@@ -30,6 +30,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "../../../convex/_generated/api";
@@ -46,11 +53,19 @@ const supportedVariables = [
 ];
 const newPromptTabValue = "__new-template__";
 
+type BackgroundMode = "solid" | "transparent";
+
+type BackgroundDraft = {
+  removeBackground: boolean;
+  backgroundMode: BackgroundMode;
+  backgroundColor: string;
+  backgroundShadow: boolean;
+};
+
 type NewPromptDraft = {
   imageType: string;
-  label: string;
   content: string;
-};
+} & BackgroundDraft;
 
 type MasterPromptSettings = {
   shopId: string | null;
@@ -58,6 +73,131 @@ type MasterPromptSettings = {
   defaultMasterPrompt: string;
   updatedAt: number | null;
 };
+
+const defaultBackgroundDraft: BackgroundDraft = {
+  removeBackground: false,
+  backgroundMode: "solid",
+  backgroundColor: "#ffffff",
+  backgroundShadow: true,
+};
+
+function promptBackgroundDraft(
+  prompt: Doc<"promptTemplates">,
+): BackgroundDraft {
+  return {
+    removeBackground: prompt.removeBackground === true,
+    backgroundMode:
+      prompt.backgroundMode === "transparent" ? "transparent" : "solid",
+    backgroundColor:
+      prompt.backgroundColor ?? defaultBackgroundDraft.backgroundColor,
+    backgroundShadow:
+      prompt.backgroundShadow ?? defaultBackgroundDraft.backgroundShadow,
+  };
+}
+
+function backgroundDraftsEqual(left: BackgroundDraft, right: BackgroundDraft) {
+  return (
+    left.removeBackground === right.removeBackground &&
+    left.backgroundMode === right.backgroundMode &&
+    left.backgroundColor.toLowerCase() ===
+      right.backgroundColor.toLowerCase() &&
+    left.backgroundShadow === right.backgroundShadow
+  );
+}
+
+function BackgroundControls({
+  idPrefix,
+  draft,
+  onChange,
+}: {
+  idPrefix: string;
+  draft: BackgroundDraft;
+  onChange: (values: Partial<BackgroundDraft>) => void;
+}) {
+  return (
+    <section className="mt-4 rounded-lg border border-white/10 bg-white/[0.03] p-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-medium text-foreground">Background</h3>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Post-traitement fal_ideogram configure pour ce type d'image.
+          </p>
+        </div>
+        <Label className="flex h-8 cursor-pointer items-center gap-2 rounded-lg border border-white/10 bg-background/40 px-3 text-sm">
+          <Checkbox
+            checked={draft.removeBackground}
+            onCheckedChange={(checked) =>
+              onChange({ removeBackground: checked === true })
+            }
+          />
+          Supprimer le fond
+        </Label>
+      </div>
+
+      <div className="mt-3 grid gap-3 md:grid-cols-[minmax(0,12rem)_minmax(0,1fr)_auto]">
+        <div className="grid gap-1.5">
+          <Label htmlFor={`${idPrefix}-mode`}>Fond final</Label>
+          <Select
+            value={draft.backgroundMode}
+            onValueChange={(value) =>
+              onChange({ backgroundMode: value as BackgroundMode })
+            }
+            disabled={!draft.removeBackground}
+          >
+            <SelectTrigger id={`${idPrefix}-mode`} className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="solid">Couleur unie</SelectItem>
+              <SelectItem value="transparent">Transparent</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="grid gap-1.5">
+          <Label htmlFor={`${idPrefix}-color`}>Couleur</Label>
+          <div className="grid grid-cols-[2.75rem_minmax(0,1fr)] gap-2">
+            <Input
+              id={`${idPrefix}-color-picker`}
+              type="color"
+              value={draft.backgroundColor}
+              onChange={(event) =>
+                onChange({ backgroundColor: event.target.value })
+              }
+              disabled={
+                !draft.removeBackground || draft.backgroundMode !== "solid"
+              }
+              className="h-9 w-11 p-1"
+            />
+            <Input
+              id={`${idPrefix}-color`}
+              value={draft.backgroundColor}
+              onChange={(event) =>
+                onChange({ backgroundColor: event.target.value })
+              }
+              disabled={
+                !draft.removeBackground || draft.backgroundMode !== "solid"
+              }
+              className="font-mono"
+              placeholder="#ffffff"
+            />
+          </div>
+        </div>
+
+        <Label className="mt-6 flex h-9 cursor-pointer items-center gap-2 rounded-lg border border-white/10 bg-background/40 px-3 text-sm">
+          <Checkbox
+            checked={draft.backgroundShadow}
+            onCheckedChange={(checked) =>
+              onChange({ backgroundShadow: checked === true })
+            }
+            disabled={!draft.removeBackground}
+          />
+          Ombre douce
+        </Label>
+      </div>
+    </section>
+  );
+}
 
 function compilePromptPreview(masterPrompt: string, templatePrompt: string) {
   const master = masterPrompt.trim();
@@ -79,17 +219,24 @@ function PromptSettingsPage() {
   const updatePrompt = useMutation(api.prompts.update);
   const updateMasterPrompt = useMutation(api.prompts.updateMaster);
   const resetMasterPrompt = useMutation(api.prompts.resetMaster);
-  const resetPrompt = useMutation(api.prompts.reset);
   const reorderPrompts = useMutation(api.prompts.reorder);
   const removePrompt = useMutation(api.prompts.remove);
   const setPreset = useMutation(api.prompts.setPreset);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [imageTypeDrafts, setImageTypeDrafts] = useState<
+    Record<string, string>
+  >({});
+  const [backgroundDrafts, setBackgroundDrafts] = useState<
+    Record<string, BackgroundDraft>
+  >({});
   const [masterDraft, setMasterDraft] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string | undefined>(undefined);
   const [newPromptDraft, setNewPromptDraft] = useState<NewPromptDraft | null>(
     null,
   );
+  const [editingPromptNameId, setEditingPromptNameId] =
+    useState<Id<"promptTemplates"> | null>(null);
   const [deletePromptId, setDeletePromptId] =
     useState<Id<"promptTemplates"> | null>(null);
   // Drag-and-drop reordering state. `localOrder` holds an optimistic ordering of
@@ -197,44 +344,47 @@ function PromptSettingsPage() {
   }
 
   async function save(promptId: Id<"promptTemplates">) {
-    const content = drafts[promptId]?.trim();
-    if (!content) {
-      toast.error("Prompt content cannot be empty.");
+    const prompt = orderedPrompts?.find((item) => item._id === promptId);
+    if (!prompt) return;
+
+    const imageType = (imageTypeDrafts[promptId] ?? prompt.imageType).trim();
+    const content = (drafts[promptId] ?? prompt.content).trim();
+    if (!imageType || !content) {
+      toast.error("Image type and content are required.");
       return;
     }
     setBusy(promptId);
     try {
-      await updatePrompt({ promptId, content });
+      const backgroundDraft =
+        backgroundDrafts[promptId] ?? promptBackgroundDraft(prompt);
+      await updatePrompt({
+        promptId,
+        imageType,
+        content,
+        ...backgroundDraft,
+      });
       setDrafts((current) => {
         const next = { ...current };
         delete next[promptId];
         return next;
       });
-      toast.success("Prompt template saved");
+      setImageTypeDrafts((current) => {
+        const next = { ...current };
+        delete next[promptId];
+        return next;
+      });
+      setBackgroundDrafts((current) => {
+        const next = { ...current };
+        delete next[promptId];
+        return next;
+      });
+      setEditingPromptNameId(null);
+      setActiveTab(imageType);
+      toast.success(`Saved "${imageType}" template`);
     } catch (saveError) {
       toast.error("Failed to save prompt", {
         description:
           saveError instanceof Error ? saveError.message : String(saveError),
-      });
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function reset(promptId: Id<"promptTemplates">) {
-    setBusy(promptId);
-    try {
-      await resetPrompt({ promptId });
-      setDrafts((current) => {
-        const next = { ...current };
-        delete next[promptId];
-        return next;
-      });
-      toast.success("Prompt reset to default");
-    } catch (resetError) {
-      toast.error("Failed to reset prompt", {
-        description:
-          resetError instanceof Error ? resetError.message : String(resetError),
       });
     } finally {
       setBusy(null);
@@ -251,6 +401,17 @@ function PromptSettingsPage() {
         delete next[promptId];
         return next;
       });
+      setImageTypeDrafts((current) => {
+        const next = { ...current };
+        delete next[promptId];
+        return next;
+      });
+      setBackgroundDrafts((current) => {
+        const next = { ...current };
+        delete next[promptId];
+        return next;
+      });
+      if (editingPromptNameId === promptId) setEditingPromptNameId(null);
       setLocalOrder((current) =>
         current ? current.filter((id) => id !== promptId) : current,
       );
@@ -292,7 +453,8 @@ function PromptSettingsPage() {
 
   function startCreate() {
     setNewPromptDraft(
-      (current) => current ?? { imageType: "", label: "", content: "" },
+      (current) =>
+        current ?? { imageType: "", content: "", ...defaultBackgroundDraft },
     );
     setActiveTab(newPromptTabValue);
   }
@@ -312,11 +474,15 @@ function PromptSettingsPage() {
     if (!newPromptDraft) return;
     const values = {
       imageType: newPromptDraft.imageType.trim(),
-      label: newPromptDraft.label.trim(),
+      label: newPromptDraft.imageType.trim(),
       content: newPromptDraft.content.trim(),
+      removeBackground: newPromptDraft.removeBackground,
+      backgroundMode: newPromptDraft.backgroundMode,
+      backgroundColor: newPromptDraft.backgroundColor.trim(),
+      backgroundShadow: newPromptDraft.backgroundShadow,
     };
-    if (!values.imageType || !values.label || !values.content) {
-      toast.error("Image type, label, and content are required.");
+    if (!values.imageType || !values.content) {
+      toast.error("Image type and content are required.");
       return;
     }
     setBusy("create");
@@ -347,7 +513,6 @@ function PromptSettingsPage() {
     (newPromptDraft ? newPromptTabValue : orderedPrompts?.[0]?.imageType);
   const canCreatePrompt = Boolean(
     newPromptDraft?.imageType.trim() &&
-    newPromptDraft.label.trim() &&
     newPromptDraft.content.trim() &&
     busy !== "create",
   );
@@ -509,7 +674,9 @@ function PromptSettingsPage() {
                 }`}
               >
                 <GripVertical className="size-3 shrink-0 opacity-50" />
-                <span className="truncate">{prompt.label}</span>
+                <span className="truncate">
+                  {imageTypeDrafts[prompt._id]?.trim() || prompt.imageType}
+                </span>
               </TabsTrigger>
             ))}
             {newPromptDraft ? (
@@ -519,7 +686,7 @@ function PromptSettingsPage() {
               >
                 <Plus className="size-3 shrink-0 opacity-70" />
                 <span className="truncate">
-                  {newPromptDraft.label.trim() || "Nouveau template"}
+                  {newPromptDraft.imageType.trim() || "Nouveau template"}
                 </span>
               </TabsTrigger>
             ) : null}
@@ -543,7 +710,7 @@ function PromptSettingsPage() {
                   </Badge>
                 </CardHeader>
                 <CardContent>
-                  <div className="grid gap-3 md:grid-cols-2">
+                  <div className="grid gap-3">
                     <div className="grid gap-1.5">
                       <Label htmlFor="prompt-image-type">Type image</Label>
                       <Input
@@ -554,17 +721,6 @@ function PromptSettingsPage() {
                           updateNewPromptDraft({
                             imageType: event.target.value,
                           })
-                        }
-                      />
-                    </div>
-                    <div className="grid gap-1.5">
-                      <Label htmlFor="prompt-label">Label</Label>
-                      <Input
-                        id="prompt-label"
-                        placeholder="ex. Detail shot"
-                        value={newPromptDraft.label}
-                        onChange={(event) =>
-                          updateNewPromptDraft({ label: event.target.value })
                         }
                       />
                     </div>
@@ -581,6 +737,11 @@ function PromptSettingsPage() {
                       }
                     />
                   </div>
+                  <BackgroundControls
+                    idPrefix="new-prompt-background"
+                    draft={newPromptDraft}
+                    onChange={updateNewPromptDraft}
+                  />
                   <div className="sticky bottom-0 -mx-4 mt-3 flex justify-end gap-2 border-t border-white/10 bg-card/95 px-4 py-3 backdrop-blur">
                     <Button
                       variant="outline"
@@ -605,78 +766,143 @@ function PromptSettingsPage() {
             </TabsContent>
           ) : null}
 
-          {orderedPrompts.map((prompt) => (
-            <TabsContent key={prompt._id} value={prompt.imageType}>
-              <Card className="studio-card rounded-lg">
-                <CardHeader className="flex flex-row items-start justify-between gap-2">
-                  <div>
-                    <CardTitle className="text-lg">{prompt.label}</CardTitle>
-                    <p className="text-sm text-muted-foreground">
-                      {prompt.imageType}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <Label className="flex h-8 cursor-pointer items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 text-sm">
-                      <Checkbox
-                        checked={prompt.isPreset === true}
-                        onCheckedChange={(checked) =>
-                          void togglePreset(prompt._id, checked === true)
+          {orderedPrompts.map((prompt) => {
+            const imageTypeValue =
+              imageTypeDrafts[prompt._id] ?? prompt.imageType;
+            const contentValue = drafts[prompt._id] ?? prompt.content;
+            const persistedBackground = promptBackgroundDraft(prompt);
+            const backgroundValue =
+              backgroundDrafts[prompt._id] ?? persistedBackground;
+            const imageTypeChanged = imageTypeValue.trim() !== prompt.imageType;
+            const contentChanged =
+              contentValue.trim() !== prompt.content.trim();
+            const backgroundChanged = !backgroundDraftsEqual(
+              backgroundValue,
+              persistedBackground,
+            );
+            const hasChanges =
+              imageTypeChanged || contentChanged || backgroundChanged;
+            const canSaveChanges = Boolean(
+              imageTypeValue.trim() && contentValue.trim(),
+            );
+
+            return (
+              <TabsContent key={prompt._id} value={prompt.imageType}>
+                <Card className="studio-card rounded-lg">
+                  <CardHeader className="flex flex-row items-start justify-between gap-2">
+                    <div>
+                      {editingPromptNameId === prompt._id ? (
+                        <Input
+                          aria-label="Nom du prompt"
+                          autoFocus
+                          className="h-10 text-lg"
+                          value={imageTypeValue}
+                          onBlur={() => setEditingPromptNameId(null)}
+                          onChange={(event) =>
+                            setImageTypeDrafts((current) => ({
+                              ...current,
+                              [prompt._id]: event.target.value,
+                            }))
+                          }
+                          onKeyDown={(event) => {
+                            if (event.key === "Escape") {
+                              setImageTypeDrafts((current) => {
+                                const next = { ...current };
+                                delete next[prompt._id];
+                                return next;
+                              });
+                              setEditingPromptNameId(null);
+                            }
+                            if (event.key === "Enter" && canSaveChanges) {
+                              event.currentTarget.blur();
+                              void save(prompt._id);
+                            }
+                          }}
+                        />
+                      ) : (
+                        <CardTitle className="text-lg">
+                          <button
+                            type="button"
+                            className="text-left hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            onClick={() => setEditingPromptNameId(prompt._id)}
+                          >
+                            {imageTypeValue.trim() || prompt.imageType}
+                          </button>
+                        </CardTitle>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <Label className="flex h-8 cursor-pointer items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 text-sm">
+                        <Checkbox
+                          checked={prompt.isPreset === true}
+                          onCheckedChange={(checked) =>
+                            void togglePreset(prompt._id, checked === true)
+                          }
+                        />
+                        Preset
+                      </Label>
+                      <StateBadge
+                        state={prompt.isActive ? "success" : "warning"}
+                      >
+                        {prompt.isActive ? "Active" : "Inactive"}
+                      </StateBadge>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid gap-1.5">
+                      <Label htmlFor={`prompt-content-${prompt._id}`}>
+                        Prompt specifique
+                      </Label>
+                      <Textarea
+                        id={`prompt-content-${prompt._id}`}
+                        className="min-h-[28rem] max-h-96 font-mono text-xs leading-relaxed"
+                        value={contentValue}
+                        onChange={(event) =>
+                          setDrafts((current) => ({
+                            ...current,
+                            [prompt._id]: event.target.value,
+                          }))
                         }
                       />
-                      Preset
-                    </Label>
-                    <StateBadge state={prompt.isActive ? "success" : "warning"}>
-                      {prompt.isActive ? "Active" : "Inactive"}
-                    </StateBadge>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <Textarea
-                    className="min-h-[28rem] font-mono text-xs leading-relaxed"
-                    value={drafts[prompt._id] ?? prompt.content}
-                    onChange={(event) =>
-                      setDrafts((current) => ({
-                        ...current,
-                        [prompt._id]: event.target.value,
-                      }))
-                    }
-                  />
+                    </div>
+                    <BackgroundControls
+                      idPrefix={`prompt-background-${prompt._id}`}
+                      draft={backgroundValue}
+                      onChange={(values) =>
+                        setBackgroundDrafts((current) => ({
+                          ...current,
+                          [prompt._id]: { ...backgroundValue, ...values },
+                        }))
+                      }
+                    />
 
-                  <div className="mt-3 flex justify-end gap-2">
-                    <Button
-                      variant="destructive"
-                      onClick={() => setDeletePromptId(prompt._id)}
-                      disabled={busy === prompt._id}
-                    >
-                      <Trash2 data-icon="inline-start" />
-                      Supprimer
-                    </Button>
-                    <Button
-                      variant="outline"
-                      onClick={() => void reset(prompt._id)}
-                      disabled={busy === prompt._id}
-                    >
-                      <BusyIcon busy={busy === prompt._id} />
-                      {busy !== prompt._id ? (
-                        <RotateCcw data-icon="inline-start" />
+                    <div className="mt-3 flex justify-end gap-2">
+                      <Button
+                        variant="destructive"
+                        onClick={() => setDeletePromptId(prompt._id)}
+                        disabled={busy === prompt._id}
+                      >
+                        <Trash2 data-icon="inline-start" />
+                        Supprimer
+                      </Button>
+                      {hasChanges ? (
+                        <Button
+                          onClick={() => void save(prompt._id)}
+                          disabled={busy === prompt._id || !canSaveChanges}
+                        >
+                          <BusyIcon busy={busy === prompt._id} />
+                          {busy !== prompt._id ? (
+                            <Save data-icon="inline-start" />
+                          ) : null}
+                          Enregistrer
+                        </Button>
                       ) : null}
-                      Reset
-                    </Button>
-                    <Button
-                      onClick={() => void save(prompt._id)}
-                      disabled={busy === prompt._id}
-                    >
-                      <BusyIcon busy={busy === prompt._id} />
-                      {busy !== prompt._id ? (
-                        <Save data-icon="inline-start" />
-                      ) : null}
-                      Enregistrer
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            </TabsContent>
-          ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            );
+          })}
         </Tabs>
       )}
 
