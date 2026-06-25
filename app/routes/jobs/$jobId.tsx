@@ -41,6 +41,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { errorMessage } from "@/lib/errors";
 import { api } from "../../../convex/_generated/api";
 import type { Doc, Id } from "../../../convex/_generated/dataModel";
 
@@ -308,7 +309,7 @@ async function setReview(imageIds: Id<"generatedImages">[], reviewStatus: "appro
         await pushImages({ productId, imageIds, replaceExisting });
       } catch (error) {
         const product = products.find((item) => item._id === productId);
-        errors.push(`${product?.title ?? productId}: ${error instanceof Error ? error.message : String(error)}`);
+        errors.push(`${product?.title ?? productId}: ${errorMessage(error)}`);
       } finally {
         setPushedProducts((count) => count + 1);
       }

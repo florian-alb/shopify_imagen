@@ -1,4 +1,4 @@
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import { action, internalMutation, internalQuery } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -8,6 +8,7 @@ import { refreshJobSummary } from "./jobs";
 import { envShopDomain, type ShopifyCredentials } from "./shopScope";
 
 type GraphQlResponse<T> = { data?: T; errors?: Array<{ message: string }> };
+type ShopifyUserError = { field?: string[] | string | null; message: string };
 
 function env(name: string, fallback = "") {
   return process.env[name] ?? fallback;
@@ -23,20 +24,25 @@ async function getAccessToken(credentials?: ShopifyCredentials) {
   const domain = credentials?.domain ?? normalizeShopDomain(env("SHOPIFY_SHOP_DOMAIN"));
   const clientId = credentials?.clientId ?? env("SHOPIFY_CLIENT_ID");
   const clientSecret = credentials?.clientSecret ?? env("SHOPIFY_CLIENT_SECRET");
-  if (!clientId || !clientSecret) throw new Error("SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET are required.");
+  if (!clientId || !clientSecret) throw new ConvexError("SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET are required.");
   const body = new URLSearchParams({
     grant_type: "client_credentials",
     client_id: clientId,
     client_secret: clientSecret
   });
-  const response = await fetch(`https://${domain}/admin/oauth/access_token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body
-  });
+  let response: Response;
+  try {
+    response = await fetch(`https://${domain}/admin/oauth/access_token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body
+    });
+  } catch (error) {
+    throw new ConvexError(`Shopify token request failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
   const payload = (await response.json().catch(() => null)) as { access_token?: string; error_description?: string; error?: string } | null;
   if (!response.ok || !payload?.access_token) {
-    throw new Error(payload?.error_description ?? payload?.error ?? `Shopify token request failed with ${response.status}.`);
+    throw new ConvexError(payload?.error_description ?? payload?.error ?? `Shopify token request failed with ${response.status}.`);
   }
   return payload.access_token;
 }
@@ -50,18 +56,26 @@ async function shopifyGraphql<T>(
   const domain = credentials?.domain ?? normalizeShopDomain(env("SHOPIFY_SHOP_DOMAIN"));
   const version = env("SHOPIFY_API_VERSION", "2026-04");
   const token = accessToken ?? await getAccessToken(credentials);
-  const response = await fetch(`https://${domain}/admin/api/${version}/graphql.json`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Shopify-Access-Token": token
-    },
-    body: JSON.stringify({ query, variables })
-  });
+  let response: Response;
+  try {
+    response = await fetch(`https://${domain}/admin/api/${version}/graphql.json`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Shopify-Access-Token": token
+      },
+      body: JSON.stringify({ query, variables })
+    });
+  } catch (error) {
+    throw new ConvexError(`Shopify API request failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
   const payload = (await response.json().catch(() => null)) as GraphQlResponse<T> | null;
-  if (!response.ok) throw new Error(`Shopify API request failed with ${response.status}.`);
-  if (payload?.errors?.length) throw new Error(payload.errors.map((error) => error.message).join("; "));
-  if (!payload?.data) throw new Error("Shopify API response did not include data.");
+  if (!response.ok) {
+    const details = payload?.errors?.map((error) => error.message).join("; ");
+    throw new ConvexError(`Shopify API request failed with ${response.status}${details ? `: ${details}` : ""}.`);
+  }
+  if (payload?.errors?.length) throw new ConvexError(payload.errors.map((error) => error.message).join("; "));
+  if (!payload?.data) throw new ConvexError("Shopify API response did not include data.");
   return payload.data;
 }
 
@@ -273,8 +287,19 @@ export const syncProduct = action({
   }
 });
 
-function throwUserErrors(errors: Array<{ message: string }>, label: string) {
-  if (errors.length) throw new Error(`${label}: ${errors.map((error) => error.message).join("; ")}`);
+function shopifyErrorMessage(errors: ShopifyUserError[] | null | undefined) {
+  if (!errors?.length) return null;
+  return errors
+    .map((error) => {
+      const field = Array.isArray(error.field) ? error.field.join(".") : error.field;
+      return field ? `${field}: ${error.message}` : error.message;
+    })
+    .join("; ");
+}
+
+function throwUserErrors(errors: ShopifyUserError[] | null | undefined, label: string) {
+  const message = shopifyErrorMessage(errors);
+  if (message) throw new ConvexError(`${label}: ${message}`);
 }
 
 function sameIds(left: string[], right: string[]) {
@@ -431,8 +456,10 @@ export const pushProductImages = action({
       undefined,
       credentials
     );
-    throwUserErrors(data.productUpdate.userErrors, "Shopify product media update failed");
-    const mediaNodes = data.productUpdate.product?.media.nodes ?? [];
+    const productUpdate = data.productUpdate;
+    if (!productUpdate) throw new ConvexError("Shopify product media update failed: Shopify returned no product update payload.");
+    throwUserErrors(productUpdate.userErrors, "Shopify product media update failed");
+    const mediaNodes = productUpdate.product?.media?.nodes ?? [];
 
     for (const image of ready) {
       const alt = `${product.title} - ${image.imageType}`;
@@ -460,8 +487,9 @@ export const pushProductImages = action({
           undefined,
           credentials
         );
-        throwUserErrors(deleted.productDeleteMedia.mediaUserErrors, "Shopify product media deletion failed");
-      }
+      if (!deleted.productDeleteMedia) throw new ConvexError("Shopify product media deletion failed: Shopify returned no media deletion payload.");
+      throwUserErrors(deleted.productDeleteMedia.mediaUserErrors, "Shopify product media deletion failed");
+    }
     }
 
     await ctx.runMutation(internal.shopify.markProductPushed, { productId: product._id });
