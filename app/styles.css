@@ -360,6 +360,72 @@
   object-fit: cover;
 }
 
+.generated-wave-tile {
+  position: relative;
+  background:
+    radial-gradient(
+      circle at 32% 18%,
+      color-mix(in oklch, var(--primary) 16%, transparent),
+      transparent 34%
+    ),
+    linear-gradient(
+      135deg,
+      color-mix(in oklch, var(--muted) 88%, var(--background) 12%),
+      color-mix(in oklch, var(--primary) 10%, var(--background) 90%)
+    );
+}
+
+.generated-wave {
+  position: absolute;
+  right: -18%;
+  bottom: -36%;
+  left: -18%;
+  height: 38%;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--primary) 18%, transparent);
+  filter: blur(18px);
+  opacity: 0;
+  transform: translateY(70%) rotate(-8deg) scaleX(0.94);
+  animation: generated-wave-rise 3.2s ease-in-out infinite;
+}
+
+.generated-wave-a {
+  animation-delay: -2.1s;
+}
+
+.generated-wave-b {
+  background: color-mix(in oklch, var(--primary) 12%, var(--background) 8%);
+  animation-delay: -1.05s;
+}
+
+.generated-wave-c {
+  animation-delay: 0s;
+}
+
+@keyframes generated-wave-rise {
+  0% {
+    opacity: 0;
+    transform: translateY(78%) rotate(-8deg) scaleX(0.94);
+  }
+
+  35% {
+    opacity: 0.54;
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateY(-245%) rotate(-8deg) scaleX(1.08);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .generated-wave {
+    animation: none;
+    opacity: 0.26;
+    transform: translateY(-80%) rotate(-8deg) scaleX(1);
+  }
+}
+
 .sticky-actions {
   position: sticky;
   right: 0;

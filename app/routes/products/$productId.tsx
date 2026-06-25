@@ -8,7 +8,6 @@ import {
   ChevronRight,
   ExternalLink,
   GripVertical,
-  Loader2,
   ListChecks,
   RefreshCw,
   Send,
@@ -1215,17 +1214,10 @@ function Gallery({
 function GeneratingGalleryCard({ item }: { item: PendingGalleryItem }) {
   return (
     <figure className="relative overflow-hidden rounded-lg bg-muted/30 ring-1 ring-border">
-      <div className="image-tile relative flex w-full flex-col items-center justify-center gap-3 overflow-hidden rounded-none bg-muted/40 p-4 text-center">
-        <div className="absolute inset-0 bg-gradient-to-br from-transparent via-primary/15 to-transparent opacity-80 motion-safe:animate-pulse" />
-        <div className="relative grid size-14 place-items-center rounded-full border border-primary/20 bg-background/70 shadow-sm backdrop-blur-sm">
-          <span className="absolute inset-1 rounded-full border border-primary/20 border-t-primary motion-safe:animate-spin" />
-          <Loader2 className="size-5 animate-spin text-primary" />
-        </div>
-        <div className="relative flex items-end gap-1.5" aria-hidden="true">
-          <span className="size-1.5 rounded-full bg-primary/80 motion-safe:animate-bounce" />
-          <span className="size-1.5 rounded-full bg-primary/80 motion-safe:animate-bounce [animation-delay:120ms]" />
-          <span className="size-1.5 rounded-full bg-primary/80 motion-safe:animate-bounce [animation-delay:240ms]" />
-        </div>
+      <div className="image-tile generated-wave-tile w-full rounded-none">
+        <div className="generated-wave generated-wave-a" />
+        <div className="generated-wave generated-wave-b" />
+        <div className="generated-wave generated-wave-c" />
       </div>
       <figcaption className="grid gap-1.5 px-2 py-2">
         {item.caption ? (
