@@ -74,6 +74,7 @@ import {
   type ProductPublishState,
   type ProductReviewState,
 } from "@/lib/status";
+import { errorMessage } from "@/lib/errors";
 import { api } from "../../../convex/_generated/api";
 import type { Doc, Id } from "../../../convex/_generated/dataModel";
 
@@ -398,8 +399,7 @@ function ProductDetailPage() {
       );
     } catch (pushError) {
       toast.error("Push failed", {
-        description:
-          pushError instanceof Error ? pushError.message : String(pushError),
+        description: errorMessage(pushError),
       });
     } finally {
       setBusy(null);
