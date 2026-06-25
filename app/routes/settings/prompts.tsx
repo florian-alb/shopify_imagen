@@ -308,10 +308,6 @@ function PromptSettingsPage() {
       masterPrompt?.masterPrompt ??
       ""
     ).trim();
-    if (!masterPromptValue) {
-      toast.error("Master prompt cannot be empty.");
-      return;
-    }
     setBusy("master");
     try {
       await updateMasterPrompt({ masterPrompt: masterPromptValue });
@@ -566,8 +562,8 @@ function PromptSettingsPage() {
                   Master Prompt
                 </div>
                 <p className="mt-1 text-sm font-normal text-muted-foreground">
-                  Instructions communes ajoutees avant chaque template lors de
-                  la generation.
+                  Instructions communes optionnelles. Si le champ est vide,
+                  seuls les templates sont utilises.
                 </p>
               </div>
               <Badge
@@ -590,6 +586,7 @@ function PromptSettingsPage() {
                   className="min-h-[16rem] font-mono text-xs leading-relaxed"
                   value={masterPromptValue}
                   onChange={(event) => setMasterDraft(event.target.value)}
+                  placeholder="Laissez vide pour generer uniquement avec les templates."
                 />
                 <div className="mt-3 flex flex-wrap justify-end gap-2">
                   <Button
