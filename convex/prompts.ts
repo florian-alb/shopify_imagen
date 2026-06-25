@@ -81,7 +81,6 @@ export const updateMaster = mutation({
     const shop = await ensureActiveShop(ctx, userId);
     const scope = await getActiveShopScope(ctx, userId);
     const masterPrompt = args.masterPrompt.trim();
-    if (!masterPrompt) throw new Error("Master prompt cannot be empty.");
 
     const existingSettings = await promptSettingsForScope(ctx, scope);
     const now = Date.now();
