@@ -12,13 +12,14 @@ import { requireUserId } from "./authz";
 import { backgroundConfigFrom } from "./background";
 import { compilePrompt, renderPrompt } from "./lib";
 import { defaultMasterPrompt } from "./promptDefaults";
+import { resolvePromptRuntime } from "./promptRuntime";
 import { BATCH_PRICE_MULTIPLIER } from "./pricing";
 import { refreshProductSummary } from "./products";
 import {
   ensureActiveShop,
   getActiveShopScope,
   shopMatchesScope,
-  type ShopScope
+  type ShopScope,
 } from "./shopScope";
 
 type ImageProvider = "openai" | "gemini";
@@ -35,8 +36,12 @@ const jobStatusFilter = v.optional(
     v.literal("cancelled"),
   ),
 );
-const executionModeFilter = v.optional(v.union(v.literal("realtime"), v.literal("batch")));
-const providerFilter = v.optional(v.union(v.literal("openai"), v.literal("gemini")));
+const executionModeFilter = v.optional(
+  v.union(v.literal("realtime"), v.literal("batch")),
+);
+const providerFilter = v.optional(
+  v.union(v.literal("openai"), v.literal("gemini")),
+);
 const reviewFilter = v.optional(
   v.union(
     v.literal("to-review"),
@@ -101,7 +106,8 @@ function summarizeImageCosts(
       0,
     ),
     pricedImageCount: images.filter(
-      (image) => image.costUsd != null || image.backgroundRemovalCostUsd != null,
+      (image) =>
+        image.costUsd != null || image.backgroundRemovalCostUsd != null,
     ).length,
   };
 }
@@ -144,7 +150,10 @@ function listedJob(job: Doc<"generationJobs">) {
   };
 }
 
-export async function refreshJobSummary(ctx: { db: any }, jobId: Id<"generationJobs">) {
+export async function refreshJobSummary(
+  ctx: { db: any },
+  jobId: Id<"generationJobs">,
+) {
   const job = await ctx.db.get(jobId);
   if (!job) return null;
   const images = await ctx.db
@@ -153,7 +162,9 @@ export async function refreshJobSummary(ctx: { db: any }, jobId: Id<"generationJ
     .collect();
   const costSummary = summarizeImageCosts(job, images);
   const reviewable: Doc<"generatedImages">[] = images.filter(
-    (image: Doc<"generatedImages">) => image.storageUrl && (image.status === "generated" || image.status === "uploaded"),
+    (image: Doc<"generatedImages">) =>
+      image.storageUrl &&
+      (image.status === "generated" || image.status === "uploaded"),
   );
   const patch = {
     generationCost: costSummary.generationCost,
@@ -161,9 +172,15 @@ export async function refreshJobSummary(ctx: { db: any }, jobId: Id<"generationJ
     outputTokens: costSummary.outputTokens,
     pricedImageCount: costSummary.pricedImageCount,
     reviewTotal: reviewable.length,
-    reviewPending: reviewable.filter((image) => (image.reviewStatus ?? "pending") === "pending").length,
-    reviewApproved: reviewable.filter((image) => image.reviewStatus === "approved").length,
-    reviewRejected: reviewable.filter((image) => image.reviewStatus === "rejected").length,
+    reviewPending: reviewable.filter(
+      (image) => (image.reviewStatus ?? "pending") === "pending",
+    ).length,
+    reviewApproved: reviewable.filter(
+      (image) => image.reviewStatus === "approved",
+    ).length,
+    reviewRejected: reviewable.filter(
+      (image) => image.reviewStatus === "rejected",
+    ).length,
     updatedAt: Date.now(),
   };
   await ctx.db.patch(jobId, patch);
@@ -171,8 +188,8 @@ export async function refreshJobSummary(ctx: { db: any }, jobId: Id<"generationJ
 }
 
 async function currentGenerationEngine(ctx: MutationCtx, scope: ShopScope) {
-  const rows = (await ctx.db.query("appSettings").collect()).filter((row: Doc<"appSettings">) =>
-    shopMatchesScope(row, scope)
+  const rows = (await ctx.db.query("appSettings").collect()).filter(
+    (row: Doc<"appSettings">) => shopMatchesScope(row, scope),
   );
   const settings = Object.fromEntries(
     rows.map((row: Doc<"appSettings">) => [row.key, row.value]),
@@ -203,7 +220,10 @@ export const list = query({
     const userId = await requireUserId(ctx);
     const scope = await getActiveShopScope(ctx, userId);
     const offset = Math.max(0, Math.floor(args.offset ?? 0));
-    const limit = Math.max(1, Math.min(Math.floor(args.limit ?? DEFAULT_PAGE_SIZE), MAX_PAGE_SIZE));
+    const limit = Math.max(
+      1,
+      Math.min(Math.floor(args.limit ?? DEFAULT_PAGE_SIZE), MAX_PAGE_SIZE),
+    );
     const page: Doc<"generationJobs">[] = [];
     let matched = 0;
     const jobs = ctx.db
@@ -215,7 +235,8 @@ export const list = query({
       if (args.productId && !job.productIds.includes(args.productId)) continue;
       const effectiveExecutionMode = job.executionMode ?? "realtime";
       if (args.status && job.status !== args.status) continue;
-      if (args.executionMode && effectiveExecutionMode !== args.executionMode) continue;
+      if (args.executionMode && effectiveExecutionMode !== args.executionMode)
+        continue;
       if (args.provider && job.imageProvider !== args.provider) continue;
       if (args.review && getStoredReviewState(job) !== args.review) continue;
       if (matched >= offset && page.length < limit + 1) page.push(job);
@@ -237,11 +258,11 @@ export const costSummary = query({
   handler: async (ctx) => {
     const userId = await requireUserId(ctx);
     const scope = await getActiveShopScope(ctx, userId);
-    const jobs = (await ctx.db.query("generationJobs").collect()).filter((job: Doc<"generationJobs">) =>
-      shopMatchesScope(job, scope)
+    const jobs = (await ctx.db.query("generationJobs").collect()).filter(
+      (job: Doc<"generationJobs">) => shopMatchesScope(job, scope),
     );
-    const products = (await ctx.db.query("products").collect()).filter((product: Doc<"products">) =>
-      shopMatchesScope(product, scope)
+    const products = (await ctx.db.query("products").collect()).filter(
+      (product: Doc<"products">) => shopMatchesScope(product, scope),
     );
     const needsImageFallback = jobs.some(
       (job) =>
@@ -251,13 +272,19 @@ export const costSummary = query({
         job.pricedImageCount == null,
     );
     const images = needsImageFallback
-      ? (await ctx.db.query("generatedImages").collect()).filter((image: Doc<"generatedImages">) =>
-        shopMatchesScope(image, scope)
-      )
+      ? (await ctx.db.query("generatedImages").collect()).filter(
+          (image: Doc<"generatedImages">) => shopMatchesScope(image, scope),
+        )
       : [];
-    const imagesByJob = new Map<Id<"generationJobs">, Doc<"generatedImages">[]>();
+    const imagesByJob = new Map<
+      Id<"generationJobs">,
+      Doc<"generatedImages">[]
+    >();
     for (const image of images) {
-      imagesByJob.set(image.jobId, [...(imagesByJob.get(image.jobId) ?? []), image]);
+      imagesByJob.set(image.jobId, [
+        ...(imagesByJob.get(image.jobId) ?? []),
+        image,
+      ]);
     }
     const jobCost = (job: Doc<"generationJobs">) => {
       if (
@@ -276,15 +303,24 @@ export const costSummary = query({
       return summarizeImageCosts(job, imagesByJob.get(job._id) ?? []);
     };
     const costs = jobs.map((job) => ({ job, cost: jobCost(job) }));
-    const generationCost = costs.reduce((sum, item) => sum + item.cost.generationCost, 0);
+    const generationCost = costs.reduce(
+      (sum, item) => sum + item.cost.generationCost,
+      0,
+    );
     const realtimeGenerationCost = costs
       .filter((item) => item.job.executionMode !== "batch")
       .reduce((sum, item) => sum + item.cost.generationCost, 0);
     const batchGenerationCost = costs
       .filter((item) => item.job.executionMode === "batch")
       .reduce((sum, item) => sum + item.cost.generationCost, 0);
-    const inputTokens = costs.reduce((sum, item) => sum + item.cost.inputTokens, 0);
-    const outputTokens = costs.reduce((sum, item) => sum + item.cost.outputTokens, 0);
+    const inputTokens = costs.reduce(
+      (sum, item) => sum + item.cost.inputTokens,
+      0,
+    );
+    const outputTokens = costs.reduce(
+      (sum, item) => sum + item.cost.outputTokens,
+      0,
+    );
     const analysisCost = products.reduce(
       (sum, product) => sum + (product.vibeCostUsd ?? 0),
       0,
@@ -303,7 +339,10 @@ export const costSummary = query({
       batchImageCount: costs
         .filter((item) => item.job.executionMode === "batch")
         .reduce((sum, item) => sum + item.cost.pricedImageCount, 0),
-      pricedImageCount: costs.reduce((sum, item) => sum + item.cost.pricedImageCount, 0),
+      pricedImageCount: costs.reduce(
+        (sum, item) => sum + item.cost.pricedImageCount,
+        0,
+      ),
     };
   },
 });
@@ -361,17 +400,24 @@ export const create = mutation({
     await Promise.all(
       products
         .filter((product) => !product.shopId)
-        .map((product) => ctx.db.patch(product._id, { shopId: shop._id, updatedAt: Date.now() }))
+        .map((product) =>
+          ctx.db.patch(product._id, {
+            shopId: shop._id,
+            updatedAt: Date.now(),
+          }),
+        ),
     );
 
     const { imageProvider, executionMode, imageModel, vibeAnalysisDefault } =
       await currentGenerationEngine(ctx, scope);
     const vibeAnalysis = args.useVibeAnalysis ?? vibeAnalysisDefault;
-    const prompts = (await ctx.db.query("promptTemplates").collect()).filter((prompt: Doc<"promptTemplates">) =>
-      shopMatchesScope(prompt, scope)
+    const prompts = (await ctx.db.query("promptTemplates").collect()).filter(
+      (prompt: Doc<"promptTemplates">) => shopMatchesScope(prompt, scope),
     );
-    const promptSettings = (await ctx.db.query("promptSettings").collect()).find(
-      (settings: Doc<"promptSettings">) => shopMatchesScope(settings, scope)
+    const promptSettings = (
+      await ctx.db.query("promptSettings").collect()
+    ).find((settings: Doc<"promptSettings">) =>
+      shopMatchesScope(settings, scope),
     );
     const masterPrompt = promptSettings?.masterPrompt ?? defaultMasterPrompt;
     const promptByType = new Map(
@@ -393,6 +439,9 @@ export const create = mutation({
       product: Doc<"products">;
       imageType: string;
       promptUsed: string;
+      useVibeAnalysis: boolean;
+      referenceImageCount: number;
+      sourceImageUrls: string[];
       sourceImageUrl: string | null;
       sourceImageUrl2: string | null;
       background: ReturnType<typeof backgroundConfigFrom>;
@@ -403,6 +452,7 @@ export const create = mutation({
         const template = promptByType.get(imageType);
         if (!template)
           throw new Error(`No active prompt template found for ${imageType}.`);
+        const runtime = resolvePromptRuntime(template);
         const compiledPrompt = compilePrompt(masterPrompt, template.content);
         const promptUsed = appendRegenerationInstructions(
           renderPrompt(compiledPrompt, {
@@ -412,11 +462,17 @@ export const create = mutation({
           }),
           args.regenerationInstructions,
         );
-        const references = referenceImageUrls(product);
+        const references = referenceImageUrls(product).slice(
+          0,
+          runtime.referenceImageCount,
+        );
         planned.push({
           product,
           imageType,
           promptUsed,
+          useVibeAnalysis: runtime.useVibeAnalysis,
+          referenceImageCount: runtime.referenceImageCount,
+          sourceImageUrls: references,
           sourceImageUrl: references[0] ?? null,
           sourceImageUrl2: references[1] ?? null,
           background: backgroundConfigFrom(template),
@@ -473,6 +529,11 @@ export const create = mutation({
         imageProvider,
         imageModel,
         promptUsed: task.promptUsed,
+        finalPromptUsed: task.promptUsed,
+        useVibeAnalysis: task.useVibeAnalysis,
+        vibeUsed: null,
+        referenceImageCount: task.referenceImageCount,
+        sourceImageUrls: task.sourceImageUrls,
         sourceImageUrl: task.sourceImageUrl,
         sourceImageUrl2: task.sourceImageUrl2,
         ...task.background,
@@ -742,7 +803,9 @@ export const completeImage = internalMutation({
     providerRequestId: v.optional(v.union(v.string(), v.null())),
     providerResponseId: v.optional(v.union(v.string(), v.null())),
     transparentCutoutUrl: v.optional(v.union(v.string(), v.null())),
-    backgroundRemovalProvider: v.optional(v.union(v.literal("fal_ideogram"), v.null())),
+    backgroundRemovalProvider: v.optional(
+      v.union(v.literal("fal_ideogram"), v.null()),
+    ),
     backgroundRemovalCostUsd: v.optional(v.number()),
     backgroundRemovalRequestId: v.optional(v.union(v.string(), v.null())),
     inputTokens: v.optional(v.number()),
@@ -882,6 +945,21 @@ export const markImageGenerating = internalMutation({
   },
 });
 
+export const markImagePromptPrepared = internalMutation({
+  args: {
+    imageId: v.id("generatedImages"),
+    finalPromptUsed: v.string(),
+    vibeUsed: v.optional(v.union(v.string(), v.null())),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.imageId, {
+      finalPromptUsed: args.finalPromptUsed,
+      vibeUsed: args.vibeUsed ?? null,
+      updatedAt: Date.now(),
+    });
+  },
+});
+
 export const reviewImages = mutation({
   args: {
     imageIds: v.array(v.id("generatedImages")),
@@ -929,7 +1007,8 @@ export const retry = mutation({
     const userId = await requireUserId(ctx);
     const scope = await getActiveShopScope(ctx, userId);
     const job = await ctx.db.get(args.jobId);
-    if (!job || !shopMatchesScope(job, scope)) throw new Error("Job not found.");
+    if (!job || !shopMatchesScope(job, scope))
+      throw new Error("Job not found.");
     if (job.status !== "failed" && job.status !== "cancelled")
       throw new Error("Only failed or cancelled jobs can be retried.");
 
@@ -947,7 +1026,8 @@ export const retry = mutation({
     );
     if (!toRetry.length) throw new Error("No failed images to retry.");
     const canResumePostProcessing = toRetry.every(
-      (img) => img.removeBackground === true && Boolean(img.backgroundRemovalInputUrl),
+      (img) =>
+        img.removeBackground === true && Boolean(img.backgroundRemovalInputUrl),
     );
 
     const now = Date.now();

@@ -19,6 +19,7 @@ import type * as lib from "../lib.js";
 import type * as pricing from "../pricing.js";
 import type * as products from "../products.js";
 import type * as promptDefaults from "../promptDefaults.js";
+import type * as promptRuntime from "../promptRuntime.js";
 import type * as prompts from "../prompts.js";
 import type * as settings from "../settings.js";
 import type * as shopScope from "../shopScope.js";
@@ -44,6 +45,7 @@ declare const fullApi: ApiFromModules<{
   pricing: typeof pricing;
   products: typeof products;
   promptDefaults: typeof promptDefaults;
+  promptRuntime: typeof promptRuntime;
   prompts: typeof prompts;
   settings: typeof settings;
   shopScope: typeof shopScope;

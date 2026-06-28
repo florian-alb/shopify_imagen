@@ -1,7 +1,13 @@
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
-import { ImageIcon, RefreshCw, Search, SlidersHorizontal, WandSparkles } from "lucide-react";
+import {
+  ImageIcon,
+  RefreshCw,
+  Search,
+  SlidersHorizontal,
+  WandSparkles,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
   BusyIcon,
@@ -10,7 +16,11 @@ import {
   PageHeader,
   StateBadge,
 } from "@/components/page";
-import { productFilterArgs, type ProductSearch, validateProductSearch } from "@/lib/productFilters";
+import {
+  productFilterArgs,
+  type ProductSearch,
+  validateProductSearch,
+} from "@/lib/productFilters";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -117,25 +127,34 @@ function ProductsPage() {
   const offset = (page - 1) * pageSize;
   const productListArgs = useMemo(
     () => productFilterArgs(search),
-    [search.action, search.collection, search.generation, search.publish, search.q, search.review, search.shopifyStatus, search.status, search.type],
+    [
+      search.action,
+      search.collection,
+      search.generation,
+      search.publish,
+      search.q,
+      search.review,
+      search.shopifyStatus,
+      search.status,
+      search.type,
+    ],
   );
-  const productPage = useQuery(
-    api.products.list,
-    {
-      ...productListArgs,
-      offset,
-      limit: pageSize,
-    },
-  ) as ProductPageResult | undefined;
+  const productPage = useQuery(api.products.list, {
+    ...productListArgs,
+    offset,
+    limit: pageSize,
+  }) as ProductPageResult | undefined;
   const products = productPage?.page ?? [];
   const facets = useQuery(api.products.facets) as ProductFacets | undefined;
-  const settings = useQuery(api.settings.list);
   const syncProducts = useAction(api.shopify.syncProducts);
   const createJob = useMutation(api.jobs.create);
-  const vibeDefault = String(settings?.VIBE_ANALYSIS ?? "on") !== "off";
 
   function updateSearch(patch: Partial<ProductSearch>) {
-    void navigate({ to: "/products", search: { ...search, ...patch }, replace: true });
+    void navigate({
+      to: "/products",
+      search: { ...search, ...patch },
+      replace: true,
+    });
   }
 
   function updateFilters(patch: Partial<ProductSearch>) {
@@ -150,7 +169,7 @@ function ProductsPage() {
   function updatePageSize(nextPageSize: number) {
     updateSearch({
       page: undefined,
-      pageSize: nextPageSize === 20 ? undefined : nextPageSize
+      pageSize: nextPageSize === 20 ? undefined : nextPageSize,
     });
   }
 
@@ -166,7 +185,8 @@ function ProductsPage() {
       toast.success("Shopify catalog synced");
     } catch (syncError) {
       toast.error("Sync failed", {
-        description: syncError instanceof Error ? syncError.message : String(syncError),
+        description:
+          syncError instanceof Error ? syncError.message : String(syncError),
       });
     } finally {
       setSyncing(false);
@@ -197,24 +217,28 @@ function ProductsPage() {
     });
   }
 
-  async function generate(imageTypes: string[], useVibeAnalysis: boolean) {
+  async function generate(imageTypes: string[]) {
     setCreatingJob(true);
     try {
       const jobId = await createJob({
         productIds: Array.from(selected),
         selectedImageTypes: imageTypes,
         forceRegenerate: true,
-        useVibeAnalysis,
       });
       setChooserOpen(false);
       setSelected(new Set());
       toast.success("Background generation started", {
         description: "Product states update here in real time.",
-        action: { label: "View job", onClick: () => void navigate({ to: "/jobs/$jobId", params: { jobId } }) },
+        action: {
+          label: "View job",
+          onClick: () =>
+            void navigate({ to: "/jobs/$jobId", params: { jobId } }),
+        },
       });
     } catch (jobError) {
       toast.error("Failed to start generation", {
-        description: jobError instanceof Error ? jobError.message : String(jobError),
+        description:
+          jobError instanceof Error ? jobError.message : String(jobError),
       });
     } finally {
       setCreatingJob(false);
@@ -240,12 +264,21 @@ function ProductsPage() {
         title="Produits"
         action={
           <>
-            <Button variant="outline" size="sm" onClick={() => void runSync()} disabled={syncing}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void runSync()}
+              disabled={syncing}
+            >
               <BusyIcon busy={syncing} />
               {!syncing ? <RefreshCw data-icon="inline-start" /> : null}
               Synchroniser
             </Button>
-            <Button size="sm" disabled={!selected.size} onClick={() => setChooserOpen(true)}>
+            <Button
+              size="sm"
+              disabled={!selected.size}
+              onClick={() => setChooserOpen(true)}
+            >
               <WandSparkles data-icon="inline-start" />
               Generer
             </Button>
@@ -260,7 +293,8 @@ function ProductsPage() {
           <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
             <div className="flex flex-wrap gap-1">
               {actionTabs.map((tab) => {
-                const active = search.action === tab.value || (!search.action && !tab.value);
+                const active =
+                  search.action === tab.value || (!search.action && !tab.value);
                 return (
                   <Button
                     key={tab.label}
@@ -280,11 +314,17 @@ function ProductsPage() {
                 <Input
                   className="h-9 pl-9"
                   value={search.q ?? ""}
-                  onChange={(event) => updateFilters({ q: event.target.value || undefined })}
+                  onChange={(event) =>
+                    updateFilters({ q: event.target.value || undefined })
+                  }
                   placeholder="Rechercher un produit ou handle"
                 />
               </Label>
-              <Button variant="outline" size="sm" className="justify-start gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="justify-start gap-2"
+              >
                 <SlidersHorizontal className="size-4" />
                 Filtres
               </Button>
@@ -305,7 +345,9 @@ function ProductsPage() {
             <FilterSelect
               value={search.collection ?? ""}
               placeholder="Collection"
-              onChange={(collection) => updateFilters({ collection: collection || undefined })}
+              onChange={(collection) =>
+                updateFilters({ collection: collection || undefined })
+              }
             >
               {facets?.collections.map((item) => (
                 <SelectItem key={item.id} value={item.id}>
@@ -316,7 +358,9 @@ function ProductsPage() {
             <FilterSelect
               value={search.shopifyStatus ?? ""}
               placeholder="Shopify"
-              onChange={(shopifyStatus) => updateFilters({ shopifyStatus: shopifyStatus || undefined })}
+              onChange={(shopifyStatus) =>
+                updateFilters({ shopifyStatus: shopifyStatus || undefined })
+              }
             >
               {facets?.shopifyStatuses.map((item) => (
                 <SelectItem key={item} value={item}>
@@ -327,35 +371,54 @@ function ProductsPage() {
             <FilterSelect
               value={search.generation ?? ""}
               placeholder="Generation"
-              onChange={(generation) => updateFilters({ generation: (generation || undefined) as ProductSearch["generation"] })}
+              onChange={(generation) =>
+                updateFilters({
+                  generation: (generation ||
+                    undefined) as ProductSearch["generation"],
+                })
+              }
             >
-              {Object.entries(productGenerationStateLabels).map(([value, label]) => (
-                <SelectItem key={value} value={value}>
-                  {label}
-                </SelectItem>
-              ))}
+              {Object.entries(productGenerationStateLabels).map(
+                ([value, label]) => (
+                  <SelectItem key={value} value={value}>
+                    {label}
+                  </SelectItem>
+                ),
+              )}
             </FilterSelect>
             <FilterSelect
               value={search.review ?? ""}
               placeholder="Review"
-              onChange={(review) => updateFilters({ review: (review || undefined) as ProductSearch["review"] })}
+              onChange={(review) =>
+                updateFilters({
+                  review: (review || undefined) as ProductSearch["review"],
+                })
+              }
             >
-              {Object.entries(productReviewStateLabels).map(([value, label]) => (
-                <SelectItem key={value} value={value}>
-                  {label}
-                </SelectItem>
-              ))}
+              {Object.entries(productReviewStateLabels).map(
+                ([value, label]) => (
+                  <SelectItem key={value} value={value}>
+                    {label}
+                  </SelectItem>
+                ),
+              )}
             </FilterSelect>
             <FilterSelect
               value={search.publish ?? ""}
               placeholder="Publication"
-              onChange={(publish) => updateFilters({ publish: (publish || undefined) as ProductSearch["publish"] })}
+              onChange={(publish) =>
+                updateFilters({
+                  publish: (publish || undefined) as ProductSearch["publish"],
+                })
+              }
             >
-              {Object.entries(productPublishStateLabels).map(([value, label]) => (
-                <SelectItem key={value} value={value}>
-                  {label}
-                </SelectItem>
-              ))}
+              {Object.entries(productPublishStateLabels).map(
+                ([value, label]) => (
+                  <SelectItem key={value} value={value}>
+                    {label}
+                  </SelectItem>
+                ),
+              )}
             </FilterSelect>
           </div>
         </CardContent>
@@ -431,7 +494,8 @@ function ProductsPage() {
           >
             <div>
               <p className="text-sm font-medium">
-                {selected.size} produit{selected.size === 1 ? "" : "s"} selectionne{selected.size === 1 ? "" : "s"}
+                {selected.size} produit{selected.size === 1 ? "" : "s"}{" "}
+                selectionne{selected.size === 1 ? "" : "s"}
               </p>
               <p className="text-xs text-muted-foreground">
                 Choisissez les formats avant de lancer le job.
@@ -450,8 +514,7 @@ function ProductsPage() {
           <ImageTypeChooser
             products={selectedProducts}
             submitting={creatingJob}
-            defaultUseVibe={vibeDefault}
-            onGenerate={(types, useVibe) => void generate(types, useVibe)}
+            onGenerate={(types) => void generate(types)}
           />
         ) : null}
       </Dialog>
@@ -532,12 +595,16 @@ function ProductTableRow({
               search={search}
               className="block min-w-0 hover:text-primary"
             >
-              <span className="block truncate font-medium">{product.title}</span>
+              <span className="block truncate font-medium">
+                {product.title}
+              </span>
             </Link>
             <div className="mt-1 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
               <span className="truncate font-mono">{product.handle}</span>
               <span className="text-white/20">/</span>
-              <span className="truncate">{product.productType || "Sans categorie"}</span>
+              <span className="truncate">
+                {product.productType || "Sans categorie"}
+              </span>
             </div>
           </div>
         </div>
@@ -568,12 +635,18 @@ function ProductTableRow({
             {product.generatedImageCount ?? 0} gen.
           </Badge>
           {product.failedImageCount ? (
-            <Badge variant="outline" className="border-red-400/25 bg-red-400/10 text-red-200">
+            <Badge
+              variant="outline"
+              className="border-red-400/25 bg-red-400/10 text-red-200"
+            >
               {product.failedImageCount} err.
             </Badge>
           ) : null}
           {product.pendingReviewCount ? (
-            <Badge variant="outline" className="border-amber-400/25 bg-amber-400/10 text-amber-200">
+            <Badge
+              variant="outline"
+              className="border-amber-400/25 bg-amber-400/10 text-amber-200"
+            >
               {product.pendingReviewCount} review
             </Badge>
           ) : null}
@@ -582,11 +655,16 @@ function ProductTableRow({
       <TableCell>
         <div className="space-y-1">
           {product.shopifyStatus ? (
-            <Badge variant="outline" className="border-white/10 bg-white/[0.04]">
+            <Badge
+              variant="outline"
+              className="border-white/10 bg-white/[0.04]"
+            >
               {shopifyStatusLabel(product.shopifyStatus)}
             </Badge>
           ) : null}
-          <p className="text-xs text-muted-foreground">{product.shopifyImageCount} images</p>
+          <p className="text-xs text-muted-foreground">
+            {product.shopifyImageCount} images
+          </p>
         </div>
       </TableCell>
       <TableCell className="text-right">
@@ -602,13 +680,11 @@ function ProductTableRow({
 function ImageTypeChooser({
   products,
   submitting,
-  defaultUseVibe,
   onGenerate,
 }: {
   products: Product[];
   submitting: boolean;
-  defaultUseVibe: boolean;
-  onGenerate: (imageTypes: string[], useVibeAnalysis: boolean) => void;
+  onGenerate: (imageTypes: string[]) => void;
 }) {
   const prompts = useQuery(api.prompts.list) as
     | Doc<"promptTemplates">[]
@@ -619,7 +695,6 @@ function ImageTypeChooser({
   );
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [touched, setTouched] = useState(false);
-  const [useVibe, setUseVibe] = useState(defaultUseVibe);
 
   // Default to the preset image types until the user changes the selection.
   // If no template is marked as preset, fall back to selecting all of them.
@@ -645,19 +720,11 @@ function ImageTypeChooser({
       <DialogHeader>
         <DialogTitle>Types d'images</DialogTitle>
         <DialogDescription>
-          {products.length} produit{products.length === 1 ? "" : "s"} selectionne{products.length === 1 ? "" : "s"}.
-          Chaque type utilise son prompt actif.
+          {products.length} produit{products.length === 1 ? "" : "s"}{" "}
+          selectionne{products.length === 1 ? "" : "s"}. Chaque type utilise son
+          prompt actif.
         </DialogDescription>
       </DialogHeader>
-      <div className="flex flex-wrap items-center gap-2">
-        <Label className="flex h-8 items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3">
-          <Checkbox
-            checked={useVibe}
-            onCheckedChange={(checked) => setUseVibe(checked === true)}
-          />
-          Analyse visuelle
-        </Label>
-      </div>
       <div className="grid gap-2">
         {types.map((type) => (
           <Label
@@ -675,7 +742,7 @@ function ImageTypeChooser({
       <DialogFooter>
         <Button
           disabled={!selected.size || submitting}
-          onClick={() => onGenerate(Array.from(selected), useVibe)}
+          onClick={() => onGenerate(Array.from(selected))}
         >
           <BusyIcon busy={submitting} />
           {!submitting ? <WandSparkles data-icon="inline-start" /> : null}

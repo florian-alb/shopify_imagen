@@ -9,7 +9,7 @@ const generationStatus = v.union(
   v.literal("ready"),
   v.literal("pushed"),
   v.literal("canceled"),
-  v.literal("failed")
+  v.literal("failed"),
 );
 
 const productGenerationState = v.union(
@@ -18,7 +18,7 @@ const productGenerationState = v.union(
   v.literal("complete"),
   v.literal("incomplete"),
   v.literal("failed"),
-  v.literal("canceled")
+  v.literal("canceled"),
 );
 
 const productReviewState = v.union(
@@ -26,14 +26,14 @@ const productReviewState = v.union(
   v.literal("needs_review"),
   v.literal("partially_approved"),
   v.literal("approved"),
-  v.literal("rejected")
+  v.literal("rejected"),
 );
 
 const productPublishState = v.union(
   v.literal("not_ready"),
   v.literal("ready_to_push"),
   v.literal("partially_pushed"),
-  v.literal("pushed")
+  v.literal("pushed"),
 );
 
 const productPrimaryAction = v.union(
@@ -42,7 +42,7 @@ const productPrimaryAction = v.union(
   v.literal("review"),
   v.literal("push"),
   v.literal("fix_errors"),
-  v.literal("done")
+  v.literal("done"),
 );
 
 const jobStatus = v.union(
@@ -50,7 +50,7 @@ const jobStatus = v.union(
   v.literal("running"),
   v.literal("completed"),
   v.literal("failed"),
-  v.literal("cancelled")
+  v.literal("cancelled"),
 );
 
 const imageStatus = v.union(
@@ -59,13 +59,13 @@ const imageStatus = v.union(
   v.literal("generated"),
   v.literal("uploaded"),
   v.literal("canceled"),
-  v.literal("failed")
+  v.literal("failed"),
 );
 
 const reviewStatus = v.union(
   v.literal("pending"),
   v.literal("approved"),
-  v.literal("rejected")
+  v.literal("rejected"),
 );
 const backgroundMode = v.union(v.literal("solid"), v.literal("transparent"));
 const backgroundRemovalProvider = v.union(v.literal("fal_ideogram"), v.null());
@@ -83,10 +83,10 @@ export default defineSchema({
     role: v.optional(v.string()),
     activeShopId: v.optional(v.union(v.id("shops"), v.null())),
     createdAt: v.optional(v.number()),
-    updatedAt: v.optional(v.number())
+    updatedAt: v.optional(v.number()),
   })
-  .index("email", ["email"])
-  .index("phone", ["phone"]),
+    .index("email", ["email"])
+    .index("phone", ["phone"]),
   shops: defineTable({
     domain: v.string(),
     name: v.optional(v.union(v.string(), v.null())),
@@ -95,7 +95,7 @@ export default defineSchema({
     productQuery: v.optional(v.union(v.string(), v.null())),
     createdByUserId: v.id("users"),
     createdAt: v.number(),
-    updatedAt: v.number()
+    updatedAt: v.number(),
   })
     .index("by_domain", ["domain"])
     .index("by_created_by_user", ["createdByUserId"])
@@ -134,7 +134,7 @@ export default defineSchema({
     vibeAnalyzedAt: v.optional(v.number()),
     lastSyncedAt: v.optional(v.number()),
     createdAt: v.number(),
-    updatedAt: v.number()
+    updatedAt: v.number(),
   })
     .index("by_shop", ["shopId"])
     .index("by_shop_and_shopify_product_id", ["shopId", "shopifyProductId"])
@@ -147,8 +147,16 @@ export default defineSchema({
     .index("by_shop_and_primary_action", ["shopId", "primaryAction"])
     .index("by_shop_and_product_type", ["shopId", "productType"])
     .index("by_shop_and_shopify_status", ["shopId", "shopifyStatus"])
-    .index("by_shop_and_generation_status_and_product_type", ["shopId", "generationStatus", "productType"])
-    .index("by_shop_and_primary_action_and_product_type", ["shopId", "primaryAction", "productType"])
+    .index("by_shop_and_generation_status_and_product_type", [
+      "shopId",
+      "generationStatus",
+      "productType",
+    ])
+    .index("by_shop_and_primary_action_and_product_type", [
+      "shopId",
+      "primaryAction",
+      "productType",
+    ])
     .index("by_shopify_product_id", ["shopifyProductId"])
     .index("by_handle", ["handle"])
     .index("by_created", ["createdAt"])
@@ -159,9 +167,18 @@ export default defineSchema({
     .index("by_primary_action", ["primaryAction"])
     .index("by_product_type", ["productType"])
     .index("by_shopify_status", ["shopifyStatus"])
-    .index("by_generation_status_and_product_type", ["generationStatus", "productType"])
-    .index("by_primary_action_and_product_type", ["primaryAction", "productType"])
-    .searchIndex("search_products", { searchField: "title", filterFields: ["shopId", "generationStatus"] }),
+    .index("by_generation_status_and_product_type", [
+      "generationStatus",
+      "productType",
+    ])
+    .index("by_primary_action_and_product_type", [
+      "primaryAction",
+      "productType",
+    ])
+    .searchIndex("search_products", {
+      searchField: "title",
+      filterFields: ["shopId", "generationStatus"],
+    }),
   promptTemplates: defineTable({
     shopId: v.optional(v.id("shops")),
     imageType: v.string(),
@@ -175,13 +192,15 @@ export default defineSchema({
     // Display + Shopify publish order. Optional so pre-existing rows keep working;
     // rows without a position sort after positioned ones (see prompts.list).
     position: v.optional(v.number()),
+    useVibeAnalysis: v.optional(v.boolean()),
+    referenceImageCount: v.optional(v.number()),
     removeBackground: v.optional(v.boolean()),
     backgroundRemovalProvider: v.optional(backgroundRemovalProvider),
     backgroundMode: v.optional(backgroundMode),
     backgroundColor: v.optional(v.string()),
     backgroundShadow: v.optional(v.boolean()),
     createdAt: v.number(),
-    updatedAt: v.number()
+    updatedAt: v.number(),
   })
     .index("by_image_type", ["imageType"])
     .index("by_shop_and_image_type", ["shopId", "imageType"])
@@ -191,13 +210,15 @@ export default defineSchema({
     masterPrompt: v.string(),
     defaultMasterPrompt: v.string(),
     createdAt: v.number(),
-    updatedAt: v.number()
+    updatedAt: v.number(),
   }).index("by_shop", ["shopId"]),
   generationJobs: defineTable({
     shopId: v.optional(v.id("shops")),
     status: jobStatus,
     mode: v.union(v.literal("single"), v.literal("bulk")),
-    executionMode: v.optional(v.union(v.literal("realtime"), v.literal("batch"))),
+    executionMode: v.optional(
+      v.union(v.literal("realtime"), v.literal("batch")),
+    ),
     batchId: v.optional(v.union(v.string(), v.null())),
     previousBatchIds: v.optional(v.array(v.string())),
     batchStatus: v.optional(v.union(v.string(), v.null())),
@@ -205,7 +226,9 @@ export default defineSchema({
     batchIngestionStartedAt: v.optional(v.union(v.number(), v.null())),
     batchResultOffset: v.optional(v.number()),
     vibeAnalysis: v.optional(v.boolean()),
-    imageProvider: v.optional(v.union(v.literal("openai"), v.literal("gemini"))),
+    imageProvider: v.optional(
+      v.union(v.literal("openai"), v.literal("gemini")),
+    ),
     imageModel: v.optional(v.string()),
     productIds: v.array(v.id("products")),
     selectedImageTypes: v.array(v.string()),
@@ -226,7 +249,7 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
     startedAt: v.optional(v.number()),
-    completedAt: v.optional(v.number())
+    completedAt: v.optional(v.number()),
   })
     .index("by_status", ["status"])
     .index("by_created", ["createdAt"])
@@ -237,15 +260,24 @@ export default defineSchema({
     productId: v.id("products"),
     jobId: v.id("generationJobs"),
     imageType: v.string(),
-    imageProvider: v.optional(v.union(v.literal("openai"), v.literal("gemini"))),
+    imageProvider: v.optional(
+      v.union(v.literal("openai"), v.literal("gemini")),
+    ),
     imageModel: v.optional(v.string()),
     promptUsed: v.string(),
+    finalPromptUsed: v.optional(v.string()),
+    useVibeAnalysis: v.optional(v.boolean()),
+    vibeUsed: v.optional(v.union(v.string(), v.null())),
+    referenceImageCount: v.optional(v.number()),
+    sourceImageUrls: v.optional(v.array(v.string())),
     sourceImageUrl: v.optional(v.union(v.string(), v.null())),
     sourceImageUrl2: v.optional(v.union(v.string(), v.null())),
     generatedImageUrl: v.optional(v.union(v.string(), v.null())),
     storageUrl: v.optional(v.union(v.string(), v.null())),
     backgroundRemovalInputUrl: v.optional(v.union(v.string(), v.null())),
-    backgroundRemovalInputContentType: v.optional(v.union(v.string(), v.null())),
+    backgroundRemovalInputContentType: v.optional(
+      v.union(v.string(), v.null()),
+    ),
     backgroundRemovalInputExtension: v.optional(v.union(v.string(), v.null())),
     transparentCutoutUrl: v.optional(v.union(v.string(), v.null())),
     providerBatchId: v.optional(v.union(v.string(), v.null())),
@@ -269,7 +301,7 @@ export default defineSchema({
     costUsd: v.optional(v.number()),
     costRateMultiplier: v.optional(v.number()),
     createdAt: v.number(),
-    updatedAt: v.number()
+    updatedAt: v.number(),
   })
     .index("by_product", ["productId"])
     .index("by_job", ["jobId"])
@@ -281,8 +313,8 @@ export default defineSchema({
     shopId: v.optional(v.id("shops")),
     key: v.string(),
     value: v.any(),
-    updatedAt: v.number()
+    updatedAt: v.number(),
   })
     .index("by_key", ["key"])
-    .index("by_shop_and_key", ["shopId", "key"])
+    .index("by_shop_and_key", ["shopId", "key"]),
 });
