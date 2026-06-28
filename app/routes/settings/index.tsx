@@ -240,7 +240,6 @@ function SettingsPage() {
     "GENERATION_EXECUTION_MODE",
     "realtime",
   );
-  const vibeAnalysis = settingString(settings, "VIBE_ANALYSIS", "on");
   const headerSubtitle = activeShop
     ? `${shopDisplayName(activeShop)} - ${activeShop.domain}`
     : shops === undefined
@@ -467,22 +466,6 @@ function SettingsPage() {
                   { value: "batch", label: "Batch" },
                 ]}
               />
-              <ChoiceSettingRow
-                id="vibe-analysis"
-                label="Analyse visuelle"
-                description="Ajoute du contexte depuis l'image Shopify de reference."
-                value={vibeAnalysis}
-                saving={saving === "VIBE_ANALYSIS"}
-                badge={
-                  vibeAnalysis === "on" ? "Analyse active" : "Analyse inactive"
-                }
-                badgeState={vibeAnalysis === "on" ? "success" : "neutral"}
-                onChange={(value) => void switchSetting("VIBE_ANALYSIS", value)}
-                options={[
-                  { value: "on", label: "On" },
-                  { value: "off", label: "Off" },
-                ]}
-              />
             </div>
           </SettingsPanel>
         </TabsContent>
@@ -498,7 +481,6 @@ function SettingsPage() {
               provider={provider}
               saving={saving}
               settings={settings}
-              vibeAnalysis={vibeAnalysis}
               onDraftChange={setDrafts}
               onSave={save}
             />
@@ -516,7 +498,6 @@ function SettingsPage() {
               provider={provider}
               saving={saving}
               settings={settings}
-              vibeAnalysis={vibeAnalysis}
               onDraftChange={setDrafts}
               onSave={save}
             />
@@ -746,7 +727,6 @@ function SettingTable({
   drafts,
   saving,
   provider,
-  vibeAnalysis,
   onDraftChange,
   onSave,
 }: {
@@ -755,7 +735,6 @@ function SettingTable({
   drafts: Record<string, string>;
   saving: string | null;
   provider: string;
-  vibeAnalysis: string;
   onDraftChange: (
     next:
       | Record<string, string>
@@ -813,12 +792,12 @@ function SettingTable({
                   ) : (
                     <StateBadge
                       state={
-                        settingIsActive(definition, provider, vibeAnalysis)
+                        settingIsActive(definition, provider)
                           ? "success"
                           : "neutral"
                       }
                     >
-                      {settingIsActive(definition, provider, vibeAnalysis)
+                      {settingIsActive(definition, provider)
                         ? "Actif"
                         : "Disponible"}
                     </StateBadge>
@@ -845,13 +824,9 @@ function SettingTable({
   );
 }
 
-function settingIsActive(
-  definition: SettingDefinition,
-  provider: string,
-  vibeAnalysis: string,
-) {
+function settingIsActive(definition: SettingDefinition, provider: string) {
   if (definition.scope === "shared") return true;
-  if (definition.scope === "vibe") return vibeAnalysis !== "off";
+  if (definition.scope === "vibe") return true;
   return definition.scope === provider;
 }
 

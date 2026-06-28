@@ -62,10 +62,16 @@ type BackgroundDraft = {
   backgroundShadow: boolean;
 };
 
+type PromptAiDraft = {
+  useVibeAnalysis: boolean;
+  referenceImageCount: number;
+};
+
 type NewPromptDraft = {
   imageType: string;
   content: string;
-} & BackgroundDraft;
+} & BackgroundDraft &
+  PromptAiDraft;
 
 type MasterPromptSettings = {
   shopId: string | null;
@@ -80,6 +86,54 @@ const defaultBackgroundDraft: BackgroundDraft = {
   backgroundColor: "#ffffff",
   backgroundShadow: true,
 };
+
+const defaultPromptAiDraft: PromptAiDraft = {
+  useVibeAnalysis: true,
+  referenceImageCount: 2,
+};
+
+function normalizePromptName(value?: string | null) {
+  return (value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\u2010-\u2015]/g, "-")
+    .replace(/\s*-\s*/g, " - ")
+    .replace(/\s+/g, " ");
+}
+
+function defaultAiDraftForPromptName(
+  imageType: string,
+  label?: string | null,
+): PromptAiDraft {
+  const names = [normalizePromptName(imageType), normalizePromptName(label)];
+  if (names.some((name) => name.startsWith("studio - "))) {
+    return { useVibeAnalysis: false, referenceImageCount: 1 };
+  }
+  if (
+    names.some(
+      (name) =>
+        name.startsWith("on-foot - ") || name.startsWith("lifestyle - "),
+    )
+  ) {
+    return { useVibeAnalysis: true, referenceImageCount: 2 };
+  }
+  return defaultPromptAiDraft;
+}
+
+function normalizeReferenceImageCount(value: number) {
+  if (!Number.isFinite(value)) return 1;
+  return Math.min(4, Math.max(1, Math.round(value)));
+}
+
+function promptAiDraft(prompt: Doc<"promptTemplates">): PromptAiDraft {
+  const defaults = defaultAiDraftForPromptName(prompt.imageType, prompt.label);
+  return {
+    useVibeAnalysis: prompt.useVibeAnalysis ?? defaults.useVibeAnalysis,
+    referenceImageCount: normalizeReferenceImageCount(
+      prompt.referenceImageCount ?? defaults.referenceImageCount,
+    ),
+  };
+}
 
 function promptBackgroundDraft(
   prompt: Doc<"promptTemplates">,
@@ -105,6 +159,65 @@ function backgroundDraftsEqual(left: BackgroundDraft, right: BackgroundDraft) {
   );
 }
 
+function promptAiDraftsEqual(left: PromptAiDraft, right: PromptAiDraft) {
+  return (
+    left.useVibeAnalysis === right.useVibeAnalysis &&
+    left.referenceImageCount === right.referenceImageCount
+  );
+}
+
+function PromptAiControls({
+  idPrefix,
+  draft,
+  onChange,
+}: {
+  idPrefix: string;
+  draft: PromptAiDraft;
+  onChange: (values: Partial<PromptAiDraft>) => void;
+}) {
+  return (
+    <section className="mt-4 rounded-lg border border-white/10 bg-white/[0.03] p-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-medium text-foreground">Reglages IA</h3>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Analyse visuelle et references envoyees pour ce prompt.
+          </p>
+        </div>
+        <Label className="flex h-8 cursor-pointer items-center gap-2 rounded-lg border border-white/10 bg-background/40 px-3 text-sm">
+          <Checkbox
+            checked={draft.useVibeAnalysis}
+            onCheckedChange={(checked) =>
+              onChange({ useVibeAnalysis: checked === true })
+            }
+          />
+          Analyse visuelle
+        </Label>
+      </div>
+      <div className="mt-3 grid gap-1.5 md:max-w-44">
+        <Label htmlFor={`${idPrefix}-reference-count`}>
+          Images de reference
+        </Label>
+        <Input
+          id={`${idPrefix}-reference-count`}
+          type="number"
+          min={1}
+          max={4}
+          step={1}
+          value={draft.referenceImageCount}
+          onChange={(event) =>
+            onChange({
+              referenceImageCount: normalizeReferenceImageCount(
+                Number(event.target.value),
+              ),
+            })
+          }
+        />
+      </div>
+    </section>
+  );
+}
+
 function BackgroundControls({
   idPrefix,
   draft,
@@ -118,9 +231,11 @@ function BackgroundControls({
     <section className="mt-4 rounded-lg border border-white/10 bg-white/[0.03] p-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h3 className="text-sm font-medium text-foreground">Background</h3>
+          <h3 className="text-sm font-medium text-foreground">
+            Detourage IA experimental
+          </h3>
           <p className="mt-1 text-xs text-muted-foreground">
-            Post-traitement fal_ideogram configure pour ce type d'image.
+            Post-traitement FAL facultatif configure pour ce type d'image.
           </p>
         </div>
         <Label className="flex h-8 cursor-pointer items-center gap-2 rounded-lg border border-white/10 bg-background/40 px-3 text-sm">
@@ -130,7 +245,7 @@ function BackgroundControls({
               onChange({ removeBackground: checked === true })
             }
           />
-          Supprimer le fond
+          Activer le detourage IA
         </Label>
       </div>
 
@@ -229,12 +344,14 @@ function PromptSettingsPage() {
   const [backgroundDrafts, setBackgroundDrafts] = useState<
     Record<string, BackgroundDraft>
   >({});
+  const [aiDrafts, setAiDrafts] = useState<Record<string, PromptAiDraft>>({});
   const [masterDraft, setMasterDraft] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string | undefined>(undefined);
   const [newPromptDraft, setNewPromptDraft] = useState<NewPromptDraft | null>(
     null,
   );
+  const [newPromptAiTouched, setNewPromptAiTouched] = useState(false);
   const [editingPromptNameId, setEditingPromptNameId] =
     useState<Id<"promptTemplates"> | null>(null);
   const [deletePromptId, setDeletePromptId] =
@@ -353,10 +470,12 @@ function PromptSettingsPage() {
     try {
       const backgroundDraft =
         backgroundDrafts[promptId] ?? promptBackgroundDraft(prompt);
+      const aiDraft = aiDrafts[promptId] ?? promptAiDraft(prompt);
       await updatePrompt({
         promptId,
         imageType,
         content,
+        ...aiDraft,
         ...backgroundDraft,
       });
       setDrafts((current) => {
@@ -370,6 +489,11 @@ function PromptSettingsPage() {
         return next;
       });
       setBackgroundDrafts((current) => {
+        const next = { ...current };
+        delete next[promptId];
+        return next;
+      });
+      setAiDrafts((current) => {
         const next = { ...current };
         delete next[promptId];
         return next;
@@ -403,6 +527,11 @@ function PromptSettingsPage() {
         return next;
       });
       setBackgroundDrafts((current) => {
+        const next = { ...current };
+        delete next[promptId];
+        return next;
+      });
+      setAiDrafts((current) => {
         const next = { ...current };
         delete next[promptId];
         return next;
@@ -448,15 +577,22 @@ function PromptSettingsPage() {
   }
 
   function startCreate() {
+    setNewPromptAiTouched(false);
     setNewPromptDraft(
       (current) =>
-        current ?? { imageType: "", content: "", ...defaultBackgroundDraft },
+        current ?? {
+          imageType: "",
+          content: "",
+          ...defaultPromptAiDraft,
+          ...defaultBackgroundDraft,
+        },
     );
     setActiveTab(newPromptTabValue);
   }
 
   function cancelCreate() {
     setNewPromptDraft(null);
+    setNewPromptAiTouched(false);
     setActiveTab(orderedPrompts?.[0]?.imageType);
   }
 
@@ -466,12 +602,42 @@ function PromptSettingsPage() {
     );
   }
 
+  function newPromptAiValue(draft: NewPromptDraft): PromptAiDraft {
+    return newPromptAiTouched
+      ? {
+          useVibeAnalysis: draft.useVibeAnalysis,
+          referenceImageCount: draft.referenceImageCount,
+        }
+      : defaultAiDraftForPromptName(draft.imageType, draft.imageType);
+  }
+
+  function updateNewPromptAiDraft(values: Partial<PromptAiDraft>) {
+    setNewPromptAiTouched(true);
+    setNewPromptDraft((current) => {
+      if (!current) return current;
+      const base = newPromptAiTouched
+        ? {
+            useVibeAnalysis: current.useVibeAnalysis,
+            referenceImageCount: current.referenceImageCount,
+          }
+        : defaultAiDraftForPromptName(current.imageType, current.imageType);
+      return { ...current, ...base, ...values };
+    });
+  }
+
   async function create() {
     if (!newPromptDraft) return;
+    const aiValues = newPromptAiTouched
+      ? {
+          useVibeAnalysis: newPromptDraft.useVibeAnalysis,
+          referenceImageCount: newPromptDraft.referenceImageCount,
+        }
+      : {};
     const values = {
       imageType: newPromptDraft.imageType.trim(),
       label: newPromptDraft.imageType.trim(),
       content: newPromptDraft.content.trim(),
+      ...aiValues,
       removeBackground: newPromptDraft.removeBackground,
       backgroundMode: newPromptDraft.backgroundMode,
       backgroundColor: newPromptDraft.backgroundColor.trim(),
@@ -486,6 +652,7 @@ function PromptSettingsPage() {
       await createPrompt(values);
       setActiveTab(values.imageType.trim());
       setNewPromptDraft(null);
+      setNewPromptAiTouched(false);
       toast.success(`Created "${values.label}" template`);
     } catch (createError) {
       toast.error("Failed to create template", {
@@ -734,6 +901,11 @@ function PromptSettingsPage() {
                       }
                     />
                   </div>
+                  <PromptAiControls
+                    idPrefix="new-prompt-ai"
+                    draft={newPromptAiValue(newPromptDraft)}
+                    onChange={updateNewPromptAiDraft}
+                  />
                   <BackgroundControls
                     idPrefix="new-prompt-background"
                     draft={newPromptDraft}
@@ -770,6 +942,8 @@ function PromptSettingsPage() {
             const persistedBackground = promptBackgroundDraft(prompt);
             const backgroundValue =
               backgroundDrafts[prompt._id] ?? persistedBackground;
+            const persistedAi = promptAiDraft(prompt);
+            const aiValue = aiDrafts[prompt._id] ?? persistedAi;
             const imageTypeChanged = imageTypeValue.trim() !== prompt.imageType;
             const contentChanged =
               contentValue.trim() !== prompt.content.trim();
@@ -777,8 +951,12 @@ function PromptSettingsPage() {
               backgroundValue,
               persistedBackground,
             );
+            const aiChanged = !promptAiDraftsEqual(aiValue, persistedAi);
             const hasChanges =
-              imageTypeChanged || contentChanged || backgroundChanged;
+              imageTypeChanged ||
+              contentChanged ||
+              backgroundChanged ||
+              aiChanged;
             const canSaveChanges = Boolean(
               imageTypeValue.trim() && contentValue.trim(),
             );
@@ -862,6 +1040,16 @@ function PromptSettingsPage() {
                         }
                       />
                     </div>
+                    <PromptAiControls
+                      idPrefix={`prompt-ai-${prompt._id}`}
+                      draft={aiValue}
+                      onChange={(values) =>
+                        setAiDrafts((current) => ({
+                          ...current,
+                          [prompt._id]: { ...aiValue, ...values },
+                        }))
+                      }
+                    />
                     <BackgroundControls
                       idPrefix={`prompt-background-${prompt._id}`}
                       draft={backgroundValue}
