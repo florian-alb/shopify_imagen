@@ -196,12 +196,18 @@ export const pushProductImages = action({
     // Publish in the order defined by the prompt templates in settings/prompts,
     // so the Shopify gallery mirrors that sequence. Images whose imageType has no
     // matching template fall back to the end, ordered by their original index.
-    const promptOrder = (await ctx.runQuery(internal.shopify.promptOrder, {
+    const promptOrderEntries = (await ctx.runQuery(internal.shopify.promptOrder, {
       shopId: product.shopId ?? null
-    })) as Record<string, number>;
+    })) as Array<{ imageType: string; position: number | null }>;
+    const promptOrder = new Map(
+      promptOrderEntries.map((entry) => [
+        entry.imageType,
+        entry.position ?? Number.POSITIVE_INFINITY
+      ])
+    );
     ready.sort((a, b) => {
-      const oa = promptOrder[a.imageType] ?? Number.POSITIVE_INFINITY;
-      const ob = promptOrder[b.imageType] ?? Number.POSITIVE_INFINITY;
+      const oa = promptOrder.get(a.imageType) ?? Number.POSITIVE_INFINITY;
+      const ob = promptOrder.get(b.imageType) ?? Number.POSITIVE_INFINITY;
       return oa - ob;
     });
 
@@ -273,19 +279,20 @@ export const generatedImagesForPush = internalQuery({
   }
 });
 
-// Maps each prompt template's imageType to its display/publish position so
+// Lists each prompt template's imageType and display/publish position so
 // pushProductImages can order the Shopify gallery to match settings/prompts.
+// Do not return a Record keyed by imageType: Convex object field names must be
+// ASCII, while merchants can create prompt names with accents.
 export const promptOrder = internalQuery({
   args: { shopId: v.optional(v.union(v.id("shops"), v.null())) },
   handler: async (ctx, args) => {
     const prompts = (await ctx.db.query("promptTemplates").collect()).filter((prompt: Doc<"promptTemplates">) =>
       args.shopId ? prompt.shopId === args.shopId : prompt.shopId == null
     );
-    const order: Record<string, number> = {};
-    for (const prompt of prompts) {
-      order[prompt.imageType] = prompt.position ?? Number.POSITIVE_INFINITY;
-    }
-    return order;
+    return prompts.map((prompt) => ({
+      imageType: prompt.imageType,
+      position: prompt.position ?? null
+    }));
   }
 });
 
