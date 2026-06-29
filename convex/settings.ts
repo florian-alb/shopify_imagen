@@ -1,13 +1,14 @@
 import { v } from "convex/values";
 import { internalQuery, mutation, query } from "./_generated/server";
-import type { Doc, Id } from "./_generated/dataModel";
 import { requireUserId } from "./authz";
 import {
-  ensureActiveShop,
-  getActiveShopScope,
-  shopMatchesScope,
-  type ShopScope
-} from "./shopScope";
+  legacySettingForKey,
+  settingForShop,
+  settingsForScope,
+  settingsForShopId,
+  settingsRowsToObject
+} from "./settings/scope";
+import { ensureActiveShop, getActiveShopScope } from "./shopScope";
 
 const DEFAULT_SETTINGS: Record<string, unknown> = {
   IMAGE_PROVIDER: "openai",
@@ -26,25 +27,13 @@ const DEFAULT_SETTINGS: Record<string, unknown> = {
   GENERATION_CONCURRENCY: 1
 };
 
-async function settingsForScope(ctx: { db: any }, scope: ShopScope) {
-  const rows = await ctx.db.query("appSettings").collect();
-  return rows.filter((row: { shopId?: Id<"shops"> }) => shopMatchesScope(row, scope));
-}
-
-async function settingForShop(ctx: { db: any }, shopId: Id<"shops">, key: string) {
-  return ctx.db
-    .query("appSettings")
-    .withIndex("by_shop_and_key", (q: any) => q.eq("shopId", shopId).eq("key", key))
-    .unique();
-}
-
 export const list = query({
   args: {},
   handler: async (ctx) => {
     const userId = await requireUserId(ctx);
     const scope = await getActiveShopScope(ctx, userId);
     const rows = await settingsForScope(ctx, scope);
-    return { ...DEFAULT_SETTINGS, ...Object.fromEntries(rows.map((row: Doc<"appSettings">) => [row.key, row.value])) };
+    return settingsRowsToObject(DEFAULT_SETTINGS, rows);
   }
 });
 
@@ -60,11 +49,8 @@ export const shopInfo = query({
 export const internalList = internalQuery({
   args: { shopId: v.optional(v.union(v.id("shops"), v.null())) },
   handler: async (ctx, args) => {
-    const rows = await ctx.db.query("appSettings").collect();
-    const scopedRows = rows.filter((row: { shopId?: Id<"shops"> }) =>
-      args.shopId ? row.shopId === args.shopId : row.shopId == null
-    );
-    return { ...DEFAULT_SETTINGS, ...Object.fromEntries(scopedRows.map((row) => [row.key, row.value])) };
+    const rows = await settingsForShopId(ctx, args.shopId);
+    return settingsRowsToObject(DEFAULT_SETTINGS, rows);
   }
 });
 
@@ -79,8 +65,8 @@ export const set = mutation({
       return existing._id;
     }
 
-    const legacy = await ctx.db.query("appSettings").withIndex("by_key", (q) => q.eq("key", args.key)).unique();
-    if (legacy && legacy.shopId == null) {
+    const legacy = await legacySettingForKey(ctx, args.key);
+    if (legacy) {
       await ctx.db.patch(legacy._id, {
         shopId: shop._id,
         value: args.value,
