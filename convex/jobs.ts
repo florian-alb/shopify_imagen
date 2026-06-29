@@ -5,150 +5,46 @@ import {
   internalQuery,
   mutation,
   query,
-  type MutationCtx,
 } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireUserId } from "./authz";
-import { backgroundConfigFrom } from "./background";
-import { compilePrompt, renderPrompt } from "./lib";
-import { defaultMasterPrompt } from "./promptDefaults";
-import { resolvePromptRuntime } from "./promptRuntime";
-import { BATCH_PRICE_MULTIPLIER } from "./pricing";
+import {
+  canResumeBackgroundRemoval,
+  cancelImagePatch,
+  generatingProductPatch,
+  isActiveImageStatus,
+  isRetryableImageStatus,
+  isTerminalJobStatus,
+  retryImagePatch,
+  supersedeImagePatch,
+} from "./jobs/lifecycle";
+import { currentGenerationEngine } from "./jobs/engine";
+import { buildImageTasks } from "./jobs/planning";
+import {
+  getStoredReviewState,
+  jobNeedsImageCostFallback,
+  listedJob,
+  summarizeImageCosts,
+  summarizeJobCostWithFallback,
+} from "./jobs/summaries";
+import {
+  DEFAULT_PAGE_SIZE,
+  MAX_PAGE_SIZE,
+  executionModeFilter,
+  jobStatusFilter,
+  providerFilter,
+  reviewFilter,
+} from "./jobs/validators";
+import {
+  promptSettingsForScope,
+  promptsForScope,
+} from "./prompts/repository";
 import { refreshProductSummary } from "./products";
 import {
   ensureActiveShop,
   getActiveShopScope,
   shopMatchesScope,
-  type ShopScope,
 } from "./shopScope";
-
-type ImageProvider = "openai" | "gemini";
-type ExecutionMode = "realtime" | "batch";
-const DEFAULT_PAGE_SIZE = 20;
-const MAX_PAGE_SIZE = 100;
-
-const jobStatusFilter = v.optional(
-  v.union(
-    v.literal("queued"),
-    v.literal("running"),
-    v.literal("completed"),
-    v.literal("failed"),
-    v.literal("cancelled"),
-  ),
-);
-const executionModeFilter = v.optional(
-  v.union(v.literal("realtime"), v.literal("batch")),
-);
-const providerFilter = v.optional(
-  v.union(v.literal("openai"), v.literal("gemini")),
-);
-const reviewFilter = v.optional(
-  v.union(
-    v.literal("to-review"),
-    v.literal("approved"),
-    v.literal("partial"),
-    v.literal("rejected"),
-    v.literal("no-review"),
-  ),
-);
-
-function appendRegenerationInstructions(prompt: string, instructions?: string) {
-  const correction = instructions?.trim();
-  if (!correction) return prompt;
-  return `${prompt}
-
-IMPORTANT CORRECTION FOR THIS REGENERATION:
-${correction}
-
-Apply this correction with priority while preserving all other product details from the reference image and the instructions above.`;
-}
-
-// Reference images for a product, in priority order, de-duplicated.
-// First entry feeds the primary reference, the second (if any) is passed as a
-// staging/context reference alongside the prompt.
-function referenceImageUrls(product: Doc<"products">): string[] {
-  const candidates = [
-    product.featuredImageUrl,
-    ...product.currentShopifyImages.map(
-      (image) => (image as { url?: string } | null)?.url,
-    ),
-  ].filter((url): url is string => typeof url === "string" && url.length > 0);
-  return Array.from(new Set(candidates));
-}
-
-function imageCostForJob(
-  job: Doc<"generationJobs">,
-  image: Doc<"generatedImages">,
-) {
-  const cost = image.costUsd ?? 0;
-  const generationCost =
-    job.executionMode === "batch" && image.costRateMultiplier == null
-      ? cost * BATCH_PRICE_MULTIPLIER
-      : cost;
-  return generationCost + (image.backgroundRemovalCostUsd ?? 0);
-}
-
-function summarizeImageCosts(
-  job: Doc<"generationJobs">,
-  images: Doc<"generatedImages">[],
-) {
-  return {
-    generationCost: images.reduce(
-      (sum, image) => sum + imageCostForJob(job, image),
-      0,
-    ),
-    inputTokens: images.reduce(
-      (sum, image) => sum + (image.inputTokens ?? 0),
-      0,
-    ),
-    outputTokens: images.reduce(
-      (sum, image) => sum + (image.outputTokens ?? 0),
-      0,
-    ),
-    pricedImageCount: images.filter(
-      (image) =>
-        image.costUsd != null || image.backgroundRemovalCostUsd != null,
-    ).length,
-  };
-}
-
-function storedJobCostSummary(job: Doc<"generationJobs">) {
-  return {
-    generationCost: job.generationCost ?? 0,
-    inputTokens: job.inputTokens ?? 0,
-    outputTokens: job.outputTokens ?? 0,
-    pricedImageCount: job.pricedImageCount ?? 0,
-  };
-}
-
-function storedJobReviewSummary(job: Doc<"generationJobs">) {
-  return {
-    total: job.reviewTotal ?? 0,
-    pending: job.reviewPending ?? 0,
-    approved: job.reviewApproved ?? 0,
-    rejected: job.reviewRejected ?? 0,
-  };
-}
-
-function getStoredReviewState(job: Doc<"generationJobs">) {
-  const total = job.reviewTotal ?? 0;
-  const pending = job.reviewPending ?? 0;
-  const approved = job.reviewApproved ?? 0;
-  const rejected = job.reviewRejected ?? 0;
-  if (total === 0) return "no-review";
-  if (pending > 0) return "to-review";
-  if (rejected === total) return "rejected";
-  if (approved === total) return "approved";
-  return "partial";
-}
-
-function listedJob(job: Doc<"generationJobs">) {
-  return {
-    ...job,
-    costSummary: storedJobCostSummary(job),
-    reviewSummary: storedJobReviewSummary(job),
-  };
-}
 
 export async function refreshJobSummary(
   ctx: { db: any },
@@ -185,25 +81,6 @@ export async function refreshJobSummary(
   };
   await ctx.db.patch(jobId, patch);
   return patch;
-}
-
-async function currentGenerationEngine(ctx: MutationCtx, scope: ShopScope) {
-  const rows = (await ctx.db.query("appSettings").collect()).filter(
-    (row: Doc<"appSettings">) => shopMatchesScope(row, scope),
-  );
-  const settings = Object.fromEntries(
-    rows.map((row: Doc<"appSettings">) => [row.key, row.value]),
-  );
-  const imageProvider: ImageProvider =
-    settings.IMAGE_PROVIDER === "gemini" ? "gemini" : "openai";
-  const executionMode: ExecutionMode =
-    settings.GENERATION_EXECUTION_MODE === "batch" ? "batch" : "realtime";
-  const imageModel =
-    imageProvider === "gemini"
-      ? String(settings.GEMINI_IMAGE_MODEL ?? "gemini-3-pro-image-preview")
-      : String(settings.OPENAI_IMAGE_MODEL ?? "gpt-image-2-2026-04-21");
-  const vibeAnalysisDefault = String(settings.VIBE_ANALYSIS ?? "on") !== "off";
-  return { imageProvider, executionMode, imageModel, vibeAnalysisDefault };
 }
 
 export const list = query({
@@ -264,13 +141,7 @@ export const costSummary = query({
     const products = (await ctx.db.query("products").collect()).filter(
       (product: Doc<"products">) => shopMatchesScope(product, scope),
     );
-    const needsImageFallback = jobs.some(
-      (job) =>
-        job.generationCost == null ||
-        job.inputTokens == null ||
-        job.outputTokens == null ||
-        job.pricedImageCount == null,
-    );
+    const needsImageFallback = jobs.some(jobNeedsImageCostFallback);
     const images = needsImageFallback
       ? (await ctx.db.query("generatedImages").collect()).filter(
           (image: Doc<"generatedImages">) => shopMatchesScope(image, scope),
@@ -286,23 +157,10 @@ export const costSummary = query({
         image,
       ]);
     }
-    const jobCost = (job: Doc<"generationJobs">) => {
-      if (
-        job.generationCost != null &&
-        job.inputTokens != null &&
-        job.outputTokens != null &&
-        job.pricedImageCount != null
-      ) {
-        return {
-          generationCost: job.generationCost,
-          inputTokens: job.inputTokens,
-          outputTokens: job.outputTokens,
-          pricedImageCount: job.pricedImageCount,
-        };
-      }
-      return summarizeImageCosts(job, imagesByJob.get(job._id) ?? []);
-    };
-    const costs = jobs.map((job) => ({ job, cost: jobCost(job) }));
+    const costs = jobs.map((job) => ({
+      job,
+      cost: summarizeJobCostWithFallback(job, imagesByJob),
+    }));
     const generationCost = costs.reduce(
       (sum, item) => sum + item.cost.generationCost,
       0,
@@ -377,8 +235,7 @@ export const create = mutation({
     const userId = await requireUserId(ctx);
     const shop = await ensureActiveShop(ctx, userId);
     const scope = await getActiveShopScope(ctx, userId);
-    if (!args.productIds.length)
-      throw new Error("Select at least one product.");
+    if (!args.productIds.length) throw new Error("Select at least one product.");
     if (!args.selectedImageTypes.length)
       throw new Error("Select at least one image type.");
     if (
@@ -411,80 +268,16 @@ export const create = mutation({
     const { imageProvider, executionMode, imageModel, vibeAnalysisDefault } =
       await currentGenerationEngine(ctx, scope);
     const vibeAnalysis = args.useVibeAnalysis ?? vibeAnalysisDefault;
-    const prompts = (await ctx.db.query("promptTemplates").collect()).filter(
-      (prompt: Doc<"promptTemplates">) => shopMatchesScope(prompt, scope),
-    );
-    const promptSettings = (
-      await ctx.db.query("promptSettings").collect()
-    ).find((settings: Doc<"promptSettings">) =>
-      shopMatchesScope(settings, scope),
-    );
-    const masterPrompt = promptSettings?.masterPrompt ?? defaultMasterPrompt;
-    const promptByType = new Map(
-      prompts
-        .filter((prompt) => prompt.isActive)
-        .map((prompt) => [prompt.imageType, prompt]),
-    );
-    // Image types are defined by the prompt templates that exist; only keep
-    // selections that map to an active template.
-    const selectedImageTypes = Array.from(
-      new Set(args.selectedImageTypes),
-    ).filter((type) => promptByType.has(type));
-    if (!selectedImageTypes.length)
-      throw new Error(
-        "None of the selected image types have an active prompt template.",
-      );
+    const prompts = await promptsForScope(ctx, scope);
+    const promptSettings = await promptSettingsForScope(ctx, scope);
+    const { planned, selectedImageTypes } = buildImageTasks({
+      products,
+      prompts,
+      promptSettings,
+      selectedImageTypes: args.selectedImageTypes,
+      regenerationInstructions: args.regenerationInstructions,
+    });
     const now = Date.now();
-    const planned: Array<{
-      product: Doc<"products">;
-      imageType: string;
-      promptUsed: string;
-      useVibeAnalysis: boolean;
-      referenceImageCount: number;
-      sourceImageUrls: string[];
-      sourceImageUrl: string | null;
-      sourceImageUrl2: string | null;
-      background: ReturnType<typeof backgroundConfigFrom>;
-    }> = [];
-
-    for (const product of products) {
-      for (const imageType of selectedImageTypes) {
-        const template = promptByType.get(imageType);
-        if (!template)
-          throw new Error(`No active prompt template found for ${imageType}.`);
-        const runtime = resolvePromptRuntime(template);
-        const compiledPrompt = compilePrompt(masterPrompt, template.content);
-        const promptUsed = appendRegenerationInstructions(
-          renderPrompt(compiledPrompt, {
-            PRODUCT_TITLE: product.title,
-            PRODUCT_HANDLE: product.handle,
-            IMAGE_TYPE: imageType,
-          }),
-          args.regenerationInstructions,
-        );
-        const references = referenceImageUrls(product).slice(
-          0,
-          runtime.referenceImageCount,
-        );
-        planned.push({
-          product,
-          imageType,
-          promptUsed,
-          useVibeAnalysis: runtime.useVibeAnalysis,
-          referenceImageCount: runtime.referenceImageCount,
-          sourceImageUrls: references,
-          sourceImageUrl: references[0] ?? null,
-          sourceImageUrl2: references[1] ?? null,
-          background: backgroundConfigFrom(template),
-        });
-      }
-    }
-
-    if (!planned.length) {
-      throw new Error(
-        "No image tasks could be planned for the selected products.",
-      );
-    }
 
     const jobId = await ctx.db.insert("generationJobs", {
       shopId: shop._id,
@@ -594,25 +387,18 @@ async function cancelJobLocally(
 ) {
   const job = await ctx.db.get(args.jobId);
   if (!job) throw new Error("Job not found.");
-  if (
-    job.status === "completed" ||
-    job.status === "failed" ||
-    job.status === "cancelled"
-  )
-    return;
+  if (isTerminalJobStatus(job.status)) return;
   const images = await ctx.db
     .query("generatedImages")
     .withIndex("by_job", (q: any) => q.eq("jobId", args.jobId))
     .collect();
   const now = Date.now();
   for (const image of images) {
-    if (image.status === "queued" || image.status === "generating") {
-      await ctx.db.patch(image._id, {
-        status: "canceled",
-        error: args.reason,
-        providerBatchId: image.providerBatchId ?? job.batchId,
-        updatedAt: now,
-      });
+    if (isActiveImageStatus(image.status)) {
+      await ctx.db.patch(
+        image._id,
+        cancelImagePatch({ image, job, reason: args.reason, now }),
+      );
     }
   }
   await ctx.db.patch(args.jobId, {
@@ -1017,18 +803,9 @@ export const retry = mutation({
       .withIndex("by_job", (q) => q.eq("jobId", args.jobId))
       .collect();
 
-    const toRetry = images.filter(
-      (img) =>
-        img.status === "failed" ||
-        img.status === "canceled" ||
-        img.status === "queued" ||
-        img.status === "generating",
-    );
+    const toRetry = images.filter((img) => isRetryableImageStatus(img.status));
     if (!toRetry.length) throw new Error("No failed images to retry.");
-    const canResumePostProcessing = toRetry.every(
-      (img) =>
-        img.removeBackground === true && Boolean(img.backgroundRemovalInputUrl),
-    );
+    const canResumePostProcessing = canResumeBackgroundRemoval(toRetry);
 
     const now = Date.now();
     const affectedProductIds = new Set<Id<"products">>();
@@ -1045,12 +822,8 @@ export const retry = mutation({
       for (const img of otherImages) {
         if (img.jobId === args.jobId) continue;
         if (!retryImageTypes.has(img.imageType)) continue;
-        if (img.status === "generating" || img.status === "queued") {
-          await ctx.db.patch(img._id, {
-            status: "failed",
-            error: "Superseded by retry.",
-            updatedAt: now,
-          });
+        if (isActiveImageStatus(img.status)) {
+          await ctx.db.patch(img._id, supersedeImagePatch(now));
           affectedProductIds.add(img.productId);
           affectedJobIds.add(img.jobId);
         }
@@ -1058,20 +831,8 @@ export const retry = mutation({
     }
 
     for (const img of toRetry) {
-      await ctx.db.patch(img._id, {
-        status: "queued",
-        reviewStatus: "pending",
-        reviewedAt: undefined,
-        reviewedByUserId: undefined,
-        error: null,
-        updatedAt: now,
-      });
-      await ctx.db.patch(img.productId, {
-        generationStatus: "generating",
-        generationState: "generating",
-        primaryAction: "wait",
-        updatedAt: now,
-      });
+      await ctx.db.patch(img._id, retryImagePatch(now));
+      await ctx.db.patch(img.productId, generatingProductPatch(now));
       affectedProductIds.add(img.productId);
     }
 
@@ -1123,9 +884,7 @@ export const failStuckJob = internalMutation({
       .query("generatedImages")
       .withIndex("by_job", (q) => q.eq("jobId", args.jobId))
       .collect();
-    const stuck = images.filter(
-      (img) => img.status === "queued" || img.status === "generating",
-    );
+    const stuck = images.filter((img) => isActiveImageStatus(img.status));
     const now = Date.now();
     for (const img of stuck) {
       await ctx.db.patch(img._id, {

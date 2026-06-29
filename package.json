@@ -18,6 +18,7 @@
     "build:review": "vite build --config vite.review.config.ts",
     "review": "npm run build:review && tsx src/index.ts review",
     "full": "tsx src/index.ts full",
+    "check:convex-contract": "node scripts/check_convex_public_contract.mjs",
     "typecheck": "tsc --noEmit && tsc -p review-ui/tsconfig.json --noEmit"
   },
   "dependencies": {

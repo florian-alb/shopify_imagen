@@ -1,6 +1,5 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
-import type { Doc, Id } from "./_generated/dataModel";
 import { requireUserId } from "./authz";
 import {
   backgroundConfigArgValidators,
@@ -13,61 +12,18 @@ import {
   validateReferenceImageCount,
 } from "./promptRuntime";
 import {
+  promptSettingsForScope,
+  promptsForScope,
+} from "./prompts/repository";
+import {
+  getPromptForActiveShop,
+  masterPromptPayload,
+} from "./prompts/access";
+import {
   ensureActiveShop,
   getActiveShopScope,
   shopMatchesScope,
-  type ShopScope,
 } from "./shopScope";
-
-function comparePrompts(
-  a: { position?: number; imageType: string },
-  b: { position?: number; imageType: string },
-) {
-  const pa = a.position ?? Number.POSITIVE_INFINITY;
-  const pb = b.position ?? Number.POSITIVE_INFINITY;
-  if (pa !== pb) return pa - pb;
-  return a.imageType.localeCompare(b.imageType);
-}
-
-async function promptsForScope(ctx: { db: any }, scope: ShopScope) {
-  const prompts = await ctx.db.query("promptTemplates").collect();
-  return (prompts as Doc<"promptTemplates">[])
-    .filter((prompt) => shopMatchesScope(prompt, scope))
-    .sort(comparePrompts);
-}
-
-async function promptSettingsForScope(ctx: { db: any }, scope: ShopScope) {
-  const settings = await ctx.db.query("promptSettings").collect();
-  return (
-    (settings as Doc<"promptSettings">[]).find((setting) =>
-      shopMatchesScope(setting, scope),
-    ) ?? null
-  );
-}
-
-function masterPromptPayload(
-  scope: ShopScope,
-  settings: Doc<"promptSettings"> | null,
-) {
-  return {
-    shopId: scope.shopId ?? null,
-    masterPrompt: settings?.masterPrompt ?? defaultMasterPrompt,
-    defaultMasterPrompt: settings?.defaultMasterPrompt ?? defaultMasterPrompt,
-    updatedAt: settings?.updatedAt ?? null,
-  };
-}
-
-async function getPromptForActiveShop(
-  ctx: { db: any },
-  promptId: Id<"promptTemplates">,
-  userId: Id<"users">,
-) {
-  const scope = await getActiveShopScope(ctx, userId);
-  const prompt = await ctx.db.get(promptId);
-  if (!prompt || !shopMatchesScope(prompt, scope))
-    throw new Error("Prompt not found.");
-  return { prompt: prompt as Doc<"promptTemplates">, scope };
-}
 
 export const list = query({
   args: {},
