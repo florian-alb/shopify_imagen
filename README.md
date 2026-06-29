@@ -89,49 +89,49 @@ Ouvre l'URL affichée par Vite, généralement **http://localhost:5173**.
 ## 🔐 Environnement
 
 ### Convex & Auth
-| Variable | Rôle |
-|---|---|
-| `CONVEX_DEPLOYMENT`, `CONVEX_DEPLOY_KEY` | déploiement Convex (auto-renseigné par `convex dev`) |
-| `VITE_CONVEX_URL`, `VITE_CONVEX_SITE_URL` | URLs Convex côté client (seules variables `VITE_` exposées au navigateur) |
-| `AUTH_SECRET`, `AUTH_URL`, `SITE_URL` | config Convex Auth |
-| `JWT_PRIVATE_KEY`, `JWKS` | clés générées par la commande de setup Convex Auth |
-| `AUTH_ADMIN_EMAIL` | seule adresse autorisée à créer une session |
-| `AUTH_SETUP_SECRET` | secret requis pour le premier compte ; à supprimer de Convex après initialisation |
+| Variable                                  | Rôle                                                                              |
+| ----------------------------------------- | --------------------------------------------------------------------------------- |
+| `CONVEX_DEPLOYMENT`, `CONVEX_DEPLOY_KEY`  | déploiement Convex (auto-renseigné par `convex dev`)                              |
+| `VITE_CONVEX_URL`, `VITE_CONVEX_SITE_URL` | URLs Convex côté client (seules variables `VITE_` exposées au navigateur)         |
+| `AUTH_SECRET`, `AUTH_URL`, `SITE_URL`     | config Convex Auth                                                                |
+| `JWT_PRIVATE_KEY`, `JWKS`                 | clés générées par la commande de setup Convex Auth                                |
+| `AUTH_ADMIN_EMAIL`                        | seule adresse autorisée à créer une session                                       |
+| `AUTH_SETUP_SECRET`                       | secret requis pour le premier compte ; à supprimer de Convex après initialisation |
 
 ### OpenAI Images
-| Variable | Défaut |
-|---|---|
-| `OPENAI_API_KEY` | — |
-| `OPENAI_IMAGE_MODEL` | `gpt-image-2-2026-04-21` |
-| `OPENAI_IMAGE_SIZE` | `1024x1024` |
-| `OPENAI_IMAGE_QUALITY` | `medium` |
-| `OPENAI_IMAGE_OUTPUT_FORMAT` | `jpeg` |
-| `OPENAI_IMAGE_REQUESTS_PER_MINUTE` | `5` |
+| Variable                           | Défaut                   |
+| ---------------------------------- | ------------------------ |
+| `OPENAI_API_KEY`                   | —                        |
+| `OPENAI_IMAGE_MODEL`               | `gpt-image-2-2026-04-21` |
+| `OPENAI_IMAGE_SIZE`                | `1024x1024`              |
+| `OPENAI_IMAGE_QUALITY`             | `medium`                 |
+| `OPENAI_IMAGE_OUTPUT_FORMAT`       | `jpeg`                   |
+| `OPENAI_IMAGE_REQUESTS_PER_MINUTE` | `5`                      |
 
 ### Nano Banana Pro (Gemini)
-| Variable | Défaut |
-|---|---|
-| `GEMINI_API_KEY` | — |
-| `GEMINI_IMAGE_MODEL` | `gemini-3-pro-image-preview` |
-| `GEMINI_IMAGE_SIZE` | `1K` \| `2K` \| `4K` (vide = défaut modèle) |
-| `GEMINI_IMAGE_ASPECT_RATIO` | ex. `1:1`, `4:3`, `16:9` |
-| `GEMINI_IMAGE_REQUESTS_PER_MINUTE` | `5` |
+| Variable                           | Défaut                                      |
+| ---------------------------------- | ------------------------------------------- |
+| `GEMINI_API_KEY`                   | —                                           |
+| `GEMINI_IMAGE_MODEL`               | `gemini-3-pro-image-preview`                |
+| `GEMINI_IMAGE_SIZE`                | `1K` \| `2K` \| `4K` (vide = défaut modèle) |
+| `GEMINI_IMAGE_ASPECT_RATIO`        | ex. `1:1`, `4:3`, `16:9`                    |
+| `GEMINI_IMAGE_REQUESTS_PER_MINUTE` | `5`                                         |
 
 ### Shopify Admin GraphQL
-| Variable | Défaut |
-|---|---|
-| `SHOPIFY_SHOP_DOMAIN` | `xxx.myshopify.com` |
-| `SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET` | client credentials de l'app |
-| `SHOPIFY_API_VERSION` | `2026-04` |
-| `SHOPIFY_PRODUCT_QUERY` | `status:active,draft,archived` (ex. `status:active` pour restreindre) |
+| Variable                                     | Défaut                                                                |
+| -------------------------------------------- | --------------------------------------------------------------------- |
+| `SHOPIFY_SHOP_DOMAIN`                        | `xxx.myshopify.com`                                                   |
+| `SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET` | client credentials de l'app                                           |
+| `SHOPIFY_API_VERSION`                        | `2026-04`                                                             |
+| `SHOPIFY_PRODUCT_QUERY`                      | `status:active,draft,archived` (ex. `status:active` pour restreindre) |
 
 ### Cloudflare R2
-| Variable | Rôle |
-|---|---|
-| `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | credentials S3 |
-| `R2_BUCKET` | nom du bucket |
-| `R2_PUBLIC_BASE_URL` | **URL publique** du bucket (Shopify importe les images depuis ces URLs) |
-| `WEBP_QUALITY` | qualité WebP, défaut `82` (optionnel) |
+| Variable                                                    | Rôle                                                                    |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | credentials S3                                                          |
+| `R2_BUCKET`                                                 | nom du bucket                                                           |
+| `R2_PUBLIC_BASE_URL`                                        | **URL publique** du bucket (Shopify importe les images depuis ces URLs) |
+| `WEBP_QUALITY`                                              | qualité WebP, défaut `82` (optionnel)                                   |
 
 ---
 
@@ -166,10 +166,10 @@ Fixations (uniquement si détectées) : `multi-fonction`, `passe-tringle`, `galo
 
 ## ⚙️ Modes de génération
 
-| Mode | Comportement |
-|---|---|
-| **Temps réel** | `generation.processJob` génère séquentiellement avec rate-limit ; résultats immédiats. |
-| **Batch** | `generation.submitBatch` soumet un lot au provider (~50 % moins cher, asynchrone). Pour Gemini, les requêtes et résultats transitent par des fichiers JSONL afin de streamer les images sans dépasser la mémoire Convex. Le cron **`poll image batches`** (`convex/crons.ts`, toutes les 2 min) récupère les résultats et termine le job. |
+| Mode           | Comportement                                                                                                                                                                                                                                                                                                                              |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Temps réel** | `generation.processJob` génère séquentiellement avec rate-limit ; résultats immédiats.                                                                                                                                                                                                                                                    |
+| **Batch**      | `generation.submitBatch` soumet un lot au provider (~50 % moins cher, asynchrone). Pour Gemini, les requêtes et résultats transitent par des fichiers JSONL afin de streamer les images sans dépasser la mémoire Convex. Le cron **`poll image batches`** (`convex/crons.ts`, toutes les 2 min) récupère les résultats et termine le job. |
 
 Architecture détaillée et récupération des anciens batches Gemini inline :
 [`docs/GEMINI_BATCH.md`](docs/GEMINI_BATCH.md).
@@ -192,24 +192,14 @@ Flux « tout repasser en WebP » : régénérer (force) → push avec *Replace e
 
 ---
 
-## 🛠️ Script de maintenance
-
-`scripts/switch_images.js` — inverse la première et la dernière image des produits « voilage » via l'Admin GraphQL.
-
-```bash
-npm run images_switch     # charge .env via `node --env-file`
-```
-
----
-
 ## 🧯 Dépannage
 
-| Symptôme | Cause / solution |
-|---|---|
-| `Variable d'environnement manquante` dans un script | le `.env` n'est pas chargé → lancer via `node --env-file=.env …` (déjà câblé dans `images_switch`). |
-| `Could not find MIME for Buffer` à la génération | ancien code (jimp, sans codec WebP) encore déployé → relancer `convex:dev` / `npx convex dev --once`. |
-| Image stockée en `.jpg` au lieu de `.webp` | `sharp` n'a pas chargé côté Convex → vérifier `convex.json` puis redéployer. |
-| Jobs batch bloqués en `running` / « perdus » | Vérifier que `convex:dev` tourne, puis lancer `npx convex run generation:pollBatches '{}'`. Les anciens batches Gemini inline sont récupérés progressivement ; voir [`docs/GEMINI_BATCH.md`](docs/GEMINI_BATCH.md). |
+| Symptôme                                            | Cause / solution                                                                                                                                                                                                    |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Variable d'environnement manquante` dans un script | le `.env` n'est pas chargé → lancer via `node --env-file=.env …` (déjà câblé dans `images_switch`).                                                                                                                 |
+| `Could not find MIME for Buffer` à la génération    | ancien code (jimp, sans codec WebP) encore déployé → relancer `convex:dev` / `npx convex dev --once`.                                                                                                               |
+| Image stockée en `.jpg` au lieu de `.webp`          | `sharp` n'a pas chargé côté Convex → vérifier `convex.json` puis redéployer.                                                                                                                                        |
+| Jobs batch bloqués en `running` / « perdus »        | Vérifier que `convex:dev` tourne, puis lancer `npx convex run generation:pollBatches '{}'`. Les anciens batches Gemini inline sont récupérés progressivement ; voir [`docs/GEMINI_BATCH.md`](docs/GEMINI_BATCH.md). |
 
 ---
 
