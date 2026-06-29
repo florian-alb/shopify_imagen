@@ -5,177 +5,22 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { requireUserId } from "./authz";
 import { refreshProductSummary } from "./products";
 import { refreshJobSummary } from "./jobs";
-import { envShopDomain, type ShopifyCredentials } from "./shopScope";
-
-type GraphQlResponse<T> = { data?: T; errors?: Array<{ message: string }> };
-type ShopifyUserError = { field?: string[] | string | null; message: string };
-
-function env(name: string, fallback = "") {
-  return process.env[name] ?? fallback;
-}
-
-function normalizeShopDomain(domain: string) {
-  const trimmed = domain.trim().replace(/^https?:\/\//, "").replace(/\/$/, "");
-  if (!trimmed) throw new Error("SHOPIFY_SHOP_DOMAIN is required.");
-  return trimmed.includes(".") ? trimmed : `${trimmed}.myshopify.com`;
-}
-
-async function getAccessToken(credentials?: ShopifyCredentials) {
-  const domain = credentials?.domain ?? normalizeShopDomain(env("SHOPIFY_SHOP_DOMAIN"));
-  const clientId = credentials?.clientId ?? env("SHOPIFY_CLIENT_ID");
-  const clientSecret = credentials?.clientSecret ?? env("SHOPIFY_CLIENT_SECRET");
-  if (!clientId || !clientSecret) throw new ConvexError("SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET are required.");
-  const body = new URLSearchParams({
-    grant_type: "client_credentials",
-    client_id: clientId,
-    client_secret: clientSecret
-  });
-  let response: Response;
-  try {
-    response = await fetch(`https://${domain}/admin/oauth/access_token`, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body
-    });
-  } catch (error) {
-    throw new ConvexError(`Shopify token request failed: ${error instanceof Error ? error.message : String(error)}`);
-  }
-  const payload = (await response.json().catch(() => null)) as { access_token?: string; error_description?: string; error?: string } | null;
-  if (!response.ok || !payload?.access_token) {
-    throw new ConvexError(payload?.error_description ?? payload?.error ?? `Shopify token request failed with ${response.status}.`);
-  }
-  return payload.access_token;
-}
-
-async function shopifyGraphql<T>(
-  query: string,
-  variables: Record<string, unknown>,
-  accessToken?: string,
-  credentials?: ShopifyCredentials
-) {
-  const domain = credentials?.domain ?? normalizeShopDomain(env("SHOPIFY_SHOP_DOMAIN"));
-  const version = env("SHOPIFY_API_VERSION", "2026-04");
-  const token = accessToken ?? await getAccessToken(credentials);
-  let response: Response;
-  try {
-    response = await fetch(`https://${domain}/admin/api/${version}/graphql.json`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Shopify-Access-Token": token
-      },
-      body: JSON.stringify({ query, variables })
-    });
-  } catch (error) {
-    throw new ConvexError(`Shopify API request failed: ${error instanceof Error ? error.message : String(error)}`);
-  }
-  const payload = (await response.json().catch(() => null)) as GraphQlResponse<T> | null;
-  if (!response.ok) {
-    const details = payload?.errors?.map((error) => error.message).join("; ");
-    throw new ConvexError(`Shopify API request failed with ${response.status}${details ? `: ${details}` : ""}.`);
-  }
-  if (payload?.errors?.length) throw new ConvexError(payload.errors.map((error) => error.message).join("; "));
-  if (!payload?.data) throw new ConvexError("Shopify API response did not include data.");
-  return payload.data;
-}
-
-const PRODUCTS_QUERY = `#graphql
-  query ProductsForImageStudio($first: Int!, $after: String, $query: String) {
-    products(first: $first, after: $after, query: $query, sortKey: UPDATED_AT, reverse: true) {
-      pageInfo { hasNextPage endCursor }
-      nodes {
-        id
-        title
-        handle
-        status
-        productType
-        vendor
-        tags
-        collections(first: 50) { nodes { id title handle } }
-        featuredMedia { preview { image { url altText } } }
-        options { name values }
-        variants(first: 100) { nodes { id title selectedOptions { name value } } }
-        metafields(first: 50) { nodes { id namespace key type value } }
-        media(first: 100) {
-          nodes {
-            id
-            alt
-            mediaContentType
-            preview { image { url altText } }
-            ... on MediaImage { image { url altText } }
-          }
-        }
-      }
-    }
-  }
-`;
-
-const PRODUCT_QUERY = `#graphql
-  query ProductForImageStudio($id: ID!) {
-    product(id: $id) {
-      id
-      title
-      handle
-      status
-      productType
-      vendor
-      tags
-      collections(first: 50) { nodes { id title handle } }
-      featuredMedia { preview { image { url altText } } }
-      options { name values }
-      variants(first: 100) { nodes { id title selectedOptions { name value } } }
-      metafields(first: 50) { nodes { id namespace key type value } }
-      media(first: 100) {
-        nodes {
-          id
-          alt
-          mediaContentType
-          preview { image { url altText } }
-          ... on MediaImage { image { url altText } }
-        }
-      }
-    }
-  }
-`;
-
-const PRODUCT_UPDATE_MEDIA_MUTATION = `#graphql
-  mutation ProductUpdateWithGeneratedMedia($product: ProductUpdateInput!, $media: [CreateMediaInput!]) {
-    productUpdate(product: $product, media: $media) {
-      product {
-        id
-        media(first: 100) {
-          nodes { id alt mediaContentType preview { status } }
-        }
-      }
-      userErrors { field message }
-    }
-  }
-`;
-
-const PRODUCT_DELETE_MEDIA_MUTATION = `#graphql
-  mutation ProductDeleteMedia($productId: ID!, $mediaIds: [ID!]!) {
-    productDeleteMedia(productId: $productId, mediaIds: $mediaIds) {
-      deletedMediaIds
-      deletedProductImageIds
-      mediaUserErrors { field message }
-    }
-  }
-`;
-
-const PRODUCT_REORDER_MEDIA_MUTATION = `#graphql
-  mutation ProductReorderMedia($id: ID!, $moves: [MoveInput!]!) {
-    productReorderMedia(id: $id, moves: $moves) {
-      job { id }
-      mediaUserErrors { field message }
-    }
-  }
-`;
-
-const SHOPIFY_JOB_QUERY = `#graphql
-  query ShopifyJob($id: ID!) {
-    job(id: $id) { id done }
-  }
-`;
+import type { ShopifyCredentials } from "./shopScope";
+import { getAccessToken, shopifyGraphql } from "./shopify/client";
+import {
+  buildMediaMoves,
+  sameIds,
+  throwUserErrors,
+} from "./shopify/media";
+import { mapProductForUpsert } from "./shopify/productMapping";
+import {
+  PRODUCT_DELETE_MEDIA_MUTATION,
+  PRODUCT_QUERY,
+  PRODUCT_REORDER_MEDIA_MUTATION,
+  PRODUCT_UPDATE_MEDIA_MUTATION,
+  PRODUCTS_QUERY,
+  SHOPIFY_JOB_QUERY,
+} from "./shopify/graphql";
 
 type ProductsResponse = {
   products: {
@@ -183,49 +28,6 @@ type ProductsResponse = {
     nodes: Array<any>;
   };
 };
-
-function mapImages(product: any) {
-  const images = (product.media?.nodes ?? [])
-    .filter((media: any) => media.mediaContentType === "IMAGE")
-    .map((media: any) => ({
-      id: media.id,
-      mediaId: media.id,
-      url: media.image?.url ?? media.preview?.image?.url ?? null,
-      altText: media.image?.altText ?? media.preview?.image?.altText ?? media.alt ?? null
-    }))
-    .filter((image: { url: string | null }) => image.url);
-  const featuredUrl = product.featuredMedia?.preview?.image?.url;
-  if (featuredUrl && !images.some((image: { url: string }) => image.url === featuredUrl)) {
-    images.unshift({
-      id: null,
-      mediaId: null,
-      url: featuredUrl,
-      altText: product.featuredMedia?.preview?.image?.altText ?? null
-    });
-  }
-  return images;
-}
-
-function mapProductForUpsert(product: any, credentials: ShopifyCredentials) {
-  const currentShopifyImages = mapImages(product);
-  return {
-    shopId: credentials.shopId,
-    adoptLegacy: Boolean(credentials.shopId && credentials.domain === envShopDomain()),
-    shopifyProductId: product.id,
-    title: product.title,
-    handle: product.handle,
-    vendor: product.vendor ?? null,
-    productType: product.productType ?? null,
-    shopifyStatus: product.status ?? null,
-    tags: product.tags ?? [],
-    collections: product.collections?.nodes ?? [],
-    options: product.options ?? [],
-    variants: product.variants?.nodes ?? [],
-    metafields: product.metafields?.nodes ?? [],
-    featuredImageUrl: currentShopifyImages[0]?.url ?? null,
-    currentShopifyImages
-  };
-}
 
 export const syncProducts = action({
   args: { limit: v.optional(v.number()) },
@@ -286,42 +88,6 @@ export const syncProduct = action({
     return { productId: id };
   }
 });
-
-function shopifyErrorMessage(errors: ShopifyUserError[] | null | undefined) {
-  if (!errors?.length) return null;
-  return errors
-    .map((error) => {
-      const field = Array.isArray(error.field) ? error.field.join(".") : error.field;
-      return field ? `${field}: ${error.message}` : error.message;
-    })
-    .join("; ");
-}
-
-function throwUserErrors(errors: ShopifyUserError[] | null | undefined, label: string) {
-  const message = shopifyErrorMessage(errors);
-  if (message) throw new ConvexError(`${label}: ${message}`);
-}
-
-function sameIds(left: string[], right: string[]) {
-  return left.length === right.length && left.every((id) => right.includes(id)) && new Set(right).size === right.length;
-}
-
-function buildMediaMoves(mediaNodes: Array<{ id: string; mediaContentType: string }>, orderedImageIds: string[]) {
-  const desiredImages = [...orderedImageIds];
-  const targetIds = mediaNodes.map((media) => (media.mediaContentType === "IMAGE" ? desiredImages.shift()! : media.id));
-  const workingIds = mediaNodes.map((media) => media.id);
-  const moves: Array<{ id: string; newPosition: string }> = [];
-
-  targetIds.forEach((id, targetIndex) => {
-    const currentIndex = workingIds.indexOf(id);
-    if (currentIndex === targetIndex) return;
-    moves.push({ id, newPosition: String(targetIndex) });
-    workingIds.splice(currentIndex, 1);
-    workingIds.splice(targetIndex, 0, id);
-  });
-
-  return moves;
-}
 
 async function waitForShopifyJob(jobId: string, accessToken: string) {
   for (let attempt = 0; attempt < 20; attempt += 1) {
@@ -430,12 +196,18 @@ export const pushProductImages = action({
     // Publish in the order defined by the prompt templates in settings/prompts,
     // so the Shopify gallery mirrors that sequence. Images whose imageType has no
     // matching template fall back to the end, ordered by their original index.
-    const promptOrder = (await ctx.runQuery(internal.shopify.promptOrder, {
+    const promptOrderEntries = (await ctx.runQuery(internal.shopify.promptOrder, {
       shopId: product.shopId ?? null
-    })) as Record<string, number>;
+    })) as Array<{ imageType: string; position: number | null }>;
+    const promptOrder = new Map(
+      promptOrderEntries.map((entry) => [
+        entry.imageType,
+        entry.position ?? Number.POSITIVE_INFINITY
+      ])
+    );
     ready.sort((a, b) => {
-      const oa = promptOrder[a.imageType] ?? Number.POSITIVE_INFINITY;
-      const ob = promptOrder[b.imageType] ?? Number.POSITIVE_INFINITY;
+      const oa = promptOrder.get(a.imageType) ?? Number.POSITIVE_INFINITY;
+      const ob = promptOrder.get(b.imageType) ?? Number.POSITIVE_INFINITY;
       return oa - ob;
     });
 
@@ -507,19 +279,20 @@ export const generatedImagesForPush = internalQuery({
   }
 });
 
-// Maps each prompt template's imageType to its display/publish position so
+// Lists each prompt template's imageType and display/publish position so
 // pushProductImages can order the Shopify gallery to match settings/prompts.
+// Do not return a Record keyed by imageType: Convex object field names must be
+// ASCII, while merchants can create prompt names with accents.
 export const promptOrder = internalQuery({
   args: { shopId: v.optional(v.union(v.id("shops"), v.null())) },
   handler: async (ctx, args) => {
     const prompts = (await ctx.db.query("promptTemplates").collect()).filter((prompt: Doc<"promptTemplates">) =>
       args.shopId ? prompt.shopId === args.shopId : prompt.shopId == null
     );
-    const order: Record<string, number> = {};
-    for (const prompt of prompts) {
-      order[prompt.imageType] = prompt.position ?? Number.POSITIVE_INFINITY;
-    }
-    return order;
+    return prompts.map((prompt) => ({
+      imageType: prompt.imageType,
+      position: prompt.position ?? null
+    }));
   }
 });
 
