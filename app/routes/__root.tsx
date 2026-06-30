@@ -70,8 +70,19 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import appCss from "../styles.css?url";
 
-const convexUrl =
-  import.meta.env.VITE_CONVEX_URL || "https://placeholder.convex.cloud";
+function getConvexUrl() {
+  const url = import.meta.env.VITE_CONVEX_URL;
+
+  if (!url) {
+    throw new Error(
+      "Missing VITE_CONVEX_URL. Run `npx convex dev` locally, or deploy with `npx convex deploy --cmd-url-env-var-name VITE_CONVEX_URL --cmd 'npm run build'`.",
+    );
+  }
+
+  return url;
+}
+
+const convexUrl = getConvexUrl();
 const convex = new ConvexReactClient(convexUrl);
 const themeStorageKey = "image-studio-theme";
 
