@@ -6,9 +6,9 @@ import {
   backgroundConfigFrom,
   hasBackgroundConfigInput,
 } from "./background";
-import { defaultMasterPrompt, defaultPrompts } from "./promptDefaults";
 import {
   resolvePromptRuntime,
+  validatePromptKind,
   validateReferenceImageCount,
 } from "./promptRuntime";
 import {
@@ -18,12 +18,16 @@ import {
 import {
   getPromptForActiveShop,
   masterPromptPayload,
+  sanitizeModelReferences,
+  validateModelReferenceKey,
 } from "./prompts/access";
 import {
   ensureActiveShop,
   getActiveShopScope,
   shopMatchesScope,
 } from "./shopScope";
+
+const MAX_MODEL_REFERENCE_BYTES = 10 * 1024 * 1024;
 
 export const list = query({
   args: {},
@@ -40,12 +44,14 @@ export const master = query({
     const userId = await requireUserId(ctx);
     const scope = await getActiveShopScope(ctx, userId);
     const settings = await promptSettingsForScope(ctx, scope);
-    return masterPromptPayload(scope, settings);
+    return masterPromptPayload(ctx, scope, settings);
   },
 });
 
 export const updateMaster = mutation({
-  args: { masterPrompt: v.string() },
+  args: {
+    masterPrompt: v.string(),
+  },
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
     const shop = await ensureActiveShop(ctx, userId);
@@ -58,7 +64,6 @@ export const updateMaster = mutation({
       await ctx.db.patch(existingSettings._id, {
         shopId: shop._id,
         masterPrompt,
-        defaultMasterPrompt,
         updatedAt: now,
       });
       return;
@@ -67,37 +72,97 @@ export const updateMaster = mutation({
     await ctx.db.insert("promptSettings", {
       shopId: shop._id,
       masterPrompt,
-      defaultMasterPrompt,
       createdAt: now,
       updatedAt: now,
     });
   },
 });
 
-export const resetMaster = mutation({
+export const generateModelReferenceUploadUrl = mutation({
   args: {},
   handler: async (ctx) => {
     const userId = await requireUserId(ctx);
+    await ensureActiveShop(ctx, userId);
+    return ctx.storage.generateUploadUrl();
+  },
+});
+
+export const saveModelReference = mutation({
+  args: {
+    key: v.string(),
+    storageId: v.id("_storage"),
+    fileName: v.optional(v.string()),
+    contentType: v.optional(v.string()),
+    size: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const userId = await requireUserId(ctx);
     const shop = await ensureActiveShop(ctx, userId);
     const scope = await getActiveShopScope(ctx, userId);
+    const key = validateModelReferenceKey(args.key);
+    const file = await ctx.db.system.get("_storage", args.storageId);
+    if (!file) throw new Error("Uploaded model reference file not found.");
+    const contentType = file.contentType?.trim() ?? "";
+    if (!contentType.startsWith("image/")) {
+      throw new Error("Model reference must be an image file.");
+    }
+    if (file.size > MAX_MODEL_REFERENCE_BYTES) {
+      throw new Error("Model reference image must be 10 MB or smaller.");
+    }
+
     const existingSettings = await promptSettingsForScope(ctx, scope);
+    const modelReferences = sanitizeModelReferences(
+      existingSettings?.modelReferences,
+    );
     const now = Date.now();
+    modelReferences[key] = {
+      storageId: args.storageId,
+      ...(args.fileName?.trim() ? { fileName: args.fileName.trim() } : {}),
+      contentType,
+      size: file.size,
+      updatedAt: now,
+    };
+
     if (existingSettings) {
       await ctx.db.patch(existingSettings._id, {
         shopId: shop._id,
-        masterPrompt: defaultMasterPrompt,
-        defaultMasterPrompt,
+        modelReferences,
         updatedAt: now,
       });
       return;
     }
 
-    await ctx.db.insert("promptSettings", {
+  await ctx.db.insert("promptSettings", {
+    shopId: shop._id,
+    masterPrompt: "",
+    modelReferences,
+    createdAt: now,
+    updatedAt: now,
+  });
+  },
+});
+
+export const removeModelReference = mutation({
+  args: {
+    key: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const userId = await requireUserId(ctx);
+    const shop = await ensureActiveShop(ctx, userId);
+    const scope = await getActiveShopScope(ctx, userId);
+    const key = validateModelReferenceKey(args.key);
+    const existingSettings = await promptSettingsForScope(ctx, scope);
+    if (!existingSettings) return;
+
+    const modelReferences = sanitizeModelReferences(
+      existingSettings.modelReferences,
+    );
+    delete modelReferences[key];
+
+    await ctx.db.patch(existingSettings._id, {
       shopId: shop._id,
-      masterPrompt: defaultMasterPrompt,
-      defaultMasterPrompt,
-      createdAt: now,
-      updatedAt: now,
+      modelReferences,
+      updatedAt: Date.now(),
     });
   },
 });
@@ -108,6 +173,7 @@ export const create = mutation({
     label: v.string(),
     content: v.string(),
     isPreset: v.optional(v.boolean()),
+    promptKind: v.optional(v.string()),
     useVibeAnalysis: v.optional(v.boolean()),
     referenceImageCount: v.optional(v.number()),
     ...backgroundConfigArgValidators,
@@ -121,6 +187,7 @@ export const create = mutation({
     const content = args.content.trim();
     if (!imageType || !label || !content)
       throw new Error("Image type, label, and content are required.");
+    const promptKind = validatePromptKind(args.promptKind);
     const referenceImageCount = validateReferenceImageCount(
       args.referenceImageCount,
     );
@@ -145,6 +212,7 @@ export const create = mutation({
       defaultContent: content,
       isActive: true,
       isPreset: args.isPreset ?? false,
+      ...(promptKind ? { promptKind } : {}),
       position,
       useVibeAnalysis: args.useVibeAnalysis,
       referenceImageCount,
@@ -188,6 +256,7 @@ export const update = mutation({
     promptId: v.id("promptTemplates"),
     imageType: v.optional(v.string()),
     content: v.string(),
+    promptKind: v.optional(v.string()),
     useVibeAnalysis: v.optional(v.boolean()),
     referenceImageCount: v.optional(v.number()),
     ...backgroundConfigArgValidators,
@@ -202,6 +271,13 @@ export const update = mutation({
     );
     const imageType = args.imageType?.trim() ?? prompt.imageType;
     const content = args.content.trim();
+    const shouldPatchPromptKind = Object.prototype.hasOwnProperty.call(
+      args,
+      "promptKind",
+    );
+    const promptKind = shouldPatchPromptKind
+      ? validatePromptKind(args.promptKind)
+      : undefined;
     if (!imageType) throw new Error("Image type cannot be empty.");
     if (!content) throw new Error("Prompt content cannot be empty.");
     const referenceImageCount = validateReferenceImageCount(
@@ -231,6 +307,7 @@ export const update = mutation({
       imageType,
       label: imageType,
       content,
+      ...(shouldPatchPromptKind ? { promptKind } : {}),
       ...(args.useVibeAnalysis !== undefined
         ? { useVibeAnalysis: args.useVibeAnalysis }
         : {}),
@@ -284,31 +361,5 @@ export const reorder = mutation({
         }),
       ),
     );
-  },
-});
-
-export const reset = mutation({
-  args: { promptId: v.id("promptTemplates") },
-  handler: async (ctx, args) => {
-    const userId = await requireUserId(ctx);
-    const shop = await ensureActiveShop(ctx, userId);
-    const { prompt } = await getPromptForActiveShop(ctx, args.promptId, userId);
-    const defaultPrompt = defaultPrompts.find(
-      (item) => item.imageType === prompt.imageType,
-    );
-    const content = defaultPrompt?.content ?? prompt.defaultContent;
-    const runtime = resolvePromptRuntime({
-      imageType: prompt.imageType,
-      label: prompt.label,
-    });
-    await ctx.db.patch(args.promptId, {
-      shopId: shop._id,
-      content,
-      defaultContent: defaultPrompt?.content ?? prompt.defaultContent,
-      useVibeAnalysis: runtime.useVibeAnalysis,
-      referenceImageCount: runtime.referenceImageCount,
-      ...backgroundConfigFrom(),
-      updatedAt: Date.now(),
-    });
   },
 });

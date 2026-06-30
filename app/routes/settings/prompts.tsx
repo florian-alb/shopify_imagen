@@ -1,7 +1,15 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
-import { GripVertical, Plus, RotateCcw, Save, Trash2 } from "lucide-react";
+import {
+  GripVertical,
+  ImageIcon,
+  Plus,
+  Save,
+  Trash2,
+  Upload,
+  X,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import {
   BusyIcon,
@@ -50,8 +58,29 @@ const supportedVariables = [
   "{{PRODUCT_TITLE}}",
   "{{PRODUCT_HANDLE}}",
   "{{IMAGE_TYPE}}",
+  "{{PROMPT_KIND}}",
+  "{{TARGET_AUDIENCE}}",
+  "{{TARGET_GENDER}}",
+  "{{MODEL_REFERENCE_KEY}}",
+  "{{CONTEXT_CONFIDENCE}}",
 ];
 const newPromptTabValue = "__new-template__";
+const modelReferenceKeys = [
+  "adult_female",
+  "adult_male",
+  "adult_unisex",
+  "child_female",
+  "child_male",
+  "child_unisex",
+  "default",
+];
+const promptKindOptions = [
+  "product_only",
+  "product_detail",
+  "product_scene",
+  "human_model",
+];
+const promptKindBlankValue = "__no_prompt_kind";
 
 type BackgroundMode = "solid" | "transparent";
 
@@ -70,13 +99,24 @@ type PromptAiDraft = {
 type NewPromptDraft = {
   imageType: string;
   content: string;
+  promptKind: string;
 } & BackgroundDraft &
   PromptAiDraft;
 
 type MasterPromptSettings = {
   shopId: string | null;
   masterPrompt: string;
-  defaultMasterPrompt: string;
+  modelReferences: Record<
+    string,
+    {
+      storageId: string;
+      fileName?: string;
+      contentType?: string;
+      size?: number;
+      updatedAt: number;
+      url: string | null;
+    }
+  >;
   updatedAt: number | null;
 };
 
@@ -89,7 +129,7 @@ const defaultBackgroundDraft: BackgroundDraft = {
 
 const defaultPromptAiDraft: PromptAiDraft = {
   useVibeAnalysis: true,
-  referenceImageCount: 2,
+  referenceImageCount: 1,
 };
 
 function normalizePromptName(value?: string | null) {
@@ -109,13 +149,11 @@ function defaultAiDraftForPromptName(
   if (names.some((name) => name.startsWith("studio - "))) {
     return { useVibeAnalysis: false, referenceImageCount: 1 };
   }
-  if (
-    names.some(
-      (name) =>
-        name.startsWith("on-foot - ") || name.startsWith("lifestyle - "),
-    )
-  ) {
-    return { useVibeAnalysis: true, referenceImageCount: 2 };
+  if (names.some((name) => name.startsWith("on-foot - "))) {
+    return { useVibeAnalysis: true, referenceImageCount: 1 };
+  }
+  if (names.some((name) => name.startsWith("lifestyle - "))) {
+    return { useVibeAnalysis: true, referenceImageCount: 1 };
   }
   return defaultPromptAiDraft;
 }
@@ -123,6 +161,10 @@ function defaultAiDraftForPromptName(
 function normalizeReferenceImageCount(value: number) {
   if (!Number.isFinite(value)) return 1;
   return Math.min(4, Math.max(1, Math.round(value)));
+}
+
+function modelReferenceBusyValue(key: string) {
+  return `model-reference:${key}`;
 }
 
 function promptAiDraft(prompt: Doc<"promptTemplates">): PromptAiDraft {
@@ -333,7 +375,11 @@ function PromptSettingsPage() {
   const createPrompt = useMutation(api.prompts.create);
   const updatePrompt = useMutation(api.prompts.update);
   const updateMasterPrompt = useMutation(api.prompts.updateMaster);
-  const resetMasterPrompt = useMutation(api.prompts.resetMaster);
+  const generateModelReferenceUploadUrl = useMutation(
+    api.prompts.generateModelReferenceUploadUrl,
+  );
+  const saveModelReference = useMutation(api.prompts.saveModelReference);
+  const removeModelReference = useMutation(api.prompts.removeModelReference);
   const reorderPrompts = useMutation(api.prompts.reorder);
   const removePrompt = useMutation(api.prompts.remove);
   const setPreset = useMutation(api.prompts.setPreset);
@@ -345,6 +391,9 @@ function PromptSettingsPage() {
     Record<string, BackgroundDraft>
   >({});
   const [aiDrafts, setAiDrafts] = useState<Record<string, PromptAiDraft>>({});
+  const [promptKindDrafts, setPromptKindDrafts] = useState<
+    Record<string, string>
+  >({});
   const [masterDraft, setMasterDraft] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string | undefined>(undefined);
@@ -366,7 +415,7 @@ function PromptSettingsPage() {
 
   useEffect(() => {
     setMasterDraft(null);
-  }, [masterPrompt?.shopId]);
+  }, [masterPrompt?.shopId, masterPrompt?.updatedAt]);
 
   // Once the server order matches our optimistic order, drop the override.
   useEffect(() => {
@@ -427,7 +476,9 @@ function PromptSettingsPage() {
     ).trim();
     setBusy("master");
     try {
-      await updateMasterPrompt({ masterPrompt: masterPromptValue });
+      await updateMasterPrompt({
+        masterPrompt: masterPromptValue,
+      });
       setMasterDraft(null);
       toast.success("Master prompt saved");
     } catch (saveError) {
@@ -440,16 +491,62 @@ function PromptSettingsPage() {
     }
   }
 
-  async function resetMaster() {
-    setBusy("master");
+  async function uploadModelReference(key: string, file: File) {
+    if (file.type && !file.type.startsWith("image/")) {
+      toast.error("Ajoutez un fichier image.");
+      return;
+    }
+
+    setBusy(modelReferenceBusyValue(key));
     try {
-      await resetMasterPrompt({});
-      setMasterDraft(null);
-      toast.success("Master prompt reset to default");
-    } catch (resetError) {
-      toast.error("Failed to reset master prompt", {
+      const uploadUrl = await generateModelReferenceUploadUrl({});
+      const upload = await fetch(uploadUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": file.type || "application/octet-stream",
+        },
+        body: file,
+      });
+      if (!upload.ok) {
+        throw new Error(`Upload failed with status ${upload.status}.`);
+      }
+
+      const payload = (await upload.json()) as { storageId?: string };
+      if (!payload.storageId) {
+        throw new Error("Upload response did not include a storage id.");
+      }
+
+      await saveModelReference({
+        key,
+        storageId: payload.storageId as Id<"_storage">,
+        fileName: file.name,
+        ...(file.type ? { contentType: file.type } : {}),
+        size: file.size,
+      });
+      toast.success("Reference mannequin enregistree");
+    } catch (uploadError) {
+      toast.error("Failed to upload model reference", {
         description:
-          resetError instanceof Error ? resetError.message : String(resetError),
+          uploadError instanceof Error
+            ? uploadError.message
+            : String(uploadError),
+      });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function deleteModelReference(key: string) {
+    setBusy(modelReferenceBusyValue(key));
+    try {
+      await removeModelReference({ key });
+      toast.success("Reference mannequin supprimee");
+    } catch (removeError) {
+      toast.error("Failed to remove model reference", {
+        description:
+          removeError instanceof Error
+            ? removeError.message
+            : String(removeError),
       });
     } finally {
       setBusy(null);
@@ -471,10 +568,12 @@ function PromptSettingsPage() {
       const backgroundDraft =
         backgroundDrafts[promptId] ?? promptBackgroundDraft(prompt);
       const aiDraft = aiDrafts[promptId] ?? promptAiDraft(prompt);
+      const promptKind = promptKindDrafts[promptId] ?? prompt.promptKind ?? "";
       await updatePrompt({
         promptId,
         imageType,
         content,
+        promptKind,
         ...aiDraft,
         ...backgroundDraft,
       });
@@ -489,6 +588,11 @@ function PromptSettingsPage() {
         return next;
       });
       setBackgroundDrafts((current) => {
+        const next = { ...current };
+        delete next[promptId];
+        return next;
+      });
+      setPromptKindDrafts((current) => {
         const next = { ...current };
         delete next[promptId];
         return next;
@@ -527,6 +631,11 @@ function PromptSettingsPage() {
         return next;
       });
       setBackgroundDrafts((current) => {
+        const next = { ...current };
+        delete next[promptId];
+        return next;
+      });
+      setPromptKindDrafts((current) => {
         const next = { ...current };
         delete next[promptId];
         return next;
@@ -583,6 +692,7 @@ function PromptSettingsPage() {
         current ?? {
           imageType: "",
           content: "",
+          promptKind: "",
           ...defaultPromptAiDraft,
           ...defaultBackgroundDraft,
         },
@@ -637,6 +747,7 @@ function PromptSettingsPage() {
       imageType: newPromptDraft.imageType.trim(),
       label: newPromptDraft.imageType.trim(),
       content: newPromptDraft.content.trim(),
+      promptKind: newPromptDraft.promptKind || undefined,
       ...aiValues,
       removeBackground: newPromptDraft.removeBackground,
       backgroundMode: newPromptDraft.backgroundMode,
@@ -748,28 +859,92 @@ function PromptSettingsPage() {
                 Chargement du master prompt.
               </div>
             ) : (
-              <div className="flex flex-col gap-2 h-96">
+              <div className="flex flex-col gap-2">
                 <Textarea
-                  className="min-h-[16rem] font-mono text-xs leading-relaxed"
+                  className="max-h-[16rem] font-mono text-xs leading-relaxed"
                   value={masterPromptValue}
                   onChange={(event) => setMasterDraft(event.target.value)}
                   placeholder="Laissez vide pour generer uniquement avec les templates."
                 />
+                <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                  {modelReferenceKeys.map((referenceKey) => {
+                    const reference =
+                      masterPrompt.modelReferences[referenceKey];
+                    const referenceBusy =
+                      busy === modelReferenceBusyValue(referenceKey);
+                    const referenceDisabled = busy !== null;
+                    return (
+                      <div
+                        key={referenceKey}
+                        className="grid gap-2 rounded-md border border-border bg-background/40 p-3"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <Label
+                            htmlFor={`master-model-reference-${referenceKey}`}
+                          >
+                            {referenceKey}
+                          </Label>
+                          {reference?.url ? (
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              className="size-8"
+                              onClick={() =>
+                                void deleteModelReference(referenceKey)
+                              }
+                              disabled={referenceDisabled}
+                              aria-label={`Supprimer ${referenceKey}`}
+                            >
+                              <BusyIcon busy={referenceBusy} />
+                              {!referenceBusy ? <X className="size-4" /> : null}
+                            </Button>
+                          ) : null}
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <div className="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border bg-muted">
+                            {reference?.url ? (
+                              <img
+                                src={reference.url}
+                                alt=""
+                                className="h-full w-full object-cover"
+                              />
+                            ) : (
+                              <ImageIcon className="size-5 text-muted-foreground" />
+                            )}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm text-foreground">
+                              {reference?.fileName ?? "Aucun fichier"}
+                            </div>
+                            <Input
+                              id={`master-model-reference-${referenceKey}`}
+                              type="file"
+                              accept="image/*"
+                              className="mt-2 h-9 text-xs"
+                              disabled={referenceDisabled}
+                              onChange={(event) => {
+                                const file = event.currentTarget.files?.[0];
+                                event.currentTarget.value = "";
+                                if (file)
+                                  void uploadModelReference(referenceKey, file);
+                              }}
+                            />
+                          </div>
+                          {referenceBusy ? (
+                            <BusyIcon busy />
+                          ) : (
+                            <Upload className="size-4 shrink-0 text-muted-foreground" />
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
                 <div className="mt-3 flex flex-wrap justify-end gap-2">
                   <Button
-                    variant="outline"
-                    onClick={() => void resetMaster()}
-                    disabled={busy === "master"}
-                  >
-                    <BusyIcon busy={busy === "master"} />
-                    {busy !== "master" ? (
-                      <RotateCcw data-icon="inline-start" />
-                    ) : null}
-                    Reset
-                  </Button>
-                  <Button
                     onClick={() => void saveMaster()}
-                    disabled={busy === "master" || !masterPromptDirty}
+                    disabled={busy !== null || !masterPromptDirty}
                   >
                     <BusyIcon busy={busy === "master"} />
                     {busy !== "master" ? (
@@ -888,6 +1063,34 @@ function PromptSettingsPage() {
                         }
                       />
                     </div>
+                    <div className="grid gap-1.5">
+                      <Label htmlFor="new-prompt-kind">Prompt kind</Label>
+                      <Select
+                        value={
+                          newPromptDraft.promptKind || promptKindBlankValue
+                        }
+                        onValueChange={(selected) =>
+                          updateNewPromptDraft({
+                            promptKind:
+                              selected === promptKindBlankValue ? "" : selected,
+                          })
+                        }
+                      >
+                        <SelectTrigger id="new-prompt-kind" className="w-full">
+                          <SelectValue placeholder="Type de prompt" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={promptKindBlankValue}>
+                            Defaut
+                          </SelectItem>
+                          {promptKindOptions.map((option) => (
+                            <SelectItem key={option} value={option}>
+                              {option.replace(/_/g, " ")}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
                   <div className="mt-3 grid gap-1.5">
                     <Label htmlFor="prompt-content">Prompt specifique</Label>
@@ -939,6 +1142,8 @@ function PromptSettingsPage() {
             const imageTypeValue =
               imageTypeDrafts[prompt._id] ?? prompt.imageType;
             const contentValue = drafts[prompt._id] ?? prompt.content;
+            const promptKindValue =
+              promptKindDrafts[prompt._id] ?? prompt.promptKind ?? "";
             const persistedBackground = promptBackgroundDraft(prompt);
             const backgroundValue =
               backgroundDrafts[prompt._id] ?? persistedBackground;
@@ -947,6 +1152,9 @@ function PromptSettingsPage() {
             const imageTypeChanged = imageTypeValue.trim() !== prompt.imageType;
             const contentChanged =
               contentValue.trim() !== prompt.content.trim();
+            const promptKindChanged =
+              (promptKindDrafts[prompt._id] ?? prompt.promptKind ?? "") !==
+              (prompt.promptKind ?? "");
             const backgroundChanged = !backgroundDraftsEqual(
               backgroundValue,
               persistedBackground,
@@ -955,6 +1163,7 @@ function PromptSettingsPage() {
             const hasChanges =
               imageTypeChanged ||
               contentChanged ||
+              promptKindChanged ||
               backgroundChanged ||
               aiChanged;
             const canSaveChanges = Boolean(
@@ -1039,6 +1248,39 @@ function PromptSettingsPage() {
                           }))
                         }
                       />
+                    </div>
+                    <div className="mt-3 grid gap-1.5">
+                      <Label htmlFor={`prompt-kind-${prompt._id}`}>
+                        Prompt kind
+                      </Label>
+                      <Select
+                        value={promptKindValue || promptKindBlankValue}
+                        onValueChange={(selected) => {
+                          const nextPromptKind =
+                            selected === promptKindBlankValue ? "" : selected;
+                          setPromptKindDrafts((current) => ({
+                            ...current,
+                            [prompt._id]: nextPromptKind,
+                          }));
+                        }}
+                      >
+                        <SelectTrigger
+                          id={`prompt-kind-${prompt._id}`}
+                          className="w-full"
+                        >
+                          <SelectValue placeholder="Type de prompt" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={promptKindBlankValue}>
+                            Defaut
+                          </SelectItem>
+                          {promptKindOptions.map((option) => (
+                            <SelectItem key={option} value={option}>
+                              {option.replace(/_/g, " ")}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                     <PromptAiControls
                       idPrefix={`prompt-ai-${prompt._id}`}

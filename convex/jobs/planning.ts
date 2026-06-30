@@ -1,13 +1,28 @@
-import type { Doc } from "../_generated/dataModel";
+import type { Doc, Id } from "../_generated/dataModel";
 import { backgroundConfigFrom, type BackgroundConfig } from "../background";
 import { compilePrompt, renderPrompt } from "../lib";
-import { defaultMasterPrompt } from "../promptDefaults";
-import { resolvePromptRuntime } from "../promptRuntime";
+import {
+  inferProductVisualContext,
+  resolveModelReference,
+  visualContextPromptVariables,
+} from "../productVisualContext";
+import {
+  resolvePromptRuntime,
+  type PromptKind,
+} from "../promptRuntime";
+import type {
+  ModelReferenceKey,
+  StoredModelReference,
+} from "../prompts/access";
 
 export type PlannedImageTask = {
   product: Doc<"products">;
   imageType: string;
   promptUsed: string;
+  promptKind: PromptKind;
+  modelReferenceKey: ModelReferenceKey | null;
+  modelReferenceStorageId: Id<"_storage"> | null;
+  modelReferenceUrl: string | null;
   useVibeAnalysis: boolean;
   referenceImageCount: number;
   sourceImageUrls: string[];
@@ -20,10 +35,11 @@ export function buildImageTasks(args: {
   products: Doc<"products">[];
   prompts: Doc<"promptTemplates">[];
   promptSettings: Doc<"promptSettings"> | null;
+  modelReferences?: Partial<Record<ModelReferenceKey, StoredModelReference>>;
   selectedImageTypes: string[];
   regenerationInstructions?: string;
 }) {
-  const masterPrompt = args.promptSettings?.masterPrompt ?? defaultMasterPrompt;
+  const masterPrompt = args.promptSettings?.masterPrompt ?? "";
   const promptByType = new Map(
     args.prompts
       .filter((prompt) => prompt.isActive)
@@ -33,25 +49,30 @@ export function buildImageTasks(args: {
     new Set(args.selectedImageTypes),
   ).filter((type) => promptByType.has(type));
   if (!selectedImageTypes.length) {
-    throw new Error(
-      "None of the selected image types have an active prompt template.",
-    );
+    throw new Error("None selected image types active prompt template.");
   }
 
   const planned: PlannedImageTask[] = [];
   for (const product of args.products) {
+    const visualContext = inferProductVisualContext(product);
     for (const imageType of selectedImageTypes) {
       const template = promptByType.get(imageType);
       if (!template) {
         throw new Error(`No active prompt template found for ${imageType}.`);
       }
       const runtime = resolvePromptRuntime(template);
+      const modelReference = resolveModelReference(
+        args.modelReferences,
+        visualContext,
+        runtime.promptKind,
+      );
       const compiledPrompt = compilePrompt(masterPrompt, template.content);
       const promptUsed = appendRegenerationInstructions(
         renderPrompt(compiledPrompt, {
           PRODUCT_TITLE: product.title,
           PRODUCT_HANDLE: product.handle,
           IMAGE_TYPE: imageType,
+          ...visualContextPromptVariables(visualContext, runtime.promptKind),
         }),
         args.regenerationInstructions,
       );
@@ -59,11 +80,14 @@ export function buildImageTasks(args: {
         0,
         runtime.referenceImageCount,
       );
-
       planned.push({
         product,
         imageType,
         promptUsed,
+        promptKind: runtime.promptKind,
+        modelReferenceKey: modelReference?.key ?? null,
+        modelReferenceStorageId: modelReference?.storageId ?? null,
+        modelReferenceUrl: null,
         useVibeAnalysis: runtime.useVibeAnalysis,
         referenceImageCount: runtime.referenceImageCount,
         sourceImageUrls: references,
@@ -73,20 +97,16 @@ export function buildImageTasks(args: {
       });
     }
   }
-
   if (!planned.length) {
-    throw new Error(
-      "No image tasks could be planned for the selected products.",
-    );
+    throw new Error("No image tasks could be planned for selected products.");
   }
-
   return { planned, selectedImageTypes };
 }
 
 function appendRegenerationInstructions(prompt: string, instructions?: string) {
   const correction = instructions?.trim();
   if (!correction) return prompt;
-  return `${prompt}
+return `${prompt}
 
 IMPORTANT CORRECTION FOR THIS REGENERATION:
 ${correction}

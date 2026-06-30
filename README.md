@@ -148,7 +148,7 @@ Ouvre l'URL affichée par Vite, généralement **http://localhost:5173**.
 ## 🧭 Workflow type
 
 1. `/login` → crée le premier compte admin, puis connecte-toi.
-2. `/settings/prompts` → seed les prompts par défaut si absents.
+2. `/settings/prompts` → crée ou ajuste les prompts à utiliser.
 3. `/settings` → choisis **OpenAI Images** ou **Nano Banana Pro** + mode temps réel/batch.
 4. `/products` → **Sync Shopify**.
 5. Sélectionne des produits, coche les types d'images (preset budget : `situation`, `closeup`, `texture`, `oeillets`).

@@ -5,7 +5,7 @@ import { env } from "./runtime";
 import { mapConcurrent } from "./concurrency";
 import {
   isTransientPollStatus,
-  referenceUrlsForImage,
+  generationInputUrlsForImage,
   type BatchPollResult,
 } from "./batchTypes";
 import {
@@ -107,7 +107,7 @@ export async function submitGeminiBatch(args: {
     );
   const generationConfig = buildGeminiGenerationConfig(args.settings);
   const lines = await mapConcurrent(args.images, 5, async (image) => {
-    const referenceUrls = referenceUrlsForImage(image);
+      const referenceUrls = generationInputUrlsForImage(image);
     if (!referenceUrls.length)
       throw new Error(
         "Product has no Shopify supplier image to use as reference.",
