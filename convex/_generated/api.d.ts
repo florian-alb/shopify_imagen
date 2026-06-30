@@ -39,6 +39,7 @@ import type * as jobs from "../jobs.js";
 import type * as jobs_engine from "../jobs/engine.js";
 import type * as jobs_lifecycle from "../jobs/lifecycle.js";
 import type * as jobs_planning from "../jobs/planning.js";
+import type * as jobs_studioPromptContract from "../jobs/studioPromptContract.js";
 import type * as jobs_summaries from "../jobs/summaries.js";
 import type * as jobs_validators from "../jobs/validators.js";
 import type * as lib from "../lib.js";
@@ -101,6 +102,7 @@ declare const fullApi: ApiFromModules<{
   "jobs/engine": typeof jobs_engine;
   "jobs/lifecycle": typeof jobs_lifecycle;
   "jobs/planning": typeof jobs_planning;
+  "jobs/studioPromptContract": typeof jobs_studioPromptContract;
   "jobs/summaries": typeof jobs_summaries;
   "jobs/validators": typeof jobs_validators;
   lib: typeof lib;
