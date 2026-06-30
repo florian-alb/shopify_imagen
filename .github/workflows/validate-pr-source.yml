@@ -4,8 +4,6 @@ name: Validate PR source
 
 on:
   pull_request:
-    branches:
-      - main
     types:
       - opened
       - synchronize
@@ -21,14 +19,13 @@ jobs:
     name: validate-pr-source
     runs-on: ubuntu-latest
 
-    env:
-      BASE_BRANCH: ${{ github.base_ref }}
-      HEAD_BRANCH: ${{ github.head_ref }}
-      HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
-      CURRENT_REPO: ${{ github.repository }}
-
     steps:
-      - name: Only allow dev -> main
+      - name: Validate PR source
+        env:
+          BASE_BRANCH: ${{ github.base_ref }}
+          HEAD_BRANCH: ${{ github.head_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          CURRENT_REPO: ${{ github.repository }}
         run: |
           echo "Base branch: $BASE_BRANCH"
           echo "Head branch: $HEAD_BRANCH"
@@ -36,8 +33,8 @@ jobs:
           echo "Current repo: $CURRENT_REPO"
 
           if [ "$BASE_BRANCH" != "main" ]; then
-            echo "::error::This check only applies to PRs targeting main."
-            exit 1
+            echo "PR targets '$BASE_BRANCH', not main. No restriction."
+            exit 0
           fi
 
           if [ "$HEAD_BRANCH" != "dev" ]; then
@@ -49,3 +46,5 @@ jobs:
             echo "::error::Only the dev branch from this repository is allowed."
             exit 1
           fi
+
+          echo "Valid PR: dev -> main"

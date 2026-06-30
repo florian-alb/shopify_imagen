@@ -99,12 +99,15 @@ export default defineSchema({
     phoneVerificationTime: v.optional(v.number()),
     isAnonymous: v.optional(v.boolean()),
     role: v.optional(v.string()),
+    approvalStatus: v.optional(v.union(v.literal("pending"), v.literal("approved"), v.literal("rejected"))),
+    approvalUpdatedAt: v.optional(v.number()),
     activeShopId: v.optional(v.union(v.id("shops"), v.null())),
     createdAt: v.optional(v.number()),
     updatedAt: v.optional(v.number()),
   })
-    .index("email", ["email"])
-    .index("phone", ["phone"]),
+  .index("email", ["email"])
+  .index("phone", ["phone"])
+  .index("by_approval_status", ["approvalStatus"]),
   shops: defineTable({
     domain: v.string(),
     name: v.optional(v.union(v.string(), v.null())),
