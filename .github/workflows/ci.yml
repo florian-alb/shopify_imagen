@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build CI image
+        run: docker compose build app
+
+      - name: Typecheck
+        run: docker compose run --rm app npm run typecheck
+
+      - name: Lint
+        run: docker compose run --rm app npm run lint
+
+      - name: Test
+        run: docker compose run --rm app npm test
+
+      - name: Build
+        run: docker compose run --rm app npm run build
+
+      - name: Build production image
+        run: docker compose build web
+        env:
+          # Smoke test only -- this build isn't run or deployed, so any
+          # syntactically valid URL satisfies the build-arg requirement.
+          VITE_CONVEX_URL: https://ci-build-placeholder.convex.cloud
+
+  deploy-convex:
+    needs: verify
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm ci
+
+      - name: Deploy to Convex
+        run: npx convex deploy
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
