@@ -1,0 +1,51 @@
+# Validate that PRs are only opened from the dev branch to the main branch of this repository.
+
+name: Validate PR source
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - edited
+      - ready_for_review
+
+permissions:
+  contents: read
+
+jobs:
+  validate-pr-source:
+    name: validate-pr-source
+    runs-on: ubuntu-latest
+
+    env:
+      BASE_BRANCH: ${{ github.base_ref }}
+      HEAD_BRANCH: ${{ github.head_ref }}
+      HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+      CURRENT_REPO: ${{ github.repository }}
+
+    steps:
+      - name: Only allow dev -> main
+        run: |
+          echo "Base branch: $BASE_BRANCH"
+          echo "Head branch: $HEAD_BRANCH"
+          echo "Head repo: $HEAD_REPO"
+          echo "Current repo: $CURRENT_REPO"
+
+          if [ "$BASE_BRANCH" != "main" ]; then
+            echo "::error::This check only applies to PRs targeting main."
+            exit 1
+          fi
+
+          if [ "$HEAD_BRANCH" != "dev" ]; then
+            echo "::error::Only PRs from dev to main are allowed."
+            exit 1
+          fi
+
+          if [ "$HEAD_REPO" != "$CURRENT_REPO" ]; then
+            echo "::error::Only the dev branch from this repository is allowed."
+            exit 1
+          fi
