@@ -1,0 +1,19 @@
+services:
+  app:
+    build:
+      context: .
+      target: ci
+    image: shopify-imagen-ci:latest
+
+  web:
+    build:
+      context: .
+      target: runtime
+      args:
+        VITE_CONVEX_URL: ${VITE_CONVEX_URL:?Set VITE_CONVEX_URL (e.g. from .env.local) before building the web image}
+    image: shopify-imagen-web:latest
+    ports:
+      - "${WEB_PORT:-3100}:3000"
+    env_file:
+      - path: .env
+        required: false

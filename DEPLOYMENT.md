@@ -124,7 +124,7 @@ registration attempts are rejected server-side.
 
 ---
 
-## Local development (unchanged)
+## Local development
 
 ```bash
 npm run dev            # web app
@@ -134,3 +134,25 @@ npx convex dev         # backend (separate terminal)
 Local `npm run build` still produces a Node server at `.output/server/index.mjs`
 (run with `npm start`); the Vercel output format is only produced when the
 `VERCEL` env var is present (i.e. on Vercel's build machines).
+
+### Dev runs against a separate Convex project
+
+Local development targets its **own** Convex project, never the one backing
+prod. `npx convex dev` writes that dev deployment's connection info
+(`CONVEX_DEPLOYMENT`, `VITE_CONVEX_URL`, `VITE_CONVEX_SITE_URL`) to
+`.env.local` (gitignored, per-machine) — `.env` no longer carries those values.
+
+The dev deployment's backend env vars (`npx convex env set ...`) are separate
+from prod's; nothing is shared automatically. By default the dev project only
+has the AI provider keys (`OPENAI_*`, `GEMINI_*`, `FAL_KEY`,
+`BACKGROUND_REMOVAL_PROVIDER`) plus its own auth setup
+(`JWT_PRIVATE_KEY`/`JWKS`/`SITE_URL`/`AUTH_ADMIN_EMAIL`/`AUTH_SETUP_SECRET`).
+`SHOPIFY_*` and `R2_*` are intentionally **not** set on dev, so Shopify sync
+and image push will error locally until you add dev-safe values — this is on
+purpose, to stop local testing from touching the live store or bucket. If you
+need to test those flows, set them on the dev deployment with
+`npx convex env set SHOPIFY_SHOP_DOMAIN "..."` etc., ideally pointing at a
+Shopify dev store rather than the production one.
+
+Run `npx convex env list` (without `--prod`) to see what's currently set on
+your dev deployment.
