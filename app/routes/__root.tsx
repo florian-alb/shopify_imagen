@@ -139,6 +139,7 @@ function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
 
 function AuthShell({ children }: { children: ReactNode }) {
   const auth = useConvexAuth();
+  const access = useQuery(api.users.currentAccess);
   const location = useLocation();
   const navigate = useNavigate();
   const isLogin = location.pathname === "/login";
@@ -146,14 +147,14 @@ function AuthShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!auth.isLoading && !auth.isAuthenticated && !isLogin) {
       void navigate({ to: "/login", search: { redirect: location.href } });
-    } else if (!auth.isLoading && auth.isAuthenticated && isLogin) {
+    } else if (!auth.isLoading && auth.isAuthenticated && access?.isApproved && isLogin) {
       void navigate({ to: "/products" });
     }
-  }, [auth.isAuthenticated, auth.isLoading, isLogin, location.href, navigate]);
+  }, [access?.isApproved, auth.isAuthenticated, auth.isLoading, isLogin, location.href, navigate]);
 
   if (isLogin) return <>{children}</>;
 
-  if (auth.isLoading || !auth.isAuthenticated) {
+  if (auth.isLoading || !auth.isAuthenticated || access === undefined) {
     return (
       <main className="grid min-h-screen place-items-center bg-[var(--surface)] px-4">
         <Card size="sm" className="rounded-lg border-white/10 bg-card/80">
@@ -166,6 +167,8 @@ function AuthShell({ children }: { children: ReactNode }) {
     );
   }
 
+  if (!access?.isApproved) return <AccessBlocked status={access?.approvalStatus} />;
+
   return (
     <SidebarProvider className="min-h-screen bg-[var(--surface)] text-foreground">
       <DesktopNav />
@@ -177,6 +180,28 @@ function AuthShell({ children }: { children: ReactNode }) {
         </main>
       </SidebarInset>
     </SidebarProvider>
+  );
+}
+
+function AccessBlocked({ status }: { status?: string }) {
+  const rejected = status === "rejected";
+
+  return (
+    <main className="grid min-h-screen place-items-center bg-[var(--surface)] px-4">
+      <Card className="w-full max-w-md rounded-lg">
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <p className="text-sm font-medium">{rejected ? "Compte non autorise" : "Compte en attente"}</p>
+            <p className="text-sm text-muted-foreground">
+              {rejected
+                ? "Ce compte n'a pas acces a l'application."
+                : "Un admin doit approuver ce compte dans le backoffice Convex avant l'acces a l'application."}
+            </p>
+          </div>
+          <LogoutButton />
+        </CardContent>
+      </Card>
+    </main>
   );
 }
 

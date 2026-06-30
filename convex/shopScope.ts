@@ -109,11 +109,7 @@ export async function getActiveShopScope(ctx: DbCtx, userId: Id<"users">): Promi
     }
   }
 
-  const firstShop = await ctx.db
-    .query("shops")
-    .withIndex("by_created_by_user", (q: any) => q.eq("createdByUserId", userId))
-    .order("asc")
-    .first();
+  const firstShop = await ctx.db.query("shops").order("asc").first();
   if (firstShop) {
     const domain = normalizeShopDomain(firstShop.domain);
     return {
@@ -161,12 +157,7 @@ export async function ensureActiveShop(ctx: DbCtx, userId: Id<"users">) {
     throw new Error("Connect a Shopify shop before syncing products or creating generation jobs.");
   }
 
-  const existing = await ctx.db
-    .query("shops")
-    .withIndex("by_created_by_user_and_domain", (q: any) =>
-      q.eq("createdByUserId", userId).eq("domain", envShop.domain)
-    )
-    .unique();
+  const existing = await ctx.db.query("shops").withIndex("by_domain", (q: any) => q.eq("domain", envShop.domain)).unique();
   if (existing) {
     await ctx.db.patch(userId, { activeShopId: existing._id, updatedAt: Date.now() });
     return existing;
