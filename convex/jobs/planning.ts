@@ -14,6 +14,10 @@ import type {
   ModelReferenceKey,
   StoredModelReference,
 } from "../prompts/access";
+import {
+  applyStudioPromptContract,
+  referenceImageCountForStudio,
+} from "./studioPromptContract";
 
 export type PlannedImageTask = {
   product: Doc<"products">;
@@ -61,6 +65,11 @@ export function buildImageTasks(args: {
         throw new Error(`No active prompt template found for ${imageType}.`);
       }
       const runtime = resolvePromptRuntime(template);
+      const referenceImageCount = referenceImageCountForStudio({
+        imageType,
+        promptKind: runtime.promptKind,
+        requestedCount: runtime.referenceImageCount,
+      });
       const modelReference = resolveModelReference(
         args.modelReferences,
         visualContext,
@@ -68,17 +77,21 @@ export function buildImageTasks(args: {
       );
       const compiledPrompt = compilePrompt(masterPrompt, template.content);
       const promptUsed = appendRegenerationInstructions(
-        renderPrompt(compiledPrompt, {
-          PRODUCT_TITLE: product.title,
-          PRODUCT_HANDLE: product.handle,
-          IMAGE_TYPE: imageType,
-          ...visualContextPromptVariables(visualContext, runtime.promptKind),
+        applyStudioPromptContract({
+          imageType,
+          promptKind: runtime.promptKind,
+          prompt: renderPrompt(compiledPrompt, {
+            PRODUCT_TITLE: product.title,
+            PRODUCT_HANDLE: product.handle,
+            IMAGE_TYPE: imageType,
+            ...visualContextPromptVariables(visualContext, runtime.promptKind),
+          }),
         }),
         args.regenerationInstructions,
       );
       const references = referenceImageUrls(product).slice(
         0,
-        runtime.referenceImageCount,
+        referenceImageCount,
       );
       planned.push({
         product,
@@ -89,7 +102,7 @@ export function buildImageTasks(args: {
         modelReferenceStorageId: modelReference?.storageId ?? null,
         modelReferenceUrl: null,
         useVibeAnalysis: runtime.useVibeAnalysis,
-        referenceImageCount: runtime.referenceImageCount,
+        referenceImageCount,
         sourceImageUrls: references,
         sourceImageUrl: references[0] ?? null,
         sourceImageUrl2: references[1] ?? null,
