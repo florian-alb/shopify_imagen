@@ -103,8 +103,8 @@ The app uses Convex Auth with email/password and permits exactly one admin
 identity. Set `AUTH_ADMIN_EMAIL` to your email and `AUTH_SETUP_SECRET` to a long,
 random one-time value in the Convex production environment. On first visit go
 to `/login` and register with that email and setup secret. The profile is
-created with `role: "admin"`. Default prompt templates auto-seed on first load
-of the Prompts page.
+created with `role: "admin"`. Configure prompt templates from the Prompts page
+before launching image generation.
 
 After the first account exists, remove `AUTH_SETUP_SECRET` from the Convex
 production environment. The existing admin can still sign in, while further

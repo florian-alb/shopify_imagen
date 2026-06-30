@@ -1,4 +1,5 @@
 import type { TokenUsage } from "../pricing";
+import { isHumanModelPromptKind, type PromptKind } from "../promptRuntime";
 import type { ProviderIds } from "./providerIds";
 
 export type BatchItem = {
@@ -26,6 +27,8 @@ export type BatchReferenceImage = {
   sourceImageUrls?: string[];
   sourceImageUrl?: string | null;
   sourceImageUrl2?: string | null;
+  promptKind?: PromptKind | string | null;
+  modelReferenceUrl?: string | null;
 };
 
 export function referenceUrlsForImage(image: BatchReferenceImage) {
@@ -36,6 +39,20 @@ export function referenceUrlsForImage(image: BatchReferenceImage) {
   return [image.sourceImageUrl, image.sourceImageUrl2].filter(
     (url): url is string => Boolean(url),
   );
+}
+
+// Product references stay persisted in sourceImageUrls. The optional
+// modelReferenceUrl is a separate uploaded SaaS asset and is appended only for
+// generation inputs that actually need a human model.
+export function generationInputUrlsForImage(image: BatchReferenceImage) {
+  const productReferences = referenceUrlsForImage(image).filter(
+    (url) => url !== image.modelReferenceUrl,
+  );
+  const modelReferenceUrl = image.modelReferenceUrl?.trim();
+  if (!modelReferenceUrl || !isHumanModelPromptKind(image.promptKind)) {
+    return productReferences.slice(0, 4);
+  }
+  return [...productReferences.slice(0, 3), modelReferenceUrl];
 }
 
 export function isTransientPollStatus(status: number): boolean {

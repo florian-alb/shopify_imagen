@@ -3,9 +3,7 @@
 import { internal } from "../_generated/api";
 import type { Doc } from "../_generated/dataModel";
 import type { ActionCtx } from "../_generated/server";
-import { augmentPrompt } from "../lib";
 import { estimateCostUsd, type TokenUsage } from "../pricing";
-import { referenceUrlsForImage } from "./batchTypes";
 import { geminiUsage } from "./formats";
 import { normalizeReferenceImage } from "./images";
 import { env } from "./runtime";
@@ -110,9 +108,7 @@ export function finalPromptForImage(
   vibe: string | null,
   useVibeAnalysis: boolean,
 ) {
-  return augmentPrompt(image.promptUsed, {
-    vibe: useVibeAnalysis ? vibe : null,
-    hasSecondReference:
-      useVibeAnalysis && referenceUrlsForImage(image).length > 1,
-  });
+  const context = useVibeAnalysis ? vibe?.trim() : "";
+  if (!context) return image.promptUsed;
+  return `${image.promptUsed}\n\nScene context: ${context}`;
 }

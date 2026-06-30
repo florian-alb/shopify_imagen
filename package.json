@@ -11,7 +11,7 @@
     "convex:codegen": "convex codegen",
     "convex:dev": "convex dev",
     "dry-run": "tsx src/index.ts dry-run",
-    "test": "tsx src/index.ts dry-run",
+    "test": "npm run typecheck",
     "export-images": "tsx src/index.ts export-images",
     "generate": "tsx src/index.ts generate",
     "attach-images": "tsx src/index.ts attach-images",

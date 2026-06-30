@@ -1,9 +1,26 @@
 export const MIN_REFERENCE_IMAGE_COUNT = 1;
 export const MAX_REFERENCE_IMAGE_COUNT = 4;
 
+export const promptKinds = [
+  "product_only",
+  "product_detail",
+  "product_scene",
+  "human_model",
+] as const;
+
+export type PromptKind = (typeof promptKinds)[number];
+
+const legacyPromptKindAliases: Record<string, PromptKind> = {
+  studio_product: "product_only",
+  detail_product: "product_detail",
+  worn_model: "human_model",
+  lifestyle_model: "product_scene",
+};
+
 export type PromptRuntimeInput = {
   imageType: string;
   label?: string | null;
+  promptKind?: string | null;
   useVibeAnalysis?: boolean;
   referenceImageCount?: number | null;
 };
@@ -13,30 +30,12 @@ type PromptRuntimeDefaults = {
   referenceImageCount: number;
 };
 
-const fallbackRuntimeDefaults: PromptRuntimeDefaults = {
-  useVibeAnalysis: true,
-  referenceImageCount: 2,
+const runtimeByKind: Record<PromptKind, PromptRuntimeDefaults> = {
+  product_only: { useVibeAnalysis: false, referenceImageCount: 1 },
+  product_detail: { useVibeAnalysis: false, referenceImageCount: 1 },
+  product_scene: { useVibeAnalysis: true, referenceImageCount: 1 },
+  human_model: { useVibeAnalysis: true, referenceImageCount: 1 },
 };
-
-const promptRuntimeDefaults = new Map<string, PromptRuntimeDefaults>([
-  ["studio - side profile", { useVibeAnalysis: false, referenceImageCount: 1 }],
-  [
-    "studio - front 3/4 pair",
-    { useVibeAnalysis: false, referenceImageCount: 1 },
-  ],
-  [
-    "studio - detail close-up",
-    { useVibeAnalysis: false, referenceImageCount: 1 },
-  ],
-  [
-    "on-foot - top-down worn view",
-    { useVibeAnalysis: true, referenceImageCount: 2 },
-  ],
-  [
-    "lifestyle - worn editorial",
-    { useVibeAnalysis: true, referenceImageCount: 2 },
-  ],
-]);
 
 function normalizePromptName(value?: string | null) {
   return (value ?? "")
@@ -47,21 +46,97 @@ function normalizePromptName(value?: string | null) {
     .replace(/\s+/g, " ");
 }
 
-function defaultsForPrompt(prompt: PromptRuntimeInput): PromptRuntimeDefaults {
-  const imageType = normalizePromptName(prompt.imageType);
-  const label = normalizePromptName(prompt.label);
-  return (
-    promptRuntimeDefaults.get(imageType) ??
-    promptRuntimeDefaults.get(label) ??
-    (imageType.startsWith("studio - ") || label.startsWith("studio - ")
-      ? { useVibeAnalysis: false, referenceImageCount: 1 }
-      : imageType.startsWith("on-foot - ") ||
-          label.startsWith("on-foot - ") ||
-          imageType.startsWith("lifestyle - ") ||
-          label.startsWith("lifestyle - ")
-        ? { useVibeAnalysis: true, referenceImageCount: 2 }
-        : fallbackRuntimeDefaults)
-  );
+export function isPromptKind(value: unknown): value is PromptKind {
+  return typeof value === "string" && promptKinds.includes(value as PromptKind);
+}
+
+export function normalizePromptKind(value: string | null | undefined) {
+  const normalized = value?.trim();
+  if (!normalized) return undefined;
+  if (isPromptKind(normalized)) return normalized;
+  return legacyPromptKindAliases[normalized];
+}
+
+export function resolvePromptKind(prompt: {
+  imageType: string;
+  label?: string | null;
+  promptKind?: string | null;
+}): PromptKind {
+  const explicitKind = normalizePromptKind(prompt.promptKind);
+  if (explicitKind) return explicitKind;
+
+  const names = [
+    normalizePromptName(prompt.imageType),
+    normalizePromptName(prompt.label),
+  ];
+
+  if (
+    names.some(
+      (name) =>
+        name.startsWith("on-foot - ") ||
+        name.includes("on foot") ||
+        name.includes("worn view") ||
+        name.includes("worn model") ||
+        name.includes("human model") ||
+        name.includes("mannequin"),
+    )
+  ) {
+    return "human_model";
+  }
+
+  if (
+    names.some(
+      (name) =>
+        name.startsWith("product detail") ||
+        name.startsWith("studio - detail") ||
+        name.includes("detail close") ||
+        name.includes("close-up") ||
+        name.includes("closeup"),
+    )
+  ) {
+    return "product_detail";
+  }
+
+  if (
+    names.some(
+      (name) =>
+        name.startsWith("product scene") ||
+        name.startsWith("lifestyle - ") ||
+        name.includes("lifestyle") ||
+        name.includes("in use") ||
+        name.includes("in-use"),
+    )
+  ) {
+    return "product_scene";
+  }
+
+  if (
+    names.some(
+      (name) =>
+        name.startsWith("product only") ||
+        name.startsWith("studio - ") ||
+        name.includes("packshot"),
+    )
+  ) {
+    return "product_only";
+  }
+
+  return "product_only";
+}
+
+export function isHumanModelPromptKind(
+  promptKind: string | null | undefined,
+) {
+  return normalizePromptKind(promptKind) === "human_model";
+}
+
+export function validatePromptKind(value: string | null | undefined) {
+  if (value == null || value.trim() === "") return undefined;
+  const promptKind = normalizePromptKind(value);
+  if (!promptKind) {
+    throw new Error(`Unsupported prompt kind "${value}".`);
+  }
+  return promptKind;
 }
 
 export function validateReferenceImageCount(value: number | null | undefined) {
@@ -79,8 +154,10 @@ export function validateReferenceImageCount(value: number | null | undefined) {
 }
 
 export function resolvePromptRuntime(prompt: PromptRuntimeInput) {
-  const defaults = defaultsForPrompt(prompt);
+  const promptKind = resolvePromptKind(prompt);
+  const defaults = runtimeByKind[promptKind];
   return {
+    promptKind,
     useVibeAnalysis: prompt.useVibeAnalysis ?? defaults.useVibeAnalysis,
     referenceImageCount:
       validateReferenceImageCount(prompt.referenceImageCount) ??

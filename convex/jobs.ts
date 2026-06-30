@@ -39,6 +39,7 @@ import {
   promptSettingsForScope,
   promptsForScope,
 } from "./prompts/repository";
+import { sanitizeModelReferences } from "./prompts/access";
 import { refreshProductSummary } from "./products";
 import {
   ensureActiveShop,
@@ -267,16 +268,18 @@ export const create = mutation({
 
     const { imageProvider, executionMode, imageModel, vibeAnalysisDefault } =
       await currentGenerationEngine(ctx, scope);
-    const vibeAnalysis = args.useVibeAnalysis ?? vibeAnalysisDefault;
-    const prompts = await promptsForScope(ctx, scope);
-    const promptSettings = await promptSettingsForScope(ctx, scope);
-    const { planned, selectedImageTypes } = buildImageTasks({
-      products,
-      prompts,
-      promptSettings,
-      selectedImageTypes: args.selectedImageTypes,
-      regenerationInstructions: args.regenerationInstructions,
-    });
+  const vibeAnalysis = args.useVibeAnalysis ?? vibeAnalysisDefault;
+  const prompts = await promptsForScope(ctx, scope);
+  const promptSettings = await promptSettingsForScope(ctx, scope);
+  const modelReferences = sanitizeModelReferences(promptSettings?.modelReferences);
+  const { planned, selectedImageTypes } = buildImageTasks({
+    products,
+    prompts,
+    promptSettings,
+    modelReferences,
+    selectedImageTypes: args.selectedImageTypes,
+    regenerationInstructions: args.regenerationInstructions,
+  });
     const now = Date.now();
 
     const jobId = await ctx.db.insert("generationJobs", {
@@ -321,8 +324,12 @@ export const create = mutation({
         imageType: task.imageType,
         imageProvider,
         imageModel,
-        promptUsed: task.promptUsed,
-        finalPromptUsed: task.promptUsed,
+      promptUsed: task.promptUsed,
+      finalPromptUsed: task.promptUsed,
+      promptKind: task.promptKind,
+      modelReferenceKey: task.modelReferenceKey,
+      modelReferenceStorageId: task.modelReferenceStorageId,
+      modelReferenceUrl: task.modelReferenceUrl,
         useVibeAnalysis: task.useVibeAnalysis,
         vibeUsed: null,
         referenceImageCount: task.referenceImageCount,

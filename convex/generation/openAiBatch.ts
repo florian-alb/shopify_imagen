@@ -7,10 +7,11 @@ import { env } from "./runtime";
 import { mapConcurrent } from "./concurrency";
 import {
   isTransientPollStatus,
-  referenceUrlsForImage,
+  generationInputUrlsForImage,
   type BatchItem,
   type BatchPollResult,
 } from "./batchTypes";
+import type { PromptKind } from "../promptRuntime";
 
 export type OpenAiBatchImage = {
   _id: string;
@@ -19,6 +20,8 @@ export type OpenAiBatchImage = {
   sourceImageUrls?: string[];
   sourceImageUrl?: string | null;
   sourceImageUrl2?: string | null;
+  promptKind?: PromptKind | string | null;
+  modelReferenceUrl?: string | null;
 };
 
 export async function submitOpenAiBatch(args: {
@@ -44,7 +47,7 @@ export async function submitOpenAiBatch(args: {
   // it under the JSON `images` array the edits endpoint requires (each entry is
   // an object { image_url }, even for a single reference).
   const lines = await mapConcurrent(args.images, 5, async (image) => {
-    const referenceUrls = referenceUrlsForImage(image);
+    const referenceUrls = generationInputUrlsForImage(image);
     if (!referenceUrls.length)
       throw new Error(
         "Product has no Shopify supplier image to use as reference.",
