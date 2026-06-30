@@ -60,6 +60,7 @@ import type * as shopify_graphql from "../shopify/graphql.js";
 import type * as shopify_media from "../shopify/media.js";
 import type * as shopify_productMapping from "../shopify/productMapping.js";
 import type * as shops from "../shops.js";
+import type * as userAccess from "../userAccess.js";
 import type * as users from "../users.js";
 
 import type {
@@ -121,6 +122,7 @@ declare const fullApi: ApiFromModules<{
   "shopify/media": typeof shopify_media;
   "shopify/productMapping": typeof shopify_productMapping;
   shops: typeof shops;
+  userAccess: typeof userAccess;
   users: typeof users;
 }>;
 

@@ -99,16 +99,19 @@ the production `VITE_CONVEX_URL` baked in.
 
 ## 5. First login
 
-The app uses Convex Auth with email/password and permits exactly one admin
-identity. Set `AUTH_ADMIN_EMAIL` to your email and `AUTH_SETUP_SECRET` to a long,
-random one-time value in the Convex production environment. On first visit go
-to `/login` and register with that email and setup secret. The profile is
-created with `role: "admin"`. Configure prompt templates from the Prompts page
-before launching image generation.
+The app uses Convex Auth with email/password. Set `AUTH_ADMIN_EMAIL` to your
+email and `AUTH_SETUP_SECRET` to a long, random one-time value in the Convex
+production environment. On first visit, go to `/login` and register with that
+email plus the setup secret. The profile is created as the approved
+`role: "admin"` account.
 
-After the first account exists, remove `AUTH_SETUP_SECRET` from the Convex
-production environment. The existing admin can still sign in, while further
-registration attempts are rejected server-side.
+After the admin exists, remove `AUTH_SETUP_SECRET` from the Convex production
+environment. Later signup requests create `role: "user"` accounts with
+`approvalStatus: "pending"`; approve them by setting `approvalStatus` to
+`"approved"` in the Convex dashboard.
+
+Configure prompt templates from the Prompts page before launching image
+generation.
 
 ## 6. Production hardening
 

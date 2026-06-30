@@ -17,10 +17,7 @@ export const list = query({
   handler: async (ctx) => {
     const userId = await requireUserId(ctx);
     const user = await ctx.db.get(userId);
-    const shops = await ctx.db
-      .query("shops")
-      .withIndex("by_created_by_user", (q) => q.eq("createdByUserId", userId))
-      .collect();
+    const shops = await ctx.db.query("shops").collect();
     const activeShopId = user?.activeShopId ?? shops[0]?._id ?? null;
     const rows = shops.map((shop) => publicShop(shop, activeShopId));
     if (!rows.length) {
@@ -63,10 +60,7 @@ export const connect = mutation({
     }
 
     const now = Date.now();
-    const existing = await ctx.db
-      .query("shops")
-      .withIndex("by_created_by_user_and_domain", (q) => q.eq("createdByUserId", userId).eq("domain", domain))
-      .unique();
+    const existing = await ctx.db.query("shops").withIndex("by_domain", (q) => q.eq("domain", domain)).unique();
 
     const payload = {
       domain,
@@ -108,7 +102,7 @@ export const setActive = mutation({
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
     const shop = await ctx.db.get(args.shopId);
-    if (!shop || shop.createdByUserId !== userId) throw new Error("Shop not found.");
+    if (!shop) throw new Error("Shop not found.");
     await ctx.db.patch(userId, { activeShopId: args.shopId, updatedAt: Date.now() });
     return args.shopId;
   }

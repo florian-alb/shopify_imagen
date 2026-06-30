@@ -105,8 +105,11 @@ Ouvre l'URL affichée par Vite, généralement **http://localhost:5173**.
 | `VITE_CONVEX_URL`, `VITE_CONVEX_SITE_URL` | URLs Convex côté client (seules variables `VITE_` exposées au navigateur)         |
 | `AUTH_SECRET`, `AUTH_URL`, `SITE_URL`     | config Convex Auth                                                                |
 | `JWT_PRIVATE_KEY`, `JWKS`                 | clés générées par la commande de setup Convex Auth                                |
-| `AUTH_ADMIN_EMAIL`                        | seule adresse autorisée à créer une session                                       |
-| `AUTH_SETUP_SECRET`                       | secret requis pour le premier compte ; à supprimer de Convex après initialisation |
+| `AUTH_ADMIN_EMAIL`                        | adresse du premier compte admin approuvé                                          |
+| `AUTH_SETUP_SECRET`                       | secret requis pour créer le premier admin                                         |
+
+Les inscriptions suivantes créent des comptes `users.approvalStatus = "pending"`.
+Un admin doit passer ce champ à `"approved"` dans le dashboard Convex pour autoriser l'accès.
 
 ### OpenAI Images
 | Variable                           | Défaut                   |
