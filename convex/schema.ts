@@ -69,6 +69,24 @@ const reviewStatus = v.union(
 );
 const backgroundMode = v.union(v.literal("solid"), v.literal("transparent"));
 const backgroundRemovalProvider = v.union(v.literal("fal_ideogram"), v.null());
+const promptKind = v.union(
+  v.literal("product_only"),
+  v.literal("product_detail"),
+  v.literal("product_scene"),
+  v.literal("human_model"),
+  v.literal("studio_product"),
+  v.literal("detail_product"),
+  v.literal("worn_model"),
+  v.literal("lifestyle_model"),
+);
+
+const modelReference = v.object({
+  storageId: v.id("_storage"),
+  fileName: v.optional(v.string()),
+  contentType: v.optional(v.string()),
+  size: v.optional(v.number()),
+  updatedAt: v.number(),
+});
 
 export default defineSchema({
   ...authTables,
@@ -180,11 +198,11 @@ export default defineSchema({
       filterFields: ["shopId", "generationStatus"],
     }),
   promptTemplates: defineTable({
-    shopId: v.optional(v.id("shops")),
-    imageType: v.string(),
-    label: v.string(),
-    content: v.string(),
-    defaultContent: v.string(),
+  shopId: v.optional(v.id("shops")),
+  imageType: v.string(),
+  label: v.string(),
+  content: v.string(),
+  defaultContent: v.string(),
     isActive: v.boolean(),
     // When true, this template is pre-checked in the generation chooser.
     // Optional so pre-existing rows default to non-preset.
@@ -194,6 +212,7 @@ export default defineSchema({
     position: v.optional(v.number()),
     useVibeAnalysis: v.optional(v.boolean()),
     referenceImageCount: v.optional(v.number()),
+    promptKind: v.optional(promptKind),
     removeBackground: v.optional(v.boolean()),
     backgroundRemovalProvider: v.optional(backgroundRemovalProvider),
     backgroundMode: v.optional(backgroundMode),
@@ -208,10 +227,13 @@ export default defineSchema({
   promptSettings: defineTable({
     shopId: v.optional(v.id("shops")),
     masterPrompt: v.string(),
-    defaultMasterPrompt: v.string(),
-    createdAt: v.number(),
-    updatedAt: v.number(),
-  }).index("by_shop", ["shopId"]),
+    defaultMasterPrompt: v.optional(v.string()),
+    modelReferences: v.optional(v.record(v.string(), modelReference)),
+  // Legacy optional field kept so existing rows remain readable during rollout.
+  modelReferenceUrls: v.optional(v.record(v.string(), v.string())),
+  createdAt: v.number(),
+  updatedAt: v.number(),
+}).index("by_shop", ["shopId"]),
   generationJobs: defineTable({
     shopId: v.optional(v.id("shops")),
     status: jobStatus,
@@ -266,12 +288,16 @@ export default defineSchema({
     imageModel: v.optional(v.string()),
     promptUsed: v.string(),
     finalPromptUsed: v.optional(v.string()),
+    promptKind: v.optional(promptKind),
     useVibeAnalysis: v.optional(v.boolean()),
     vibeUsed: v.optional(v.union(v.string(), v.null())),
     referenceImageCount: v.optional(v.number()),
     sourceImageUrls: v.optional(v.array(v.string())),
     sourceImageUrl: v.optional(v.union(v.string(), v.null())),
     sourceImageUrl2: v.optional(v.union(v.string(), v.null())),
+    modelReferenceKey: v.optional(v.union(v.string(), v.null())),
+    modelReferenceStorageId: v.optional(v.union(v.id("_storage"), v.null())),
+    modelReferenceUrl: v.optional(v.union(v.string(), v.null())),
     generatedImageUrl: v.optional(v.union(v.string(), v.null())),
     storageUrl: v.optional(v.union(v.string(), v.null())),
     backgroundRemovalInputUrl: v.optional(v.union(v.string(), v.null())),

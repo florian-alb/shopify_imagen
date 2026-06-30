@@ -8,9 +8,7 @@ import { requireUserId } from "./authz";
 import { buildSeoImageFilename } from "./lib";
 import { estimateCostUsd } from "./pricing";
 import {
-  providerIdsFromResponse,
-} from "./generation/providerIds";
-import {
+  generationInputUrlsForImage,
   referenceUrlsForImage,
   type BatchPollResult,
 } from "./generation/batchTypes";
@@ -45,16 +43,12 @@ import { applyBackgroundPostProcessing } from "./generation/backgroundPostProces
 import { BackgroundRemovalError } from "./generation/backgroundRemoval";
 import { optimizeForStorage } from "./generation/images";
 import {
-  env,
   intEnv,
   log,
   sleep,
   waitFromRateLimitMessage,
 } from "./generation/runtime";
-import {
-  deleteFromR2,
-  uploadToR2,
-} from "./generation/storage";
+import { deleteFromR2, uploadToR2 } from "./generation/storage";
 import type { GeneratedImage } from "./generation/types";
 import {
   ensureProductVibe,
@@ -84,6 +78,24 @@ async function scheduleBatchPoll(
   });
 }
 
+async function withResolvedModelReferenceUrl<
+  T extends {
+    modelReferenceStorageId?: Id<"_storage"> | null;
+    modelReferenceUrl?: string | null;
+  },
+>(ctx: Pick<ActionCtx, "storage">, image: T): Promise<T> {
+  if (image.modelReferenceUrl?.trim() || !image.modelReferenceStorageId) {
+    return image;
+  }
+  const modelReferenceUrl = await ctx.storage.getUrl(
+    image.modelReferenceStorageId,
+  );
+  return {
+    ...image,
+    modelReferenceUrl,
+  };
+}
+
 export const submitBatch = internalAction({
   args: { jobId: v.id("generationJobs") },
   handler: async (ctx, args) => {
@@ -98,7 +110,11 @@ export const submitBatch = internalAction({
     const allImages = (await ctx.runQuery(internal.jobs.imagesForJob, {
       jobId: args.jobId,
     })) as Doc<"generatedImages">[];
-    const images = allImages.filter((img) => img.status === "queued");
+    const images = await Promise.all(
+      allImages
+        .filter((img) => img.status === "queued")
+        .map((image) => withResolvedModelReferenceUrl(ctx, image)),
+    );
     if (!images.length) {
       await ctx.runMutation(internal.jobs.finishJobIfDone, {
         jobId: args.jobId,
@@ -108,9 +124,7 @@ export const submitBatch = internalAction({
     const provider = images[0].imageProvider === "gemini" ? "gemini" : "openai";
     const model =
       images[0].imageModel ??
-      (provider === "gemini"
-        ? "gemini-3-pro-image-preview"
-        : "gpt-image-2-2026-04-21");
+      (provider === "gemini" ? "gemini-3-pro-image" : "gpt-image-2");
 
     // Vibe analysis once per distinct product that has it enabled, then bake
     // scene context and multi-reference guidance into those prompts only.
@@ -497,7 +511,7 @@ export const cancelJob = action({
       batchStatus =
         provider === "gemini"
           ? await cancelGeminiBatch(job.batchId)
-        : await cancelOpenAiBatchClient(job.batchId);
+          : await cancelOpenAiBatchClient(job.batchId);
       await ctx.runMutation(internal.jobs.setBatchStatus, {
         jobId: job._id,
         batchStatus,
@@ -540,10 +554,11 @@ export const processJob = internalAction({
     let done = 0;
     let failed = 0;
     while (true) {
-      const image = (await ctx.runQuery(internal.jobs.nextQueuedImage, {
+      const queuedImage = (await ctx.runQuery(internal.jobs.nextQueuedImage, {
         jobId: args.jobId,
       })) as Doc<"generatedImages"> | null;
-      if (!image) break;
+      if (!queuedImage) break;
+      const image = await withResolvedModelReferenceUrl(ctx, queuedImage);
 
       const imageProvider =
         image.imageProvider === "gemini" ? "gemini" : "openai";
@@ -605,6 +620,7 @@ export const processJob = internalAction({
           };
         } else {
           const sourceImageUrls = referenceUrlsForImage(image);
+          const generationInputUrls = generationInputUrlsForImage(image);
           if (!sourceImageUrls.length)
             throw new Error(
               "Product has no Shopify supplier image to use as reference.",
@@ -637,17 +653,17 @@ export const processJob = internalAction({
                 imageProvider === "gemini"
                   ? await generateWithGemini({
                       prompt,
-                      sourceImageUrl: sourceImageUrls[0],
-                      sourceImageUrl2: sourceImageUrls[1] ?? null,
-                      sourceImageUrls,
+                      sourceImageUrl: generationInputUrls[0],
+                      sourceImageUrl2: generationInputUrls[1] ?? null,
+                      sourceImageUrls: generationInputUrls,
                       model: image.imageModel,
                       settings,
                     })
                   : await generateWithOpenAi({
                       prompt,
-                      sourceImageUrl: sourceImageUrls[0],
-                      sourceImageUrl2: sourceImageUrls[1] ?? null,
-                      sourceImageUrls,
+                      sourceImageUrl: generationInputUrls[0],
+                      sourceImageUrl2: generationInputUrls[1] ?? null,
+                      sourceImageUrls: generationInputUrls,
                       model: image.imageModel,
                       settings,
                     });
