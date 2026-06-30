@@ -66,6 +66,15 @@ npx convex dev
 
 > 🔑 **Indispensable :** ajoute aussi les secrets serveur (`OPENAI_API_KEY`, `GEMINI_API_KEY`, `SHOPIFY_*`, `R2_*`) à **l'environnement du déploiement Convex** (dashboard Convex → Settings → Environment Variables), pas seulement dans `.env`. Les actions Convex lisent leurs clés là, jamais depuis le navigateur.
 
+### 🧪 Convex dev vs production
+
+Ce projet utilise **deux projets Convex séparés** pour ne jamais faire tourner du développement local sur la base de données de production :
+
+- **Dev** (local, `npx convex dev`) — ses identifiants de connexion (`CONVEX_DEPLOYMENT`, `VITE_CONVEX_URL`, `VITE_CONVEX_SITE_URL`) vivent dans **`.env.local`**, écrit automatiquement par la CLI Convex et ignoré par git. Ne mets jamais ces clés dans `.env`.
+- **Production** (Vercel) — son `CONVEX_DEPLOY_KEY` est configuré uniquement dans les variables d'environnement Vercel, jamais en local (voir [DEPLOYMENT.md](DEPLOYMENT.md)).
+- `.env` ne contient donc plus que les secrets serveur partagés (OpenAI, Gemini, Shopify, R2, auth) que tu pousses toi-même avec `npx convex env set` sur le déploiement actif.
+- Par défaut, le projet Convex dev **n'a pas** les clés `SHOPIFY_*` / `R2_*` de prod — les actions Shopify/R2 échoueront tant que tu n'y ajoutes pas tes propres valeurs (idéalement une boutique/bucket de test). C'est volontaire pour éviter qu'un test local ne pousse une image sur la vraie boutique Shopify.
+
 ---
 
 ## ▶️ Lancer le projet
@@ -91,7 +100,8 @@ Ouvre l'URL affichée par Vite, généralement **http://localhost:5173**.
 ### Convex & Auth
 | Variable                                  | Rôle                                                                              |
 | ----------------------------------------- | --------------------------------------------------------------------------------- |
-| `CONVEX_DEPLOYMENT`, `CONVEX_DEPLOY_KEY`  | déploiement Convex (auto-renseigné par `convex dev`)                              |
+| `CONVEX_DEPLOYMENT`                       | déploiement Convex dev actif, **auto-écrit dans `.env.local`** par `convex dev`   |
+| `CONVEX_DEPLOY_KEY`                       | clé de déploiement (CI/Vercel uniquement, jamais en local)                        |
 | `VITE_CONVEX_URL`, `VITE_CONVEX_SITE_URL` | URLs Convex côté client (seules variables `VITE_` exposées au navigateur)         |
 | `AUTH_SECRET`, `AUTH_URL`, `SITE_URL`     | config Convex Auth                                                                |
 | `JWT_PRIVATE_KEY`, `JWKS`                 | clés générées par la commande de setup Convex Auth                                |
