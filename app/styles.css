@@ -450,6 +450,196 @@
   background: var(--studio-card-bg);
 }
 
+.retouch-shell {
+  --retouch-blue: #3a6ea5;
+  --retouch-rose: #ff5c8a;
+  --retouch-graphite: #222426;
+  --retouch-line: #d9ded8;
+  display: grid;
+  max-height: calc(100vh - 2rem);
+  background:
+    linear-gradient(180deg, color-mix(in oklch, var(--card) 94%, white 6%), var(--background)),
+    var(--background);
+}
+
+.retouch-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.retouch-size {
+  flex: none;
+  border: 1px solid var(--retouch-line);
+  border-radius: 999px;
+  padding: 0.25rem 0.55rem;
+  color: var(--muted-foreground);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.retouch-layout {
+  display: grid;
+  grid-template-columns: 17rem minmax(0, 1fr);
+  min-height: 0;
+}
+
+.retouch-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-height: 0;
+  padding: 1rem;
+  border-right: 1px solid var(--border);
+  background: color-mix(in oklch, var(--card) 82%, var(--background) 18%);
+}
+
+.retouch-tool-group {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.retouch-color-input {
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 0.45rem;
+  background: transparent;
+}
+
+.retouch-hex-input {
+  min-width: 0;
+  width: 100%;
+  height: 2.25rem;
+  border: 1px solid var(--border);
+  border-radius: 0.45rem;
+  padding: 0 0.65rem;
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.retouch-swatch {
+  aspect-ratio: 1;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.65);
+}
+
+.retouch-swatch:focus-visible,
+.retouch-color-input:focus-visible,
+.retouch-hex-input:focus-visible,
+.retouch-range-row input:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.retouch-range-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 3.25rem;
+  align-items: center;
+  gap: 0.6rem;
+  color: var(--muted-foreground);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.retouch-range-row input {
+  width: 100%;
+  accent-color: var(--retouch-blue);
+}
+
+.retouch-meter {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  border: 1px solid color-mix(in oklch, var(--retouch-blue) 35%, var(--border));
+  border-radius: 0.5rem;
+  padding: 0.65rem;
+  color: var(--muted-foreground);
+  font-size: 0.78rem;
+  line-height: 1.35;
+  background: color-mix(in oklch, var(--retouch-blue) 8%, transparent);
+}
+
+.retouch-stage {
+  position: relative;
+  min-width: 0;
+  min-height: 30rem;
+  background:
+    linear-gradient(90deg, color-mix(in oklch, var(--foreground) 4%, transparent) 1px, transparent 1px),
+    linear-gradient(color-mix(in oklch, var(--foreground) 4%, transparent) 1px, transparent 1px),
+    #f8faf8;
+  background-size: 28px 28px;
+}
+
+.retouch-canvas-scroll {
+  display: grid;
+  place-items: start center;
+  height: min(64vh, 48rem);
+  overflow: auto;
+  padding: 1rem;
+}
+
+.retouch-canvas {
+  max-width: none;
+  height: auto;
+  border: 1px solid var(--retouch-line);
+  border-radius: 0.35rem;
+  background: white;
+  box-shadow: 0 12px 34px rgb(34 36 38 / 0.16);
+  touch-action: none;
+}
+
+.retouch-canvas[data-tool="brush"] {
+  cursor: crosshair;
+}
+
+.retouch-canvas[data-tool="picker"] {
+  cursor: copy;
+}
+
+.retouch-loading {
+  position: absolute;
+  inset: 1rem;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  gap: 0.5rem;
+  border: 1px dashed var(--border);
+  border-radius: 0.5rem;
+  background: color-mix(in oklch, var(--background) 78%, transparent);
+  color: var(--muted-foreground);
+  font-size: 0.86rem;
+}
+
+.retouch-footer {
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.85rem 1rem 1rem;
+  border-top: 1px solid var(--border);
+}
+
+@media (width < 900px) {
+  .retouch-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .retouch-tools {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .retouch-canvas-scroll {
+    height: min(56vh, 38rem);
+  }
+}
+
 :root:not(.dark) .border-white\/10 {
   border-color: var(--border) !important;
 }

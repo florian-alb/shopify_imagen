@@ -51,6 +51,7 @@ import type * as promptRuntime from "../promptRuntime.js";
 import type * as prompts from "../prompts.js";
 import type * as prompts_access from "../prompts/access.js";
 import type * as prompts_repository from "../prompts/repository.js";
+import type * as retouch from "../retouch.js";
 import type * as settings from "../settings.js";
 import type * as settings_scope from "../settings/scope.js";
 import type * as shared_productWorkflow from "../shared/productWorkflow.js";
@@ -114,6 +115,7 @@ declare const fullApi: ApiFromModules<{
   prompts: typeof prompts;
   "prompts/access": typeof prompts_access;
   "prompts/repository": typeof prompts_repository;
+  retouch: typeof retouch;
   settings: typeof settings;
   "settings/scope": typeof settings_scope;
   "shared/productWorkflow": typeof shared_productWorkflow;

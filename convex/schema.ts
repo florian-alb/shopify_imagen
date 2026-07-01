@@ -303,6 +303,10 @@ export default defineSchema({
     modelReferenceUrl: v.optional(v.union(v.string(), v.null())),
     generatedImageUrl: v.optional(v.union(v.string(), v.null())),
     storageUrl: v.optional(v.union(v.string(), v.null())),
+    retouchSourceImageId: v.optional(v.union(v.id("generatedImages"), v.null())),
+    retouchTool: v.optional(v.union(v.literal("manual_brush"), v.null())),
+    retouchedAt: v.optional(v.number()),
+    retouchedByUserId: v.optional(v.id("users")),
     backgroundRemovalInputUrl: v.optional(v.union(v.string(), v.null())),
     backgroundRemovalInputContentType: v.optional(
       v.union(v.string(), v.null()),
@@ -335,6 +339,7 @@ export default defineSchema({
     .index("by_product", ["productId"])
     .index("by_job", ["jobId"])
     .index("by_status", ["status"])
+    .index("by_review_status_and_reviewed_at", ["reviewStatus", "reviewedAt"])
     .index("by_shop_and_product", ["shopId", "productId"])
     .index("by_shop_and_job", ["shopId", "jobId"])
     .index("by_shop_and_status", ["shopId", "status"]),
