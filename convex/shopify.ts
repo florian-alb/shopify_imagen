@@ -1,6 +1,6 @@
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
-import { action, internalMutation, internalQuery } from "./_generated/server";
+import { action, internalAction, internalMutation, internalQuery } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireUserId } from "./authz";
 import { refreshProductSummary } from "./products";
@@ -28,6 +28,22 @@ type ProductsResponse = {
     nodes: Array<any>;
   };
 };
+
+const REJECTED_IMAGE_RETENTION_MS = 5 * 24 * 60 * 60 * 1000;
+const REJECTED_IMAGE_CLEANUP_BATCH_SIZE = 50;
+
+function generatedImageAssetUrls(image: Doc<"generatedImages">) {
+  return Array.from(
+    new Set(
+      [
+        image.storageUrl,
+        image.generatedImageUrl,
+        image.backgroundRemovalInputUrl,
+        image.transparentCutoutUrl,
+      ].filter((url): url is string => Boolean(url)),
+    ),
+  );
+}
 
 export const syncProducts = action({
   args: { limit: v.optional(v.number()) },
@@ -381,8 +397,71 @@ export const deleteImageRecord = internalMutation({
   }
 });
 
-// Deletes a generated image everywhere: the Shopify media (if pushed), the R2
-// object backing storageUrl, and the Convex record.
+export const staleRejectedImagesForCleanup = internalQuery({
+  args: {
+    cutoff: v.number(),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const limit = Math.max(
+      1,
+      Math.min(args.limit ?? REJECTED_IMAGE_CLEANUP_BATCH_SIZE, REJECTED_IMAGE_CLEANUP_BATCH_SIZE),
+    );
+    const images = await ctx.db
+      .query("generatedImages")
+      .withIndex("by_review_status_and_reviewed_at", (q) =>
+        q.eq("reviewStatus", "rejected").lte("reviewedAt", args.cutoff),
+      )
+      .take(limit);
+
+    return images.filter((image) => (image.reviewedAt ?? image.updatedAt) <= args.cutoff);
+  },
+});
+
+export const cleanupStaleRejectedImages = internalAction({
+  args: {},
+  handler: async (ctx): Promise<{ scanned: number; deleted: number; failed: number; cutoff: number }> => {
+    const cutoff = Date.now() - REJECTED_IMAGE_RETENTION_MS;
+    const images = (await ctx.runQuery(internal.shopify.staleRejectedImagesForCleanup, {
+      cutoff,
+      limit: REJECTED_IMAGE_CLEANUP_BATCH_SIZE,
+    })) as Doc<"generatedImages">[];
+    let deleted = 0;
+    let failed = 0;
+
+    for (const image of images) {
+      try {
+        if (image.reviewStatus !== "rejected" || (image.reviewedAt ?? image.updatedAt) > cutoff) {
+          continue;
+        }
+
+        for (const storageUrl of generatedImageAssetUrls(image)) {
+          await ctx.runAction(internal.generation.deleteFromStorage, { storageUrl });
+        }
+
+        // Retention cleanup must not delete the merchant's Shopify media.
+        await ctx.runMutation(internal.shopify.deleteImageRecord, { imageId: image._id });
+        deleted += 1;
+      } catch (error) {
+        failed += 1;
+        console.error(
+          `Failed to cleanup rejected image ${image._id}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+
+    if (images.length === REJECTED_IMAGE_CLEANUP_BATCH_SIZE && failed === 0) {
+      await ctx.scheduler.runAfter(0, internal.shopify.cleanupStaleRejectedImages, {});
+    }
+
+    return { scanned: images.length, deleted, failed, cutoff };
+  },
+});
+
+// Deletes a generated image everywhere: the Shopify media (if pushed), app-owned
+// generated R2 assets, and the Convex record.
 export const deleteImage = action({
   args: { imageId: v.id("generatedImages") },
   handler: async (ctx, args): Promise<{ deleted: true }> => {
@@ -410,8 +489,8 @@ export const deleteImage = action({
       }
     }
 
-    if (image.storageUrl) {
-      await ctx.runAction(internal.generation.deleteFromStorage, { storageUrl: image.storageUrl });
+    for (const storageUrl of generatedImageAssetUrls(image)) {
+      await ctx.runAction(internal.generation.deleteFromStorage, { storageUrl });
     }
 
     await ctx.runMutation(internal.shopify.deleteImageRecord, { imageId: args.imageId });

@@ -753,6 +753,128 @@ export const markImagePromptPrepared = internalMutation({
   },
 });
 
+export const generateRetouchUploadUrl = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await requireUserId(ctx);
+    await ensureActiveShop(ctx, userId);
+    return ctx.storage.generateUploadUrl();
+  },
+});
+
+export const retouchSourceForSave = internalQuery({
+  args: { imageId: v.id("generatedImages") },
+  handler: async (ctx, args) => {
+    const userId = await requireUserId(ctx);
+    const scope = await getActiveShopScope(ctx, userId);
+    const image = await ctx.db.get(args.imageId);
+    if (
+      !image ||
+      !shopMatchesScope(image, scope) ||
+      !image.storageUrl ||
+      (image.status !== "generated" && image.status !== "uploaded")
+    ) {
+      return null;
+    }
+    return image;
+  },
+});
+
+export const insertRetouchedImage = internalMutation({
+  args: {
+    sourceImageId: v.id("generatedImages"),
+    storageUrl: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const userId = await requireUserId(ctx);
+    const scope = await getActiveShopScope(ctx, userId);
+    const source = await ctx.db.get(args.sourceImageId);
+    if (
+      !source ||
+      !shopMatchesScope(source, scope) ||
+      !source.storageUrl ||
+      (source.status !== "generated" && source.status !== "uploaded")
+    ) {
+      throw new Error("Source image not found.");
+    }
+    if (!args.storageUrl.startsWith("http")) {
+      throw new Error("Retouched image URL is invalid.");
+    }
+
+    const now = Date.now();
+    const imageId = await ctx.db.insert("generatedImages", {
+      ...(source.shopId ? { shopId: source.shopId } : {}),
+      productId: source.productId,
+      jobId: source.jobId,
+      imageType: source.imageType,
+      ...(source.imageProvider ? { imageProvider: source.imageProvider } : {}),
+      ...(source.imageModel !== undefined
+        ? { imageModel: source.imageModel }
+        : {}),
+      promptUsed: source.promptUsed,
+      finalPromptUsed: source.finalPromptUsed ?? source.promptUsed,
+      ...(source.promptKind ? { promptKind: source.promptKind } : {}),
+      ...(source.useVibeAnalysis !== undefined
+        ? { useVibeAnalysis: source.useVibeAnalysis }
+        : {}),
+      ...(source.vibeUsed !== undefined ? { vibeUsed: source.vibeUsed } : {}),
+      ...(source.referenceImageCount !== undefined
+        ? { referenceImageCount: source.referenceImageCount }
+        : {}),
+      ...(source.sourceImageUrls !== undefined
+        ? { sourceImageUrls: source.sourceImageUrls }
+        : {}),
+      ...(source.sourceImageUrl !== undefined
+        ? { sourceImageUrl: source.sourceImageUrl }
+        : {}),
+      ...(source.sourceImageUrl2 !== undefined
+        ? { sourceImageUrl2: source.sourceImageUrl2 }
+        : {}),
+      ...(source.modelReferenceKey !== undefined
+        ? { modelReferenceKey: source.modelReferenceKey }
+        : {}),
+      ...(source.modelReferenceStorageId !== undefined
+        ? { modelReferenceStorageId: source.modelReferenceStorageId }
+        : {}),
+      ...(source.modelReferenceUrl !== undefined
+        ? { modelReferenceUrl: source.modelReferenceUrl }
+        : {}),
+      generatedImageUrl: args.storageUrl,
+      storageUrl: args.storageUrl,
+      retouchSourceImageId: source._id,
+      retouchTool: "manual_brush",
+      retouchedAt: now,
+      retouchedByUserId: userId,
+      ...(source.removeBackground !== undefined
+        ? { removeBackground: source.removeBackground }
+        : {}),
+      ...(source.backgroundRemovalProvider !== undefined
+        ? { backgroundRemovalProvider: source.backgroundRemovalProvider }
+        : {}),
+      ...(source.backgroundMode !== undefined
+        ? { backgroundMode: source.backgroundMode }
+        : {}),
+      ...(source.backgroundColor !== undefined
+        ? { backgroundColor: source.backgroundColor }
+        : {}),
+      ...(source.backgroundShadow !== undefined
+        ? { backgroundShadow: source.backgroundShadow }
+        : {}),
+      transparentCutoutUrl: null,
+      status: "generated",
+      reviewStatus: "pending",
+      shopifyMediaId: null,
+      error: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await refreshJobSummary(ctx, source.jobId);
+    await refreshProductSummary(ctx, source.productId);
+    return imageId;
+  },
+});
+
 export const reviewImages = mutation({
   args: {
     imageIds: v.array(v.id("generatedImages")),
