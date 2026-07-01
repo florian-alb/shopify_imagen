@@ -9,6 +9,7 @@ import {
   Eye,
   Images,
   Loader2,
+  Paintbrush,
   RefreshCw,
   RotateCcw,
   Send,
@@ -17,6 +18,10 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import {
+  ImageRetouchDialog,
+  type RetouchTarget,
+} from "@/components/image-retouch-dialog";
 import { BusyIcon, EmptyState, PageHeader, StateBadge } from "@/components/page";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
@@ -135,10 +140,13 @@ function JobDetailPage() {
   const shopInfo = useQuery(api.settings.shopInfo);
   const retryJob = useMutation(api.jobs.retry);
   const reviewImages = useMutation(api.jobs.reviewImages);
+  const generateRetouchUploadUrl = useMutation(api.jobs.generateRetouchUploadUrl);
   const createJob = useMutation(api.jobs.create);
   const pollJob = useAction(api.generation.pollJob);
   const cancelJob = useAction(api.generation.cancelJob);
   const pushImages = useAction(api.shopify.pushProductImages);
+  const prepareRetouchSource = useAction(api.retouch.prepareRetouchSource);
+  const saveRetouchedImage = useAction(api.retouch.saveRetouchedImage);
 const [filter, setFilter] = useState<ReviewFilter>("all");
 const [polling, setPolling] = useState(false);
 const [cancelling, setCancelling] = useState(false);
@@ -148,6 +156,8 @@ const [reviewing, setReviewing] = useState(false);
   const [regenerationTarget, setRegenerationTarget] = useState<Doc<"generatedImages"> | null>(null);
   const [regenerationInstructions, setRegenerationInstructions] = useState("");
   const [previewId, setPreviewId] = useState<Id<"generatedImages"> | null>(null);
+  const [retouchTarget, setRetouchTarget] = useState<RetouchTarget | null>(null);
+  const [retouchSaving, setRetouchSaving] = useState(false);
   const [pushOpen, setPushOpen] = useState(false);
   const [replaceExisting, setReplaceExisting] = useState(false);
   const [pushing, setPushing] = useState(false);
@@ -263,6 +273,56 @@ async function setReview(imageIds: Id<"generatedImages">[], reviewStatus: "appro
     setPreviewId(null);
     setRegenerationInstructions("");
     setRegenerationTarget(image);
+  }
+
+  function openRetouch(image: Doc<"generatedImages">) {
+    if (!image.storageUrl) return;
+    setRetouchTarget({
+      id: image._id,
+      url: image.storageUrl,
+      label: image.imageType,
+    });
+  }
+
+  async function saveRetouch(target: RetouchTarget, blob: Blob) {
+    setRetouchSaving(true);
+    try {
+      const uploadUrl = await generateRetouchUploadUrl({});
+      const upload = await fetch(uploadUrl, {
+        method: "POST",
+        headers: { "Content-Type": blob.type || "image/png" },
+        body: blob,
+      });
+      if (!upload.ok) {
+        throw new Error(`Upload failed with status ${upload.status}.`);
+      }
+
+      const payload = (await upload.json()) as { storageId?: string };
+      if (!payload.storageId) {
+        throw new Error("Upload response did not include a storage id.");
+      }
+
+      const retouchedImageId = await saveRetouchedImage({
+        sourceImageId: target.id,
+        storageId: payload.storageId as Id<"_storage">,
+        contentType: blob.type || "image/png",
+      });
+      setRetouchTarget(null);
+      setPreviewId(retouchedImageId);
+      toast.success("Version retouchee enregistree", {
+        description: "Elle est ajoutee en attente de validation.",
+      });
+    } catch (retouchError) {
+      toast.error("Retouche non enregistree", {
+        description:
+          retouchError instanceof Error
+            ? retouchError.message
+            : String(retouchError),
+      });
+      throw retouchError;
+    } finally {
+      setRetouchSaving(false);
+    }
   }
 
   async function regenerate() {
@@ -437,11 +497,12 @@ async function setReview(imageIds: Id<"generatedImages">[], reviewStatus: "appro
           reviewing={reviewing}
           retrying={retrying}
           regeneratingId={regeneratingId}
-          onPreview={setPreviewId}
-          onReview={(imageIds, reviewStatus) => void setReview(imageIds, reviewStatus)}
-          onRegenerate={openRegeneration}
-          onRetry={() => void handleRetryJob()}
-        />
+              onPreview={setPreviewId}
+              onReview={(imageIds, reviewStatus) => void setReview(imageIds, reviewStatus)}
+              onRegenerate={openRegeneration}
+              onRetouch={openRetouch}
+              onRetry={() => void handleRetryJob()}
+            />
           ))}
         </section>
       ) : (
@@ -523,6 +584,19 @@ async function setReview(imageIds: Id<"generatedImages">[], reviewStatus: "appro
         onMove={movePreview}
         onReview={(reviewStatus) => previewImage && void setReview([previewImage._id], reviewStatus)}
         onRegenerate={() => previewImage && openRegeneration(previewImage)}
+        onRetouch={() => previewImage && openRetouch(previewImage)}
+      />
+
+      <ImageRetouchDialog
+        target={retouchTarget}
+        saving={retouchSaving}
+        onOpenChange={(open) => {
+          if (!open && !retouchSaving) setRetouchTarget(null);
+        }}
+        onPrepareSource={(target) =>
+          prepareRetouchSource({ sourceImageId: target.id })
+        }
+        onSave={saveRetouch}
       />
 
       <RegenerateDialog
@@ -640,8 +714,9 @@ function ProductReviewCard({
  regeneratingId,
  onPreview,
  onReview,
- onRegenerate,
- onRetry
+  onRegenerate,
+  onRetouch,
+  onRetry
 }: {
  product: Doc<"products">;
  shopifyAdminUrl: string | null;
@@ -649,10 +724,11 @@ function ProductReviewCard({
  reviewing: boolean;
  retrying: boolean;
  regeneratingId: Id<"generatedImages"> | null;
- onPreview: (imageId: Id<"generatedImages">) => void;
- onReview: (imageIds: Id<"generatedImages">[], reviewStatus: "approved" | "rejected") => void;
- onRegenerate: (image: Doc<"generatedImages">) => void;
- onRetry: () => void;
+  onPreview: (imageId: Id<"generatedImages">) => void;
+  onReview: (imageIds: Id<"generatedImages">[], reviewStatus: "approved" | "rejected") => void;
+  onRegenerate: (image: Doc<"generatedImages">) => void;
+  onRetouch: (image: Doc<"generatedImages">) => void;
+  onRetry: () => void;
 }) {
   const reviewable = images.filter(isReviewable);
   const approved = reviewable.filter((image) => getReviewStatus(image) === "approved").length;
@@ -705,6 +781,7 @@ function ProductReviewCard({
               onPreview={() => onPreview(image._id)}
               onReview={(reviewStatus) => onReview([image._id], reviewStatus)}
               onRegenerate={() => onRegenerate(image)}
+              onRetouch={() => onRetouch(image)}
               onRetry={onRetry}
             />
           ))}
@@ -722,6 +799,7 @@ function ReviewTile({
   onPreview,
   onReview,
   onRegenerate,
+  onRetouch,
   onRetry
 }: {
   image: Doc<"generatedImages">;
@@ -731,6 +809,7 @@ function ReviewTile({
   onPreview: () => void;
   onReview: (reviewStatus: "approved" | "rejected") => void;
   onRegenerate: () => void;
+  onRetouch: () => void;
   onRetry: () => void;
 }) {
   const reviewable = isReviewable(image);
@@ -754,11 +833,16 @@ function ReviewTile({
         )}
       </button>
       <div className="grid gap-2 p-2">
-        <div className="flex min-w-0 items-center justify-between gap-2">
-          <p className="truncate text-sm font-medium">{image.imageType}</p>
-          <ImageStateBadge image={image} />
-        </div>
-        {image.error ? <p className="line-clamp-2 text-xs text-destructive">{image.error}</p> : null}
+      <div className="flex min-w-0 items-center justify-between gap-2">
+        <p className="truncate text-sm font-medium">{image.imageType}</p>
+        <ImageStateBadge image={image} />
+      </div>
+      {image.retouchSourceImageId ? (
+        <Badge variant="outline" className="w-fit text-[0.65rem]">
+          Retouche
+        </Badge>
+      ) : null}
+      {image.error ? <p className="line-clamp-2 text-xs text-destructive">{image.error}</p> : null}
         {image.status === "failed" ? (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -776,7 +860,7 @@ function ReviewTile({
           </Tooltip>
         ) : null}
         {reviewable ? (
-          <div className="grid grid-cols-3 gap-1">
+      <div className="grid grid-cols-4 gap-1">
             <Button
               aria-label={`Approve ${image.imageType}`}
               title="Approve"
@@ -804,10 +888,20 @@ function ReviewTile({
               size="icon-sm"
               disabled={regenerating}
               onClick={onRegenerate}
-            >
-              {regenerating ? <Loader2 className="animate-spin" /> : <RotateCcw />}
-            </Button>
-          </div>
+        >
+          {regenerating ? <Loader2 className="animate-spin" /> : <RotateCcw />}
+        </Button>
+        <Button
+          aria-label={`Retoucher ${image.imageType}`}
+          title="Retoucher"
+          variant="outline"
+          size="icon-sm"
+          disabled={!image.storageUrl}
+          onClick={onRetouch}
+        >
+          <Paintbrush />
+        </Button>
+      </div>
         ) : null}
       </div>
     </article>
@@ -834,7 +928,8 @@ function PreviewDialog({
   onClose,
   onMove,
   onReview,
-  onRegenerate
+  onRegenerate,
+  onRetouch
 }: {
   image: Doc<"generatedImages"> | null;
   index: number;
@@ -845,6 +940,7 @@ function PreviewDialog({
   onMove: (delta: number) => void;
   onReview: (reviewStatus: "approved" | "rejected") => void;
   onRegenerate: () => void;
+  onRetouch: () => void;
 }) {
   return (
     <Dialog open={image !== null} onOpenChange={(open) => !open && onClose()}>
@@ -883,6 +979,10 @@ function PreviewDialog({
               <Button variant="outline" disabled={regenerating} onClick={onRegenerate}>
                 {regenerating ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <RotateCcw data-icon="inline-start" />}
                 Regenerate
+              </Button>
+              <Button variant="outline" disabled={!image.storageUrl} onClick={onRetouch}>
+                <Paintbrush data-icon="inline-start" />
+                Retoucher
               </Button>
               <Button disabled={reviewing} onClick={() => onReview("approved")}>
                 <Check data-icon="inline-start" />

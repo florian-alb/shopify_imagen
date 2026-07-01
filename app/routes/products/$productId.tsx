@@ -9,6 +9,7 @@ import {
   ExternalLink,
   GripVertical,
   ListChecks,
+  Paintbrush,
   RefreshCw,
   Send,
   Trash2,
@@ -17,6 +18,10 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Dialog as DialogPrimitive } from "radix-ui";
+import {
+  ImageRetouchDialog,
+  type RetouchTarget,
+} from "@/components/image-retouch-dialog";
 import { BusyIcon, EmptyState, StateBadge } from "@/components/page";
 import {
   Accordion,
@@ -133,7 +138,10 @@ function ProductDetailPage() {
   const shopInfo = useQuery(api.settings.shopInfo);
   const createJob = useMutation(api.jobs.create);
   const reviewImages = useMutation(api.jobs.reviewImages);
+  const generateRetouchUploadUrl = useMutation(api.jobs.generateRetouchUploadUrl);
   const pushImages = useAction(api.shopify.pushProductImages);
+  const prepareRetouchSource = useAction(api.retouch.prepareRetouchSource);
+  const saveRetouchedImage = useAction(api.retouch.saveRetouchedImage);
   const syncProduct = useAction(api.shopify.syncProduct);
   const deleteImage = useAction(api.shopify.deleteImage);
   const reorderProductImages = useAction(api.shopify.reorderProductImages);
@@ -153,6 +161,10 @@ function ProductDetailPage() {
   } | null>(null);
   const [deleteTarget, setDeleteTarget] =
     useState<Doc<"generatedImages"> | null>(null);
+  const [retouchTarget, setRetouchTarget] = useState<RetouchTarget | null>(
+    null,
+  );
+  const [retouchSaving, setRetouchSaving] = useState(false);
   const [shopifyReorderBusy, setShopifyReorderBusy] = useState(false);
   const [dragShopifyMediaId, setDragShopifyMediaId] = useState<string | null>(
     null,
@@ -286,6 +298,46 @@ function ProductDetailPage() {
       });
     } finally {
       setReviewingImageId(null);
+    }
+  }
+
+  async function saveRetouch(target: RetouchTarget, blob: Blob) {
+    setRetouchSaving(true);
+    try {
+      const uploadUrl = await generateRetouchUploadUrl({});
+      const upload = await fetch(uploadUrl, {
+        method: "POST",
+        headers: { "Content-Type": blob.type || "image/png" },
+        body: blob,
+      });
+      if (!upload.ok) {
+        throw new Error(`Upload failed with status ${upload.status}.`);
+      }
+
+      const payload = (await upload.json()) as { storageId?: string };
+      if (!payload.storageId) {
+        throw new Error("Upload response did not include a storage id.");
+      }
+
+      await saveRetouchedImage({
+        sourceImageId: target.id,
+        storageId: payload.storageId as Id<"_storage">,
+        contentType: blob.type || "image/png",
+      });
+      setRetouchTarget(null);
+      toast.success("Version retouchee enregistree", {
+        description: "Elle est ajoutee en attente de validation.",
+      });
+    } catch (retouchError) {
+      toast.error("Retouche non enregistree", {
+        description:
+          retouchError instanceof Error
+            ? retouchError.message
+            : String(retouchError),
+      });
+      throw retouchError;
+    } finally {
+      setRetouchSaving(false);
     }
   }
 
@@ -578,19 +630,27 @@ function ProductDetailPage() {
             <Gallery
               title="Images generees"
               description={`${approvedImages.length} approved · ${pendingImages.length} to review · ${rejectedImages.length} rejected`}
-              items={generatedGalleryImages.map((image) => ({
-                url: image.storageUrl!,
-                label: image.imageType,
-                caption: image.imageType,
-                reviewStatus: getReviewStatus(image),
-                statusLabel: generatedImageStateLabel(image),
-                statusTone: generatedImageStateTone(image),
-                reviewable: isReviewable(image),
-                reviewing: reviewingImageId === image._id,
-                onApprove: () => void setImageReview(image, "approved"),
-                onReject: () => void setImageReview(image, "rejected"),
-                onDelete: () => setDeleteTarget(image),
-              }))}
+            items={generatedGalleryImages.map((image) => ({
+              id: image._id,
+              url: image.storageUrl!,
+              label: image.imageType,
+              caption: image.imageType,
+              retouched: Boolean(image.retouchSourceImageId),
+              reviewStatus: getReviewStatus(image),
+              statusLabel: generatedImageStateLabel(image),
+              statusTone: generatedImageStateTone(image),
+              reviewable: isReviewable(image),
+              reviewing: reviewingImageId === image._id,
+              onApprove: () => void setImageReview(image, "approved"),
+              onReject: () => void setImageReview(image, "rejected"),
+              onRetouch: () =>
+                setRetouchTarget({
+                  id: image._id,
+                  url: image.storageUrl!,
+                  label: image.imageType,
+                }),
+              onDelete: () => setDeleteTarget(image),
+            }))}
               pendingItems={generatingGalleryImages.map((image) => ({
                 id: image._id,
                 caption: image.imageType,
@@ -678,6 +738,18 @@ function ProductDetailPage() {
         }
         busy={busy === "generate"}
         onGenerate={() => void generate()}
+      />
+
+      <ImageRetouchDialog
+        target={retouchTarget}
+        saving={retouchSaving}
+        onOpenChange={(open) => {
+          if (!open && !retouchSaving) setRetouchTarget(null);
+        }}
+        onPrepareSource={(target) =>
+          prepareRetouchSource({ sourceImageId: target.id })
+        }
+        onSave={saveRetouch}
       />
 
       <AlertDialog open={pushOpen} onOpenChange={setPushOpen}>
@@ -1020,6 +1092,7 @@ type GalleryItem = {
   url: string;
   label?: string;
   caption?: string;
+  retouched?: boolean;
   reviewStatus?: ReviewStatus;
   statusLabel?: string;
   statusTone?: "neutral" | "success" | "warning" | "danger";
@@ -1027,6 +1100,7 @@ type GalleryItem = {
   reviewing?: boolean;
   onApprove?: () => void;
   onReject?: () => void;
+  onRetouch?: () => void;
   onDelete?: () => void;
 };
 
@@ -1132,28 +1206,47 @@ function Gallery({
                       {index + 1}
                     </span>
                   ) : null}
-                  {item.onDelete ? (
-                    <Button
-                      variant="destructive"
-                      size="icon-sm"
-                      aria-label="Delete image"
+          {item.onDelete ? (
+            <Button
+              variant="destructive"
+              size="icon-sm"
+              aria-label="Delete image"
                       onClick={item.onDelete}
                       className="absolute top-1.5 right-1.5 bg-background/80 opacity-0 backdrop-blur-sm transition group-hover:opacity-100 focus-visible:opacity-100"
                     >
-                      <Trash2 />
-                    </Button>
+              <Trash2 />
+            </Button>
+          ) : null}
+          {item.onRetouch ? (
+            <Button
+              variant="outline"
+              size="icon-sm"
+              aria-label={`Retoucher ${item.caption ?? item.label ?? "image"}`}
+              title="Retoucher"
+              onClick={item.onRetouch}
+              className="absolute top-1.5 right-10 bg-background/80 opacity-0 backdrop-blur-sm transition group-hover:opacity-100 focus-visible:opacity-100"
+            >
+              <Paintbrush />
+            </Button>
+          ) : null}
+          {item.caption || item.statusLabel || item.reviewable ? (
+            <figcaption className="grid gap-2 px-2 py-2">
+              <div className="flex min-w-0 items-center justify-between gap-2">
+                <span className="flex min-w-0 items-center gap-1.5">
+                  {item.caption ? (
+                    <span className="truncate text-xs font-medium">
+                      {item.caption}
+                    </span>
                   ) : null}
-                  {item.caption || item.statusLabel || item.reviewable ? (
-                    <figcaption className="grid gap-2 px-2 py-2">
-                      <div className="flex min-w-0 items-center justify-between gap-2">
-                        {item.caption ? (
-                          <span className="truncate text-xs font-medium">
-                            {item.caption}
-                          </span>
-                        ) : null}
-                        {item.statusLabel ? (
-                          <StateBadge state={item.statusTone}>
-                            {item.statusLabel}
+                  {item.retouched ? (
+                    <Badge variant="outline" className="shrink-0 text-[0.65rem]">
+                      Retouche
+                    </Badge>
+                  ) : null}
+                </span>
+                {item.statusLabel ? (
+                  <StateBadge state={item.statusTone}>
+                    {item.statusLabel}
                           </StateBadge>
                         ) : null}
                       </div>
