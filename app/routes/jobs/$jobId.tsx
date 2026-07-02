@@ -7,7 +7,6 @@ import {
   ChevronRight,
   ExternalLink,
   Eye,
-  Images,
   Loader2,
   Paintbrush,
   RefreshCw,
@@ -22,6 +21,7 @@ import {
   ImageRetouchDialog,
   type RetouchTarget,
 } from "@/components/image-retouch-dialog";
+import { ImageStateBadge } from "@/components/common/ImageStateBadge";
 import { BusyIcon, EmptyState, PageHeader, StateBadge } from "@/components/page";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
@@ -52,10 +52,6 @@ import {
   reviewAggregateBadge,
   type ReviewStatus,
 } from "@/features/images/lib/review";
-import {
-  generatedImageStateLabel,
-  generatedImageStateTone,
-} from "@/features/images/lib/state";
 import { getShopifyAdminUrl } from "@/features/shopify/lib/admin";
 import { api, type Doc, type Id } from "@/lib/convex";
 import { errorMessage } from "@/lib/errors";
@@ -883,14 +879,6 @@ function ReviewTile({
         ) : null}
       </div>
     </article>
-  );
-}
-
-function ImageStateBadge({ image }: { image: Doc<"generatedImages"> }) {
-  return (
-    <StateBadge state={generatedImageStateTone(image)}>
-      {generatedImageStateLabel(image)}
-    </StateBadge>
   );
 }
 
