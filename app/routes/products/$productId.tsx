@@ -65,6 +65,19 @@ import {
   validateProductSearch,
 } from "@/lib/productFilters";
 import {
+  getReviewStatus,
+  isPushReady,
+  isReviewable,
+  type ReviewStatus,
+} from "@/features/images/lib/review";
+import {
+  generatedImageStateLabel,
+  generatedImageStateTone,
+  type GeneratedImageStateTone,
+} from "@/features/images/lib/state";
+import { getShopifyAdminUrl } from "@/features/shopify/lib/admin";
+import { shopifyMediaId } from "@/features/shopify/lib/media";
+import {
   generationStateTone,
   primaryActionTone,
   productGenerationStateLabels,
@@ -80,8 +93,7 @@ import {
   type ProductReviewState,
 } from "@/lib/status";
 import { errorMessage } from "@/lib/errors";
-import { api } from "../../../convex/_generated/api";
-import type { Doc, Id } from "../../../convex/_generated/dataModel";
+import { api, type Doc, type Id } from "@/lib/convex";
 
 export const Route = createFileRoute("/products/$productId")({
   validateSearch: validateProductSearch,
@@ -100,26 +112,9 @@ type ShopifyGalleryImage = {
   altText?: string | null;
 };
 
-type ReviewStatus = "pending" | "approved" | "rejected";
-
-function shopifyMediaId(image: ShopifyGalleryImage) {
-  return image.mediaId ?? image.id ?? "";
-}
-
-function getReviewStatus(image: Doc<"generatedImages">): ReviewStatus {
-  return image.reviewStatus ?? "pending";
-}
-
-function isReviewable(image: Doc<"generatedImages">) {
-  return (
-    Boolean(image.storageUrl) &&
-    (image.status === "generated" || image.status === "uploaded")
-  );
-}
-
-function isPushReady(image: Doc<"generatedImages">) {
-  return isReviewable(image) && getReviewStatus(image) === "approved";
-}
+type ShopifyCollection = {
+  title?: string | null;
+};
 
 function ProductDetailPage() {
   const { productId } = Route.useParams();
@@ -181,6 +176,7 @@ function ProductDetailPage() {
 
   const product = data?.product;
   const images = data?.images ?? [];
+  const productCollections = (product?.collections ?? []) as ShopifyCollection[];
   const serverShopifyImages = (product?.currentShopifyImages ??
     []) as ShopifyGalleryImage[];
   const shopifyImages =
@@ -191,12 +187,10 @@ function ProductDetailPage() {
     shopifyImages.length > 1 &&
     shopifyImages.every((image) => shopifyMediaId(image));
   const hasProductJobs = Boolean(product?.latestJobId ?? images[0]?.jobId);
-  const shopifyAdminUrl = useMemo(() => {
-    if (!product || !shopInfo?.storeHandle) return null;
-    const numericId = product.shopifyProductId.split("/").pop();
-    if (!numericId) return null;
-    return `https://admin.shopify.com/store/${shopInfo.storeHandle}/products/${numericId}`;
-  }, [product, shopInfo?.storeHandle]);
+  const shopifyAdminUrl = useMemo(
+    () => getShopifyAdminUrl(product, shopInfo?.storeHandle),
+    [product, shopInfo?.storeHandle],
+  );
   const availableTypes = useMemo(
     () => (prompts ?? []).filter((prompt) => prompt.isActive),
     [prompts],
@@ -700,8 +694,8 @@ function ProductDetailPage() {
               <Fact
                 label="Collections"
                 value={
-                  product.collections
-                    .map((collection: any) => collection.title)
+                  productCollections
+                    .map((collection) => collection.title)
                     .join(", ") || "Aucune"
                 }
               />
@@ -1095,7 +1089,7 @@ type GalleryItem = {
   retouched?: boolean;
   reviewStatus?: ReviewStatus;
   statusLabel?: string;
-  statusTone?: "neutral" | "success" | "warning" | "danger";
+  statusTone?: GeneratedImageStateTone;
   reviewable?: boolean;
   reviewing?: boolean;
   onApprove?: () => void;
@@ -1324,30 +1318,6 @@ function GeneratingGalleryCard({ item }: { item: PendingGalleryItem }) {
       </figcaption>
     </figure>
   );
-}
-
-function generatedImageStateLabel(image: Doc<"generatedImages">) {
-  if (image.status === "failed") return "Error";
-  if (image.status === "canceled") return "Canceled";
-  if (image.status === "uploaded") return "Pushed";
-  if (!isReviewable(image)) return image.status;
-  const reviewStatus = getReviewStatus(image);
-  if (reviewStatus === "approved") return "Approved";
-  if (reviewStatus === "rejected") return "Rejected";
-  return "To review";
-}
-
-function generatedImageStateTone(
-  image: Doc<"generatedImages">,
-): "neutral" | "success" | "warning" | "danger" {
-  if (image.status === "failed") return "danger";
-  if (image.status === "canceled") return "danger";
-  if (image.status === "uploaded") return "success";
-  if (!isReviewable(image)) return "warning";
-  const reviewStatus = getReviewStatus(image);
-  if (reviewStatus === "approved") return "success";
-  if (reviewStatus === "rejected") return "danger";
-  return "warning";
 }
 
 function GeneratedImageStateBadge({

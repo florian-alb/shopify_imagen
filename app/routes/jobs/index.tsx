@@ -20,8 +20,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { api } from "../../../convex/_generated/api";
-import type { Doc, Id } from "../../../convex/_generated/dataModel";
+import { reviewAggregateBadge } from "@/features/images/lib/review";
+import { api, type Doc, type Id } from "@/lib/convex";
+import { formatUsd } from "@/lib/formatters";
 
 type ReviewSummary = {
   total: number;
@@ -52,7 +53,6 @@ type JobsPageResult = {
 type JobStatusFilter = "all" | "queued" | "running" | "completed" | "failed" | "cancelled";
 type ExecutionModeFilter = "all" | "realtime" | "batch";
 type ProviderFilter = "all" | "openai" | "gemini";
-type ReviewState = "none" | "pending" | "approved" | "partial" | "rejected";
 type ReviewFilter = "all" | "to-review" | "approved" | "partial" | "rejected" | "no-review";
 type JobSearch = {
   productId?: string;
@@ -106,29 +106,8 @@ function parsePageSize(value: unknown) {
   return parsed && [20, 50, 100].includes(parsed) ? parsed : undefined;
 }
 
-function formatUsd(value: number) {
-  return `$${value.toFixed(value < 1 ? 4 : 2)}`;
-}
-
 function executionModeLabel(mode?: "realtime" | "batch") {
   return mode === "batch" ? "Batch" : "Real-time";
-}
-
-function getReviewState(reviewSummary: ReviewSummary): ReviewState {
-  if (reviewSummary.total === 0) return "none";
-  if (reviewSummary.pending > 0) return "pending";
-  if (reviewSummary.rejected === reviewSummary.total) return "rejected";
-  if (reviewSummary.approved === reviewSummary.total) return "approved";
-  return "partial";
-}
-
-function reviewBadge(reviewSummary: ReviewSummary) {
-  const state = getReviewState(reviewSummary);
-  if (state === "pending") return { tone: "warning" as const, label: `${reviewSummary.pending} to review` };
-  if (state === "approved") return { tone: "success" as const, label: "Approved" };
-  if (state === "partial") return { tone: "warning" as const, label: "Partial" };
-  if (state === "rejected") return { tone: "danger" as const, label: "Rejected" };
-  return { tone: "neutral" as const, label: "No images to review" };
 }
 
 function JobsPage() {
@@ -313,7 +292,9 @@ function JobsPage() {
                     const pct = job.totalTasks ? Math.round(((job.completedTasks + job.failedTasks) / job.totalTasks) * 100) : 0;
                     const state = job.status === "completed" ? "success" : job.status === "failed" || job.status === "cancelled" ? "danger" : "warning";
                     const reviewSummary = job.reviewSummary ?? emptyReviewSummary;
-                    const review = reviewBadge(reviewSummary);
+                    const review = reviewAggregateBadge(reviewSummary, {
+                      emptyLabel: "No images to review",
+                    });
                     return (
                       <TableRow key={job._id}>
                         <TableCell>
