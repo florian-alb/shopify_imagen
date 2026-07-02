@@ -228,38 +228,38 @@
   --shadow-opacity: var(--shadow-opacity);
   --color-shadow-color: var(--shadow-color);
   --radius-2xl: calc(var(--radius) * 1.8);
- --radius-3xl: calc(var(--radius) * 2.2);
- --radius-4xl: calc(var(--radius) * 2.6);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
 }
 
 :root,
 .dark {
- --shadow-x: 0;
- --shadow-y: 0;
- --shadow-blur: 0;
- --shadow-spread: 0;
- --shadow-opacity: 0;
- --shadow-color: transparent;
- --shadow-2xs: none;
- --shadow-xs: none;
- --shadow-sm: none;
- --shadow: none;
- --shadow-md: none;
- --shadow-lg: none;
- --shadow-xl: none;
- --shadow-2xl: none;
- --studio-panel-shadow: none;
- --studio-card-shadow: none;
+  --shadow-x: 0;
+  --shadow-y: 0;
+  --shadow-blur: 0;
+  --shadow-spread: 0;
+  --shadow-opacity: 0;
+  --shadow-color: transparent;
+  --shadow-2xs: none;
+  --shadow-xs: none;
+  --shadow-sm: none;
+  --shadow: none;
+  --shadow-md: none;
+  --shadow-lg: none;
+  --shadow-xl: none;
+  --shadow-2xl: none;
+  --studio-panel-shadow: none;
+  --studio-card-shadow: none;
 }
 
 [class*="shadow"] {
- box-shadow: none !important;
+  box-shadow: none !important;
 }
 
 @layer base {
- * {
- @apply border-border outline-ring/50;
- }
+  * {
+    @apply border-border outline-ring/50;
+  }
 
   html {
     scroll-behavior: smooth;
@@ -456,9 +456,15 @@
   --retouch-graphite: #222426;
   --retouch-line: #d9ded8;
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  height: min(calc(100vh - 2rem), 56rem);
   max-height: calc(100vh - 2rem);
   background:
-    linear-gradient(180deg, color-mix(in oklch, var(--card) 94%, white 6%), var(--background)),
+    linear-gradient(
+      180deg,
+      color-mix(in oklch, var(--card) 94%, white 6%),
+      var(--background)
+    ),
     var(--background);
 }
 
@@ -500,6 +506,24 @@
 .retouch-tool-group {
   display: grid;
   gap: 0.55rem;
+}
+
+.retouch-history-panel {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.retouch-actions-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.retouch-history-readout {
+  min-height: 1.05rem;
+  color: var(--muted-foreground);
+  font-size: 0.72rem;
+  line-height: 1.25;
 }
 
 .retouch-color-input {
@@ -572,8 +596,15 @@
   min-width: 0;
   min-height: 30rem;
   background:
-    linear-gradient(90deg, color-mix(in oklch, var(--foreground) 4%, transparent) 1px, transparent 1px),
-    linear-gradient(color-mix(in oklch, var(--foreground) 4%, transparent) 1px, transparent 1px),
+    linear-gradient(
+      90deg,
+      color-mix(in oklch, var(--foreground) 4%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      color-mix(in oklch, var(--foreground) 4%, transparent) 1px,
+      transparent 1px
+    ),
     #f8faf8;
   background-size: 28px 28px;
 }
@@ -581,12 +612,19 @@
 .retouch-canvas-scroll {
   display: grid;
   place-items: start center;
-  height: min(64vh, 48rem);
+  height: 100%;
   overflow: auto;
   padding: 1rem;
 }
 
+.retouch-canvas-frame {
+  position: relative;
+  width: fit-content;
+  line-height: 0;
+}
+
 .retouch-canvas {
+  display: block;
   max-width: none;
   height: auto;
   border: 1px solid var(--retouch-line);
@@ -597,11 +635,26 @@
 }
 
 .retouch-canvas[data-tool="brush"] {
-  cursor: crosshair;
+  cursor: none;
 }
 
 .retouch-canvas[data-tool="picker"] {
   cursor: copy;
+}
+
+.retouch-brush-preview {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  pointer-events: none;
+  border: 1.5px solid var(--retouch-blue);
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--retouch-blue) 10%, transparent);
+  box-shadow:
+    0 0 0 1px rgb(255 255 255 / 0.78),
+    0 2px 8px rgb(34 36 38 / 0.18);
+  will-change: transform, width, height;
 }
 
 .retouch-loading {
@@ -626,17 +679,132 @@
 }
 
 @media (width < 900px) {
+  .retouch-dialog-content {
+    width: min(100vw, 44rem);
+  }
+
   .retouch-layout {
     grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
   .retouch-tools {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 0.75rem;
+    max-height: 17rem;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 0.75rem;
     border-right: 0;
     border-bottom: 1px solid var(--border);
   }
 
+  .retouch-tools > .h-px,
+  .retouch-tools > [data-orientation="horizontal"] {
+    display: none;
+  }
+
+  .retouch-tool-group {
+    gap: 0.4rem;
+  }
+
+  .retouch-tool-color {
+    grid-column: span 2;
+  }
+
+  .retouch-history-panel {
+    grid-column: span 2;
+  }
+
+  .retouch-actions-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .retouch-meter {
+    display: none;
+  }
+
+  .retouch-stage {
+    min-height: 0;
+  }
+
   .retouch-canvas-scroll {
-    height: min(56vh, 38rem);
+    height: 100%;
+    min-height: 18rem;
+    padding: 0.75rem;
+  }
+}
+
+@media (width < 640px) {
+  .retouch-dialog-content {
+    width: 100vw;
+    max-width: 100vw;
+    height: 100dvh;
+    max-height: 100dvh;
+    border-radius: 0;
+  }
+
+  .retouch-shell {
+    height: 100dvh;
+    max-height: 100dvh;
+  }
+
+  .retouch-header {
+    align-items: flex-start;
+    padding: 0.75rem;
+  }
+
+  .retouch-header [data-slot="dialog-description"] {
+    display: none;
+  }
+
+  .retouch-size {
+    display: none;
+  }
+
+  .retouch-tools {
+    grid-template-columns: 1fr 1fr;
+    max-height: 15rem;
+  }
+
+  .retouch-tool-color,
+  .retouch-history-panel {
+    grid-column: span 2;
+  }
+
+  .retouch-hex-input {
+    height: 2rem;
+    font-size: 0.76rem;
+  }
+
+  .retouch-color-input {
+    width: 2rem;
+    height: 2rem;
+  }
+
+  .retouch-swatch {
+    min-height: 2rem;
+  }
+
+  .retouch-actions-grid [data-icon="inline-start"] {
+    margin-inline-end: 0;
+  }
+
+  .retouch-actions-grid button {
+    min-width: 0;
+    padding-inline: 0.45rem;
+    font-size: 0.72rem;
+  }
+
+  .retouch-footer {
+    display: grid;
+    grid-template-columns: minmax(0, 0.75fr) minmax(0, 1.25fr);
+    padding: 0.65rem 0.75rem;
+  }
+
+  .retouch-footer button {
+    min-width: 0;
   }
 }
 
