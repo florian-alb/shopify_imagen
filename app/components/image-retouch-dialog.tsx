@@ -49,6 +49,13 @@ type ImageSize = {
   height: number;
 };
 
+type BrushPreview = {
+  x: number;
+  y: number;
+  size: number;
+  visible: boolean;
+};
+
 const HISTORY_LIMIT = 12;
 const SWATCHES = ["#ffffff", "#f8faf8", "#f1f3f0", "#e6e9e5", "#d7ddd8"];
 
@@ -83,15 +90,28 @@ export function ImageRetouchDialog({
   const [historyState, setHistoryState] = useState({
     canUndo: false,
     canRedo: false,
+    pastCount: 0,
+    futureCount: 0,
+  });
+  const [brushPreview, setBrushPreview] = useState<BrushPreview>({
+    x: 0,
+    y: 0,
+    size: 0,
+    visible: false,
   });
 
   const syncHistoryState = useCallback(() => {
     const next = {
       canUndo: undoStackRef.current.length > 0,
       canRedo: redoStackRef.current.length > 0,
+      pastCount: undoStackRef.current.length,
+      futureCount: redoStackRef.current.length,
     };
     setHistoryState((current) =>
-      current.canUndo === next.canUndo && current.canRedo === next.canRedo
+      current.canUndo === next.canUndo &&
+      current.canRedo === next.canRedo &&
+      current.pastCount === next.pastCount &&
+      current.futureCount === next.futureCount
         ? current
         : next,
     );
@@ -145,7 +165,9 @@ export function ImageRetouchDialog({
 
       const response = await fetch(sourceUrl);
       if (!response.ok) {
-        throw new Error(`Image download failed with status ${response.status}.`);
+        throw new Error(
+          `Image download failed with status ${response.status}.`,
+        );
       }
 
       const imageBlob = await response.blob();
@@ -172,7 +194,10 @@ export function ImageRetouchDialog({
           );
         }
 
-        setImageSize({ width: image.naturalWidth, height: image.naturalHeight });
+        setImageSize({
+          width: image.naturalWidth,
+          height: image.naturalHeight,
+        });
         setLoading(false);
       };
       image.onerror = () => {
@@ -199,14 +224,39 @@ export function ImageRetouchDialog({
     return () => window.clearTimeout(timeoutId);
   }, [resetCanvas, target]);
 
-  const canvasPoint = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return null;
-    const rect = canvas.getBoundingClientRect();
-    return {
-      x: ((event.clientX - rect.left) / rect.width) * canvas.width,
-      y: ((event.clientY - rect.top) / rect.height) * canvas.height,
-    };
+  const canvasPoint = useCallback(
+    (event: ReactPointerEvent<HTMLCanvasElement>) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return null;
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: ((event.clientX - rect.left) / rect.width) * canvas.width,
+        y: ((event.clientY - rect.top) / rect.height) * canvas.height,
+      };
+    },
+    [],
+  );
+
+  const updateBrushPreview = useCallback(
+    (event: ReactPointerEvent<HTMLCanvasElement>) => {
+      const canvas = canvasRef.current;
+      if (!canvas || tool !== "brush" || loading || error || !imageSize) return;
+      const rect = canvas.getBoundingClientRect();
+      const scaledSize = Math.max(4, brushSize * (rect.width / canvas.width));
+      setBrushPreview({
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+        size: scaledSize,
+        visible: true,
+      });
+    },
+    [brushSize, error, imageSize, loading, tool],
+  );
+
+  const hideBrushPreview = useCallback(() => {
+    setBrushPreview((current) =>
+      current.visible ? { ...current, visible: false } : current,
+    );
   }, []);
 
   const pickColor = useCallback((point: Point) => {
@@ -259,6 +309,7 @@ export function ImageRetouchDialog({
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     if (!imageSize || loading || error) return;
+    updateBrushPreview(event);
     const point = canvasPoint(event);
     if (!point) return;
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -275,6 +326,7 @@ export function ImageRetouchDialog({
   };
 
   const handlePointerMove = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    updateBrushPreview(event);
     if (!drawingRef.current || tool !== "brush") return;
     const point = canvasPoint(event);
     if (point) drawTo(point);
@@ -293,7 +345,9 @@ export function ImageRetouchDialog({
     const context = canvas?.getContext("2d", { willReadFrequently: true });
     const previous = undoStackRef.current.pop();
     if (!canvas || !context || !previous) return;
-    redoStackRef.current.push(context.getImageData(0, 0, canvas.width, canvas.height));
+    redoStackRef.current.push(
+      context.getImageData(0, 0, canvas.width, canvas.height),
+    );
     restoreSnapshot(previous);
     syncHistoryState();
   };
@@ -303,7 +357,9 @@ export function ImageRetouchDialog({
     const context = canvas?.getContext("2d", { willReadFrequently: true });
     const next = redoStackRef.current.pop();
     if (!canvas || !context || !next) return;
-    undoStackRef.current.push(context.getImageData(0, 0, canvas.width, canvas.height));
+    undoStackRef.current.push(
+      context.getImageData(0, 0, canvas.width, canvas.height),
+    );
     restoreSnapshot(next);
     syncHistoryState();
   };
@@ -340,10 +396,15 @@ export function ImageRetouchDialog({
   const displayWidth = imageSize ? Math.min(imageSize.width, 980) * zoom : 720;
   const busy = Boolean(saving || localSaving);
   const canEdit = Boolean(imageSize && !loading && !error);
+  const showBrushPreview =
+    brushPreview.visible &&
+    tool === "brush" &&
+    canEdit &&
+    brushPreview.size > 0;
 
   return (
     <Dialog open={target !== null} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[calc(100vh-2rem)] overflow-hidden p-0 sm:max-w-6xl">
+      <DialogContent className="retouch-dialog-content max-h-[calc(100vh-2rem)] overflow-hidden p-0 sm:max-w-6xl">
         <div className="retouch-shell">
           <DialogHeader className="retouch-header">
             <div>
@@ -364,9 +425,9 @@ export function ImageRetouchDialog({
 
           <div className="retouch-layout">
             <aside className="retouch-tools" aria-label="Outils de retouche">
-              <div className="retouch-tool-group">
+              <div className="retouch-tool-group retouch-tool-mode">
                 <Label className="text-xs uppercase text-muted-foreground">
-                  Outil
+                  Outils
                 </Label>
                 <div className="grid grid-cols-2 gap-2">
                   <Button
@@ -392,8 +453,11 @@ export function ImageRetouchDialog({
 
               <Separator />
 
-              <div className="retouch-tool-group">
-                <Label htmlFor="retouch-color" className="text-xs uppercase text-muted-foreground">
+              <div className="retouch-tool-group retouch-tool-color">
+                <Label
+                  htmlFor="retouch-color"
+                  className="text-xs uppercase text-muted-foreground"
+                >
                   Couleur
                 </Label>
                 <div className="flex items-center gap-2">
@@ -425,8 +489,11 @@ export function ImageRetouchDialog({
                 </div>
               </div>
 
-              <div className="retouch-tool-group">
-                <Label htmlFor="retouch-size" className="text-xs uppercase text-muted-foreground">
+              <div className="retouch-tool-group retouch-tool-size">
+                <Label
+                  htmlFor="retouch-size"
+                  className="text-xs uppercase text-muted-foreground"
+                >
                   Taille
                 </Label>
                 <div className="retouch-range-row">
@@ -436,14 +503,19 @@ export function ImageRetouchDialog({
                     min={4}
                     max={140}
                     value={brushSize}
-                    onChange={(event) => setBrushSize(Number(event.target.value))}
+                    onChange={(event) =>
+                      setBrushSize(Number(event.target.value))
+                    }
                   />
                   <span>{brushSize}px</span>
                 </div>
               </div>
 
-              <div className="retouch-tool-group">
-                <Label htmlFor="retouch-opacity" className="text-xs uppercase text-muted-foreground">
+              <div className="retouch-tool-group retouch-tool-opacity">
+                <Label
+                  htmlFor="retouch-opacity"
+                  className="text-xs uppercase text-muted-foreground"
+                >
                   Opacite
                 </Label>
                 <div className="retouch-range-row">
@@ -453,7 +525,9 @@ export function ImageRetouchDialog({
                     min={10}
                     max={100}
                     value={brushOpacity}
-                    onChange={(event) => setBrushOpacity(Number(event.target.value))}
+                    onChange={(event) =>
+                      setBrushOpacity(Number(event.target.value))
+                    }
                   />
                   <span>{brushOpacity}%</span>
                 </div>
@@ -461,45 +535,63 @@ export function ImageRetouchDialog({
 
               <Separator />
 
-              <div className="grid grid-cols-2 gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={!historyState.canUndo}
-                  onClick={undo}
-                >
-                  <Undo2 data-icon="inline-start" />
-                  Undo
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={!historyState.canRedo}
-                  onClick={redo}
-                >
-                  <Redo2 data-icon="inline-start" />
-                  Redo
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setZoom((value) => Math.max(0.35, value - 0.15))}
-                >
-                  <ZoomOut data-icon="inline-start" />
-                  Zoom
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setZoom((value) => Math.min(2.4, value + 0.15))}
-                >
-                  <ZoomIn data-icon="inline-start" />
-                  Zoom
-                </Button>
+              <div className="retouch-history-panel">
+                <div className="retouch-actions-grid">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={!historyState.canUndo}
+                    onClick={undo}
+                  >
+                    <Undo2 data-icon="inline-start" />
+                    Reculer
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={!historyState.canRedo}
+                    onClick={redo}
+                  >
+                    <Redo2 data-icon="inline-start" />
+                    Avancer
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      setZoom((value) => Math.max(0.35, value - 0.15))
+                    }
+                  >
+                    <ZoomOut data-icon="inline-start" />
+                    Zoom
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      setZoom((value) => Math.min(2.4, value + 0.15))
+                    }
+                  >
+                    <ZoomIn data-icon="inline-start" />
+                    Zoom
+                  </Button>
+                </div>
+                <p className="retouch-history-readout" aria-live="polite">
+                  {historyState.pastCount
+                    ? `${historyState.pastCount} retour${
+                        historyState.pastCount > 1 ? "s" : ""
+                      } disponible${historyState.pastCount > 1 ? "s" : ""}`
+                    : "Aucune modification"}
+                  {historyState.futureCount
+                    ? ` · ${historyState.futureCount} avance${
+                        historyState.futureCount > 1 ? "s" : ""
+                      }`
+                    : ""}
+                </p>
               </div>
 
               <Button
@@ -529,17 +621,34 @@ export function ImageRetouchDialog({
                 </div>
               ) : null}
               <div className="retouch-canvas-scroll">
-                <canvas
-                  ref={canvasRef}
-                  className="retouch-canvas"
-                  style={{ width: displayWidth }}
-                  aria-label={`Retoucher ${target?.label ?? "image"}`}
-                  onPointerDown={handlePointerDown}
-                  onPointerMove={handlePointerMove}
-                  onPointerUp={stopDrawing}
-                  onPointerCancel={stopDrawing}
-                  data-tool={tool}
-                />
+                <div className="retouch-canvas-frame">
+                  <canvas
+                    ref={canvasRef}
+                    className="retouch-canvas"
+                    style={{ width: displayWidth }}
+                    aria-label={`Retoucher ${target?.label ?? "image"}`}
+                    onPointerEnter={updateBrushPreview}
+                    onPointerDown={handlePointerDown}
+                    onPointerMove={handlePointerMove}
+                    onPointerUp={stopDrawing}
+                    onPointerCancel={stopDrawing}
+                    onPointerLeave={hideBrushPreview}
+                    data-tool={tool}
+                  />
+                  {showBrushPreview ? (
+                    <div
+                      className="retouch-brush-preview"
+                      style={{
+                        width: brushPreview.size,
+                        height: brushPreview.size,
+                        borderColor: brushColor,
+                        transform: `translate(${
+                          brushPreview.x - brushPreview.size / 2
+                        }px, ${brushPreview.y - brushPreview.size / 2}px)`,
+                      }}
+                    />
+                  ) : null}
+                </div>
               </div>
             </main>
           </div>
@@ -551,10 +660,19 @@ export function ImageRetouchDialog({
           ) : null}
 
           <DialogFooter className="retouch-footer">
-            <Button type="button" variant="outline" disabled={busy} onClick={() => onOpenChange(false)}>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={busy}
+              onClick={() => onOpenChange(false)}
+            >
               Fermer
             </Button>
-            <Button type="button" disabled={!canEdit || busy} onClick={() => void save()}>
+            <Button
+              type="button"
+              disabled={!canEdit || busy}
+              onClick={() => void save()}
+            >
               {busy ? (
                 <Loader2 data-icon="inline-start" className="animate-spin" />
               ) : (
