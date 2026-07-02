@@ -150,4 +150,34 @@ describe("createProductImagesViewModel", () => {
     expect(viewModel.reviewState).toBe("approved");
     expect(viewModel.publishState).toBe("ready");
   });
+
+  it("falls back safely when the product is not loaded", () => {
+    const viewModel = createProductImagesViewModel({
+      product: null,
+      images: [
+        generatedImage({
+          _id: "queued",
+          status: "queued",
+          storageUrl: undefined,
+          jobId: "job-2" as Id<"generationJobs">,
+        }),
+      ],
+      prompts: undefined,
+      storeHandle: null,
+    });
+
+    expect(viewModel.productCollections).toEqual([]);
+    expect(viewModel.serverShopifyImages).toEqual([]);
+    expect(viewModel.canReorderShopifyImages).toBe(false);
+    expect(viewModel.hasProductJobs).toBe(true);
+    expect(viewModel.shopifyAdminUrl).toBeNull();
+    expect(viewModel.primaryAction).toBe("generate");
+    expect(viewModel.generationState).toBe("not_started");
+    expect(viewModel.reviewState).toBe("none");
+    expect(viewModel.publishState).toBe("not_ready");
+    expect(viewModel.generatedGalleryImages).toEqual([]);
+    expect(viewModel.generatingGalleryImages.map((image) => image._id)).toEqual([
+      "queued",
+    ]);
+  });
 });

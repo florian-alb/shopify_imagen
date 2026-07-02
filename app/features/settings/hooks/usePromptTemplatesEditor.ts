@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "convex/react";
-import { api, type Doc, type Id } from "@/lib/convex";
+import { api, type Doc } from "@/lib/convex";
 
 export type MasterPromptSettings = {
   shopId: string | null;
