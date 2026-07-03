@@ -134,6 +134,7 @@ export function JobDetailPage({ jobId }: { jobId: string }) {
   const [previewId, setPreviewId] = useState<Id<"generatedImages"> | null>(null);
   const [retouchTarget, setRetouchTarget] = useState<RetouchTarget | null>(null);
   const [retouchSaving, setRetouchSaving] = useState(false);
+  const [pushTargetProductId, setPushTargetProductId] = useState<Id<"products"> | null>(null);
 
   if (data === undefined) {
     return (
@@ -171,7 +172,13 @@ export function JobDetailPage({ jobId }: { jobId: string }) {
   const previewImages = reviewableImages.filter((image) => image.storageUrl);
   const previewImage = previewImages.find((image) => image._id === previewId) ?? null;
   const previewIndex = previewImage ? previewImages.findIndex((image) => image._id === previewImage._id) : -1;
-  const pushProductCount = new Set(pushableImages.map((image) => image.productId)).size;
+  const pushTargetProduct = pushTargetProductId
+    ? products.find((product) => product._id === pushTargetProductId) ?? null
+    : null;
+  const selectedPushableImages = pushTargetProductId
+    ? pushableImages.filter((image) => image.productId === pushTargetProductId)
+    : pushableImages;
+  const selectedPushProductCount = new Set(selectedPushableImages.map((image) => image.productId)).size;
   const pct = job.totalTasks ? Math.round(((job.completedTasks + job.failedTasks) / job.totalTasks) * 100) : 0;
   const jobState = job.status === "completed" ? "success" : job.status === "failed" ? "danger" : "warning";
   const canCancelJob = job.status === "queued" || job.status === "running";
@@ -375,22 +382,33 @@ function openRetouch(image: Doc<"generatedImages">) {
 
       {productRows.length ? (
         <section className="grid gap-4">
-          {productRows.map(({ product, images: rowImages }) => (
+        {productRows.map(({ product, images: rowImages }) => {
+          const productPushableCount = pushableImages.filter((image) => image.productId === product._id).length;
+
+          return (
             <JobProductReviewCard
               key={product._id}
               product={product}
               shopifyAdminUrl={getShopifyAdminUrl(product, shopInfo?.storeHandle)}
               images={rowImages}
-          reviewing={reviewing}
-          retrying={retrying}
-          regeneratingId={regeneratingId}
+              reviewing={reviewing}
+              retrying={retrying}
+              publishing={pushing && pushTargetProductId === product._id}
+              publishDisabled={pushing}
+              publishableCount={productPushableCount}
+              regeneratingId={regeneratingId}
               onPreview={setPreviewId}
               onReview={(imageIds, reviewStatus) => void setReview(imageIds, reviewStatus)}
+              onPublishApproved={() => {
+                setPushTargetProductId(product._id);
+                setPushOpen(true);
+              }}
               onRegenerate={openRegeneration}
               onRetouch={openRetouch}
               onRetry={() => void handleRetryJob()}
             />
-          ))}
+          );
+        })}
         </section>
       ) : (
         <EmptyState title="No images in this view" body="Choose another review filter to see the rest of this batch." />
@@ -453,7 +471,13 @@ function openRetouch(image: Doc<"generatedImages">) {
                 {pushableImages.length ? `${pushableImages.length} image${pushableImages.length === 1 ? "" : "s"} prete${pushableImages.length === 1 ? "" : "s"} a publier` : "Aucune nouvelle image a publier"}
               </p>
             </div>
-            <Button disabled={!pushableImages.length} onClick={() => setPushOpen(true)}>
+            <Button
+              disabled={!pushableImages.length}
+              onClick={() => {
+                setPushTargetProductId(null);
+                setPushOpen(true);
+              }}
+            >
               <Send data-icon="inline-start" />
               Publier {pushableImages.length || ""}
             </Button>
@@ -495,13 +519,30 @@ function openRetouch(image: Doc<"generatedImages">) {
         onRegenerate={() => void regenerate()}
       />
 
-      <AlertDialog open={pushOpen} onOpenChange={(open) => !pushing && setPushOpen(open)}>
+      <AlertDialog
+        open={pushOpen}
+        onOpenChange={(open) => {
+          if (pushing) return;
+          setPushOpen(open);
+          if (!open) setPushTargetProductId(null);
+        }}
+      >
         <AlertDialogContent className="sm:max-w-lg">
           <AlertDialogHeader>
-            <AlertDialogTitle>Push approved images to Shopify?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {pushTargetProduct ? "Push this product's approved images?" : "Push approved images to Shopify?"}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              This will upload {pushableImages.length} approved image{pushableImages.length === 1 ? "" : "s"} across {pushProductCount} product
-              {pushProductCount === 1 ? "" : "s"}. Rejected and unreviewed images will stay untouched.
+              {pushTargetProduct ? (
+                <>
+                  This will upload {selectedPushableImages.length} approved image{selectedPushableImages.length === 1 ? "" : "s"} for {pushTargetProduct.title}. Rejected, unreviewed, and already-published images will stay untouched.
+                </>
+              ) : (
+                <>
+                  This will upload {selectedPushableImages.length} approved image{selectedPushableImages.length === 1 ? "" : "s"} across {selectedPushProductCount} product
+                  {selectedPushProductCount === 1 ? "" : "s"}. Rejected, unreviewed, and already-published images will stay untouched.
+                </>
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <Label className="flex items-start gap-3 rounded-lg border p-3">
@@ -520,17 +561,28 @@ function openRetouch(image: Doc<"generatedImages">) {
             <div>
               <div className="mb-2 flex justify-between text-xs text-muted-foreground">
                 <span>Publishing products</span>
-                <span>{pushedProducts} / {pushProductCount}</span>
+                <span>{pushedProducts} / {selectedPushProductCount}</span>
               </div>
-              <Progress value={pushProductCount ? (pushedProducts / pushProductCount) * 100 : 0} />
+              <Progress value={selectedPushProductCount ? (pushedProducts / selectedPushProductCount) * 100 : 0} />
             </div>
           ) : null}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={pushing}>Cancel</AlertDialogCancel>
-            <Button disabled={pushing || !pushableImages.length} onClick={() => void pushApproved({ products, pushableImages })}>
+            <Button
+              disabled={pushing || !selectedPushableImages.length}
+              onClick={() => void pushApproved({
+                products,
+                pushableImages: selectedPushableImages,
+                successMessage: pushTargetProduct
+                  ? `${selectedPushableImages.length} image${selectedPushableImages.length === 1 ? "" : "s"} pushed for ${pushTargetProduct.title}`
+                  : undefined,
+              }).then((success) => {
+                if (success) setPushTargetProductId(null);
+              })}
+            >
               <BusyIcon busy={pushing} />
               {!pushing ? <Send data-icon="inline-start" /> : null}
-              Push {pushableImages.length} image{pushableImages.length === 1 ? "" : "s"}
+              Push {selectedPushableImages.length} image{selectedPushableImages.length === 1 ? "" : "s"}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -664,24 +716,32 @@ function RegenerateImageDialog({
 function JobProductReviewCard({
   product,
   shopifyAdminUrl,
- images,
- reviewing,
- retrying,
- regeneratingId,
- onPreview,
- onReview,
+  images,
+  reviewing,
+  retrying,
+  publishing,
+  publishDisabled,
+  publishableCount,
+  regeneratingId,
+  onPreview,
+  onReview,
+  onPublishApproved,
   onRegenerate,
   onRetouch,
   onRetry
 }: {
  product: Doc<"products">;
  shopifyAdminUrl: string | null;
- images: Doc<"generatedImages">[];
- reviewing: boolean;
- retrying: boolean;
- regeneratingId: Id<"generatedImages"> | null;
+  images: Doc<"generatedImages">[];
+  reviewing: boolean;
+  retrying: boolean;
+  publishing: boolean;
+  publishDisabled: boolean;
+  publishableCount: number;
+  regeneratingId: Id<"generatedImages"> | null;
   onPreview: (imageId: Id<"generatedImages">) => void;
   onReview: (imageIds: Id<"generatedImages">[], reviewStatus: "approved" | "rejected") => void;
+  onPublishApproved: () => void;
   onRegenerate: (image: Doc<"generatedImages">) => void;
   onRetouch: (image: Doc<"generatedImages">) => void;
   onRetry: () => void;
@@ -722,6 +782,15 @@ function JobProductReviewCard({
           >
             <Check data-icon="inline-start" />
             Approve all
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!publishableCount || publishDisabled}
+            onClick={onPublishApproved}
+          >
+            {publishing ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Send data-icon="inline-start" />}
+            Publish {publishableCount || ""}
           </Button>
         </div>
       </CardHeader>
