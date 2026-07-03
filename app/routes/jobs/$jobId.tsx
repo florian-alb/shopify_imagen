@@ -46,9 +46,20 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  getReviewStatus,
+  isReviewable,
+  reviewAggregateBadge,
+  type ReviewStatus,
+} from "@/features/images/lib/review";
+import {
+  generatedImageStateLabel,
+  generatedImageStateTone,
+} from "@/features/images/lib/state";
+import { getShopifyAdminUrl } from "@/features/shopify/lib/admin";
+import { api, type Doc, type Id } from "@/lib/convex";
 import { errorMessage } from "@/lib/errors";
-import { api } from "../../../convex/_generated/api";
-import type { Doc, Id } from "../../../convex/_generated/dataModel";
+import { formatUsd } from "@/lib/formatters";
 
 export const Route = createFileRoute("/jobs/$jobId")({
   component: JobDetailPage
@@ -60,9 +71,7 @@ type JobDetail = {
   products: Doc<"products">[];
 } | null;
 
-type ReviewStatus = "pending" | "approved" | "rejected";
 type ReviewFilter = "all" | ReviewStatus | "failed" | "pushed";
-type ReviewAggregateState = "none" | "pending" | "approved" | "partial" | "rejected";
 
 const reviewFilters: Array<{ value: ReviewFilter; label: string }> = [
   { value: "all", label: "All" },
@@ -73,40 +82,11 @@ const reviewFilters: Array<{ value: ReviewFilter; label: string }> = [
   { value: "pushed", label: "Pushed" }
 ];
 
-function getReviewStatus(image: Doc<"generatedImages">): ReviewStatus {
-  return image.reviewStatus ?? "pending";
-}
-
-function isReviewable(image: Doc<"generatedImages">) {
-  return Boolean(image.storageUrl) && (image.status === "generated" || image.status === "uploaded");
-}
-
 function matchesFilter(image: Doc<"generatedImages">, filter: ReviewFilter) {
   if (filter === "all") return true;
   if (filter === "failed") return image.status === "failed";
   if (filter === "pushed") return image.status === "uploaded";
   return isReviewable(image) && getReviewStatus(image) === filter;
-}
-
-function getReviewAggregateState(total: number, pending: number, approved: number, rejected: number): ReviewAggregateState {
-  if (total === 0) return "none";
-  if (pending > 0) return "pending";
-  if (rejected === total) return "rejected";
-  if (approved === total) return "approved";
-  return "partial";
-}
-
-function reviewAggregateBadge(total: number, pending: number, approved: number, rejected: number) {
-  const state = getReviewAggregateState(total, pending, approved, rejected);
-  if (state === "pending") return { tone: "warning" as const, label: `${pending} to review` };
-  if (state === "approved") return { tone: "success" as const, label: "Approved" };
-  if (state === "partial") return { tone: "warning" as const, label: "Partial" };
-  if (state === "rejected") return { tone: "danger" as const, label: "Rejected" };
-  return { tone: "neutral" as const, label: "No review" };
-}
-
-function formatUsd(value: number) {
-  return `$${value.toFixed(value < 1 ? 4 : 2)}`;
 }
 
 function executionModeLabel(mode?: "realtime" | "batch") {
@@ -124,13 +104,6 @@ function imageDisplayCost(image: Doc<"generatedImages">, job: Doc<"generationJob
       ? cost * 0.5
       : cost;
   return generationCost + (image.backgroundRemovalCostUsd ?? 0);
-}
-
-function getShopifyAdminUrl(product: Doc<"products">, storeHandle?: string | null) {
-  if (!storeHandle) return null;
-  const numericId = product.shopifyProductId.split("/").pop();
-  if (!numericId) return null;
-  return `https://admin.shopify.com/store/${storeHandle}/products/${numericId}`;
 }
 
 function JobDetailPage() {
@@ -205,7 +178,12 @@ const [reviewing, setReviewing] = useState(false);
   const canCancelJob = job.status === "queued" || job.status === "running";
   const canForcePoll = job.executionMode === "batch" && Boolean(job.batchId) && job.status === "running";
   const jobCost = images.reduce((sum, image) => sum + imageDisplayCost(image, job), 0);
-  const reviewBadge = reviewAggregateBadge(reviewableImages.length, pendingCount, approvedCount, rejectedCount);
+  const reviewBadge = reviewAggregateBadge({
+    total: reviewableImages.length,
+    pending: pendingCount,
+    approved: approvedCount,
+    rejected: rejectedCount,
+  });
 
   async function handleForcePoll() {
     setPolling(true);
@@ -909,14 +887,11 @@ function ReviewTile({
 }
 
 function ImageStateBadge({ image }: { image: Doc<"generatedImages"> }) {
-  if (image.status === "failed") return <StateBadge state="danger">Error</StateBadge>;
-  if (image.status === "canceled") return <StateBadge state="danger">Canceled</StateBadge>;
-  if (image.status === "uploaded") return <StateBadge state="success">Pushed</StateBadge>;
-  if (!isReviewable(image)) return <StateBadge state="warning">{image.status}</StateBadge>;
-  const reviewStatus = getReviewStatus(image);
-  if (reviewStatus === "approved") return <StateBadge state="success">Approved</StateBadge>;
-  if (reviewStatus === "rejected") return <StateBadge state="danger">Rejected</StateBadge>;
-  return <StateBadge state="warning">To review</StateBadge>;
+  return (
+    <StateBadge state={generatedImageStateTone(image)}>
+      {generatedImageStateLabel(image)}
+    </StateBadge>
+  );
 }
 
 function PreviewDialog({
