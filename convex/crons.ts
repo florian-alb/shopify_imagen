@@ -7,6 +7,12 @@ const crons = cronJobs();
 // batch, retrieves finished images, and completes the job once results arrive.
 crons.interval("poll image batches", { minutes: 2 }, internal.generation.pollBatches, {});
 crons.interval(
+  "resume image post-processing",
+  { minutes: 1 },
+  internal.generation.processPostprocessingBacklog,
+  {},
+);
+crons.interval(
   "cleanup stale rejected images",
   { hours: 1 },
   internal.shopify.cleanupStaleRejectedImages,

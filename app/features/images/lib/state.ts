@@ -11,6 +11,7 @@ export type GeneratedImageStateTone =
 export function generatedImageStateLabel(image: Doc<"generatedImages">) {
   if (image.status === "failed") return "Error";
   if (image.status === "canceled") return "Canceled";
+  if (image.status === "postprocessing") return "Post-processing";
   if (image.status === "uploaded") return "Pushed";
   if (!isReviewable(image)) return image.status;
 
