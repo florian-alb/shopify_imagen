@@ -1,5 +1,6 @@
 import { Search, SlidersHorizontal } from "lucide-react";
 
+import { FilterSelect } from "@/components/common/FilterSelect";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -15,7 +16,6 @@ import {
 } from "@/lib/status";
 
 import type { ProductFacets } from "../types";
-import { ProductFilterSelect } from "./ProductFilterSelect";
 
 const actionTabs: Array<{ label: string; value?: ProductPrimaryAction }> = [
   { label: "Tous" },
@@ -74,9 +74,10 @@ export function ProductsFilters({
           </div>
         </div>
         <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-6">
-          <ProductFilterSelect
+          <FilterSelect
             value={search.type ?? ""}
             placeholder="Categorie"
+            clearValue=""
             onChange={(type) => onFilterChange({ type: type || undefined })}
           >
             {facets?.productTypes.map((item) => (
@@ -84,10 +85,11 @@ export function ProductsFilters({
                 {item}
               </SelectItem>
             ))}
-          </ProductFilterSelect>
-          <ProductFilterSelect
+          </FilterSelect>
+          <FilterSelect
             value={search.collection ?? ""}
             placeholder="Collection"
+            clearValue=""
             onChange={(collection) =>
               onFilterChange({ collection: collection || undefined })
             }
@@ -97,10 +99,11 @@ export function ProductsFilters({
                 {item.title}
               </SelectItem>
             ))}
-          </ProductFilterSelect>
-          <ProductFilterSelect
+          </FilterSelect>
+          <FilterSelect
             value={search.shopifyStatus ?? ""}
             placeholder="Shopify"
+            clearValue=""
             onChange={(shopifyStatus) =>
               onFilterChange({ shopifyStatus: shopifyStatus || undefined })
             }
@@ -110,10 +113,11 @@ export function ProductsFilters({
                 {shopifyStatusLabel(item)}
               </SelectItem>
             ))}
-          </ProductFilterSelect>
-          <ProductFilterSelect
+          </FilterSelect>
+          <FilterSelect
             value={search.generation ?? ""}
             placeholder="Generation"
+            clearValue=""
             onChange={(generation) =>
               onFilterChange({
                 generation: (generation || undefined) as ProductSearch["generation"],
@@ -125,10 +129,11 @@ export function ProductsFilters({
                 {label}
               </SelectItem>
             ))}
-          </ProductFilterSelect>
-          <ProductFilterSelect
+          </FilterSelect>
+          <FilterSelect
             value={search.review ?? ""}
             placeholder="Review"
+            clearValue=""
             onChange={(review) =>
               onFilterChange({
                 review: (review || undefined) as ProductSearch["review"],
@@ -140,10 +145,11 @@ export function ProductsFilters({
                 {label}
               </SelectItem>
             ))}
-          </ProductFilterSelect>
-          <ProductFilterSelect
+          </FilterSelect>
+          <FilterSelect
             value={search.publish ?? ""}
             placeholder="Publication"
+            clearValue=""
             onChange={(publish) =>
               onFilterChange({
                 publish: (publish || undefined) as ProductSearch["publish"],
@@ -155,7 +161,7 @@ export function ProductsFilters({
                 {label}
               </SelectItem>
             ))}
-          </ProductFilterSelect>
+          </FilterSelect>
         </div>
       </CardContent>
     </Card>

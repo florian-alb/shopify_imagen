@@ -16,6 +16,8 @@ export function ProductsPage({ search }: { search: ProductSearch }) {
     chooserOpen,
     creatingJob,
     facets,
+    imageTypes,
+    imageTypeSelection,
     loaded,
     page,
     pageSize,
@@ -130,10 +132,19 @@ export function ProductsPage({ search }: { search: ProductSearch }) {
       {chooserOpen ? (
         <ImageTypeSelectionDialog
           open={chooserOpen}
-          products={selectedProducts}
-          submitting={creatingJob}
           onOpenChange={setChooserOpen}
-          onGenerate={(types) => void generate(types)}
+          types={imageTypes}
+          selectedTypes={imageTypeSelection.selectedTypes}
+          busy={creatingJob}
+          title="Types d'images"
+          description={`${selectedProducts.length} produit${
+            selectedProducts.length === 1 ? "" : "s"
+          } selectionne${
+            selectedProducts.length === 1 ? "" : "s"
+          }. Chaque type utilise son prompt actif.`}
+          submitLabel="Lancer le job"
+          onToggleType={imageTypeSelection.toggleType}
+          onGenerate={() => void generate()}
         />
       ) : null}
     </main>

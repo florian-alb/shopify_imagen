@@ -3,13 +3,14 @@ import { useAction, useMutation, useQuery } from "convex/react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
-import { api, type Id } from "@/lib/convex";
+import { api, type Doc, type Id } from "@/lib/convex";
 import {
   productFilterArgs,
   type ProductSearch,
 } from "@/lib/productFilters";
 
 import type { ProductFacets, ProductListItem, ProductPageResult } from "../types";
+import { useImageTypeSelection } from "./useImageTypeSelection";
 
 export function useProductsListPage(search: ProductSearch) {
   const navigate = useNavigate();
@@ -54,10 +55,18 @@ export function useProductsListPage(search: ProductSearch) {
     limit: pageSize,
   }) as ProductPageResult | undefined;
   const facets = useQuery(api.products.facets) as ProductFacets | undefined;
+  const prompts = useQuery(api.prompts.list) as
+    | Doc<"promptTemplates">[]
+    | undefined;
   const syncProducts = useAction(api.shopify.syncProducts);
   const createJob = useMutation(api.jobs.create);
 
   const products = useMemo(() => productPage?.page ?? [], [productPage?.page]);
+  const imageTypes = useMemo(
+    () => (prompts ?? []).filter((prompt) => prompt.isActive),
+    [prompts],
+  );
+  const imageTypeSelection = useImageTypeSelection(imageTypes);
   const loaded = productPage !== undefined && facets !== undefined;
   const allVisibleSelected = products.length
     ? products.every((product) => selected.has(product._id))
@@ -130,20 +139,24 @@ export function useProductsListPage(search: ProductSearch) {
   }
 
   function openChooser() {
+    imageTypeSelection.resetSelection();
     setChooserOpen(true);
   }
 
   function openChooserForProduct(product: ProductListItem) {
+    imageTypeSelection.resetSelection();
     setSelected(new Set([product._id]));
     setChooserOpen(true);
   }
 
-  async function generate(imageTypes: string[]) {
+  async function generate() {
+    if (!imageTypeSelection.selectedTypes.size) return;
+
     setCreatingJob(true);
     try {
       const jobId = await createJob({
         productIds: Array.from(selected),
-        selectedImageTypes: imageTypes,
+        selectedImageTypes: Array.from(imageTypeSelection.selectedTypes),
         forceRegenerate: true,
       });
       setChooserOpen(false);
@@ -171,6 +184,8 @@ export function useProductsListPage(search: ProductSearch) {
     chooserOpen,
     creatingJob,
     facets,
+    imageTypes,
+    imageTypeSelection,
     loaded,
     page,
     pageSize,

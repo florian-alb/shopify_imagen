@@ -5,6 +5,7 @@ import { useState } from "react";
 
 import { errorMessage } from "@/lib/errors";
 import { api, type Doc } from "@/lib/convex";
+import { useImageTypeSelection } from "./useImageTypeSelection";
 
 export function useProductImageGeneration({
   product,
@@ -15,33 +16,22 @@ export function useProductImageGeneration({
 }) {
   const navigate = useNavigate();
   const createJob = useMutation(api.jobs.create);
-  const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set());
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const imageTypeSelection = useImageTypeSelection(availableTypes);
 
   function openGenerate() {
-    const presets = availableTypes.filter((type) => type.isPreset);
-    const defaults = presets.length ? presets : availableTypes;
-    setSelectedTypes(new Set(defaults.map((type) => type.imageType)));
+    imageTypeSelection.resetSelection();
     setOpen(true);
   }
 
-  function toggleType(type: string) {
-    setSelectedTypes((current) => {
-      const next = new Set(current);
-      if (next.has(type)) next.delete(type);
-      else next.add(type);
-      return next;
-    });
-  }
-
   async function generate() {
-    if (!product || !selectedTypes.size) return;
+    if (!product || !imageTypeSelection.selectedTypes.size) return;
     setBusy(true);
     try {
       const jobId = await createJob({
         productIds: [product._id],
-        selectedImageTypes: Array.from(selectedTypes),
+        selectedImageTypes: Array.from(imageTypeSelection.selectedTypes),
         forceRegenerate: true,
       });
       setOpen(false);
@@ -63,12 +53,12 @@ export function useProductImageGeneration({
   }
 
   return {
-    selectedTypes,
+    selectedTypes: imageTypeSelection.selectedTypes,
     open,
     setOpen,
     busy,
     openGenerate,
-    toggleType,
+    toggleType: imageTypeSelection.toggleType,
     generate,
   };
 }

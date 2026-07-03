@@ -3,7 +3,7 @@ import { ImageRetouchDialog } from "@/components/image-retouch-dialog";
 import { EmptyState } from "@/components/page";
 
 import { DeleteImageDialog } from "./DeleteImageDialog";
-import { GenerateImagesDialog } from "./GenerateImagesDialog";
+import { ImageTypeSelectionDialog } from "./ImageTypeSelectionDialog";
 import { ProductFacts } from "./ProductFacts";
 import { ProductHeader } from "./ProductHeader";
 import { ProductImageHistory } from "./ProductImageHistory";
@@ -140,14 +140,17 @@ export function ProductDetailPage({
         </div>
       </div>
 
-      <GenerateImagesDialog
+      <ImageTypeSelectionDialog
         open={generation.open}
         onOpenChange={generation.setOpen}
         types={viewModel.availableTypes}
         selectedTypes={generation.selectedTypes}
-        onToggle={generation.toggleType}
         busy={generation.busy}
         onGenerate={() => void generation.generate()}
+        title="Generate images"
+        description="Select image types for this product. Each type maps to a prompt template."
+        submitLabel="Start background job"
+        onToggleType={generation.toggleType}
       />
 
       <ImageRetouchDialog

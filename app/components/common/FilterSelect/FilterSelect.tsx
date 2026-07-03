@@ -8,21 +8,23 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-export function ProductFilterSelect({
+export function FilterSelect({
   value,
   placeholder,
+  clearValue = "all",
   onChange,
   children,
 }: {
   value: string;
   placeholder: string;
+  clearValue?: string;
   onChange: (value: string) => void;
   children: ReactNode;
 }) {
   return (
     <Select
       value={value || "all"}
-      onValueChange={(next) => onChange(next === "all" ? "" : next)}
+      onValueChange={(next) => onChange(next === "all" ? clearValue : next)}
     >
       <SelectTrigger className="h-9 w-full">
         <SelectValue placeholder={placeholder} />
