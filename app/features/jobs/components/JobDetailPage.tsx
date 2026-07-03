@@ -19,6 +19,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import {
   ImageRetouchDialog,
+  type RetouchSaveMode,
   type RetouchTarget,
 } from "@/components/image-retouch-dialog";
 import { ImageStateBadge } from "@/components/common/ImageStateBadge";
@@ -242,7 +243,7 @@ function openRetouch(image: Doc<"generatedImages">) {
     });
   }
 
-  async function saveRetouch(target: RetouchTarget, blob: Blob) {
+  async function saveRetouch(target: RetouchTarget, blob: Blob, mode: RetouchSaveMode) {
     setRetouchSaving(true);
     try {
       const uploadUrl = await generateRetouchUploadUrl({});
@@ -264,12 +265,21 @@ function openRetouch(image: Doc<"generatedImages">) {
         sourceImageId: target.id,
         storageId: payload.storageId as Id<"_storage">,
         contentType: blob.type || "image/png",
+        saveMode: mode,
       });
       setRetouchTarget(null);
       setPreviewId(retouchedImageId);
-      toast.success("Version retouchee enregistree", {
-        description: "Elle est ajoutee en attente de validation.",
-      });
+      toast.success(
+        mode === "overwrite"
+          ? "Image retouchee enregistree"
+          : "Version retouchee enregistree",
+        {
+          description:
+            mode === "overwrite"
+              ? "L'image existante est remplacee et repasse en attente de validation."
+              : "Elle est ajoutee en attente de validation.",
+        },
+      );
     } catch (retouchError) {
       toast.error("Retouche non enregistree", {
         description:
