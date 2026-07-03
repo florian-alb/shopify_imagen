@@ -1,4 +1,4 @@
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link } from "@tanstack/react-router";
 import { useAction, useMutation } from "convex/react";
 import {
   ArrowLeft,
@@ -97,7 +97,6 @@ function imageDisplayCost(image: Doc<"generatedImages">, job: Doc<"generationJob
 }
 
 export function JobDetailPage({ jobId }: { jobId: string }) {
-  const navigate = useNavigate();
   const { data, shopInfo } = useJobDetail(jobId);
   const retryJob = useMutation(api.jobs.retry);
   const generateRetouchUploadUrl = useMutation(api.jobs.generateRetouchUploadUrl);
@@ -114,8 +113,8 @@ export function JobDetailPage({ jobId }: { jobId: string }) {
     openRegeneration,
     closeRegeneration,
     regenerate,
+    retryImage,
   } = useJobImageRegeneration({
-    navigateToJob: (nextJobId) => void navigate({ to: "/jobs/$jobId", params: { jobId: nextJobId } }),
     onOpen: () => setPreviewId(null),
   });
   const {
@@ -405,7 +404,7 @@ function openRetouch(image: Doc<"generatedImages">) {
               }}
               onRegenerate={openRegeneration}
               onRetouch={openRetouch}
-              onRetry={() => void handleRetryJob()}
+              onRetry={(image) => void retryImage(image)}
             />
           );
         })}
@@ -744,7 +743,7 @@ function JobProductReviewCard({
   onPublishApproved: () => void;
   onRegenerate: (image: Doc<"generatedImages">) => void;
   onRetouch: (image: Doc<"generatedImages">) => void;
-  onRetry: () => void;
+  onRetry: (image: Doc<"generatedImages">) => void;
 }) {
   const reviewable = images.filter(isReviewable);
   const approved = reviewable.filter((image) => getReviewStatus(image) === "approved").length;
@@ -807,7 +806,7 @@ function JobProductReviewCard({
               onReview={(reviewStatus) => onReview([image._id], reviewStatus)}
               onRegenerate={() => onRegenerate(image)}
               onRetouch={() => onRetouch(image)}
-              onRetry={onRetry}
+              onRetry={() => onRetry(image)}
             />
           ))}
         </div>
@@ -875,10 +874,10 @@ function ReviewImageTile({
                 aria-label={`Retry ${image.imageType}`}
                 variant="outline"
                 size="icon-sm"
-                disabled={retrying}
+                disabled={retrying || regenerating}
                 onClick={onRetry}
               >
-                {retrying ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+                {retrying || regenerating ? <Loader2 className="animate-spin" /> : <RefreshCw />}
               </Button>
             </TooltipTrigger>
             <TooltipContent>retry</TooltipContent>

@@ -1,18 +1,19 @@
 import { useMutation } from "convex/react";
 import { useState } from "react";
 import { toast } from "sonner";
+
 import { api, type Doc, type Id } from "@/lib/convex";
 
 type UseJobImageRegenerationOptions = {
-  navigateToJob: (jobId: Id<"generationJobs">) => void;
   onOpen?: () => void;
 };
 
-export function useJobImageRegeneration({ navigateToJob, onOpen }: UseJobImageRegenerationOptions) {
-  const createJob = useMutation(api.jobs.create);
-  const reviewImages = useMutation(api.jobs.reviewImages);
-  const [regeneratingId, setRegeneratingId] = useState<Id<"generatedImages"> | null>(null);
-  const [regenerationTarget, setRegenerationTarget] = useState<Doc<"generatedImages"> | null>(null);
+export function useJobImageRegeneration({ onOpen }: UseJobImageRegenerationOptions) {
+  const regenerateImage = useMutation(api.jobs.regenerateImage);
+  const [regeneratingId, setRegeneratingId] =
+    useState<Id<"generatedImages"> | null>(null);
+  const [regenerationTarget, setRegenerationTarget] =
+    useState<Doc<"generatedImages"> | null>(null);
   const [regenerationInstructions, setRegenerationInstructions] = useState("");
 
   function openRegeneration(image: Doc<"generatedImages">) {
@@ -25,26 +26,20 @@ export function useJobImageRegeneration({ navigateToJob, onOpen }: UseJobImageRe
     if (!regeneratingId) setRegenerationTarget(null);
   }
 
-  async function regenerate() {
-    if (!regenerationTarget) return;
-
-    const image = regenerationTarget;
+  async function regenerateImageInPlace(
+    image: Doc<"generatedImages">,
+    instructions?: string,
+  ) {
     setRegeneratingId(image._id);
     try {
-      const nextJobId = await createJob({
-        productIds: [image.productId],
-        selectedImageTypes: [image.imageType],
-        forceRegenerate: true,
-        regenerationInstructions: regenerationInstructions.trim() || undefined,
+      await regenerateImage({
+        imageId: image._id,
+        regenerationInstructions: instructions?.trim() || undefined,
       });
-      await reviewImages({ imageIds: [image._id], reviewStatus: "rejected" });
       setRegenerationTarget(null);
       setRegenerationInstructions("");
       toast.success(`${image.imageType} regeneration started`, {
-        action: {
-          label: "View job",
-          onClick: () => navigateToJob(nextJobId),
-        },
+        description: "The existing image slot will update in this job.",
       });
     } catch (error) {
       toast.error("Regeneration failed", {
@@ -55,6 +50,15 @@ export function useJobImageRegeneration({ navigateToJob, onOpen }: UseJobImageRe
     }
   }
 
+  async function regenerate() {
+    if (!regenerationTarget) return;
+    await regenerateImageInPlace(regenerationTarget, regenerationInstructions);
+  }
+
+  async function retryImage(image: Doc<"generatedImages">) {
+    await regenerateImageInPlace(image);
+  }
+
   return {
     regeneratingId,
     regenerationTarget,
@@ -63,5 +67,6 @@ export function useJobImageRegeneration({ navigateToJob, onOpen }: UseJobImageRe
     openRegeneration,
     closeRegeneration,
     regenerate,
+    retryImage,
   };
 }

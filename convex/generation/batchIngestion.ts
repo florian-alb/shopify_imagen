@@ -3,10 +3,7 @@
 import { internal } from "../_generated/api";
 import type { Doc } from "../_generated/dataModel";
 import type { ActionCtx } from "../_generated/server";
-import { buildSeoImageFilename } from "../lib";
 import { BATCH_PRICE_MULTIPLIER, estimateCostUsd } from "../pricing";
-import { BackgroundRemovalError } from "./backgroundRemoval";
-import { applyBackgroundPostProcessing } from "./backgroundPostProcessing";
 import {
   type BatchIngestCounts,
   type BatchIngestResult,
@@ -22,10 +19,14 @@ import {
   geminiIngestChunkSize,
 } from "./geminiStream";
 import { mimeToExtension } from "./formats";
-import { optimizeForStorage } from "./images";
 import { env, log } from "./runtime";
 import { uploadToR2 } from "./storage";
-import type { GeneratedImage } from "./types";
+
+type BatchIngestOptions = {
+  resultOffset?: number;
+  chunkSize?: number;
+  onResultOffset?: (offset: number) => Promise<void>;
+};
 
 export async function ingestBatchItem(
   ctx: ActionCtx,
@@ -49,78 +50,43 @@ export async function ingestBatchItem(
     });
     return { ingested: 0, failed: changed ? 1 : 0 };
   }
+
   try {
-    const product = (await ctx.runQuery(internal.products.internalGet, {
-      productId: image.productId,
-    })) as Doc<"products"> | null;
-    const safeHandle = (product?.handle ?? "product")
-      .replace(/[^a-z0-9-]+/gi, "-")
-      .toLowerCase();
-    const generated: GeneratedImage = {
+    const contentType = result.contentType ?? "image/png";
+    const extension = mimeToExtension(contentType);
+    const token = Date.now().toString(36);
+    const key = `generated/batch-staging/${job._id}/${image._id}/${token}.${extension}`;
+    const inputUrl = await uploadToR2({
       bytes: result.bytes,
-      contentType: result.contentType ?? "image/png",
-      extension: mimeToExtension(result.contentType ?? "image/png"),
-      usage: result.usage ?? {},
-      providerBatchId: result.providerBatchId,
-      providerRequestId: result.providerRequestId,
-      providerResponseId: result.providerResponseId,
-    };
+      key,
+      contentType,
+    });
     const usage = result.usage ?? {};
     const costUsd = estimateCostUsd(job.imageModel ?? "", usage, {
       batch: job.executionMode === "batch",
     });
     const costRateMultiplier =
       job.executionMode === "batch" ? BATCH_PRICE_MULTIPLIER : 1;
-    const processed = await applyBackgroundPostProcessing({
-      ctx,
-      image,
-      generated,
-      safeHandle,
-      providerCostUsd: costUsd,
-      costRateMultiplier,
-      providerBatchId: job.batchId,
-    });
-    const optimized = await optimizeForStorage(
-      processed.bytes,
-      processed.contentType,
-      processed.extension,
-    );
-    const filename = buildSeoImageFilename({
-      title: product?.title ?? safeHandle,
-      imageType: image.imageType,
-      extension: optimized.extension,
-    });
-    const key = `generated/${safeHandle}/${Date.now().toString(36)}/${filename}`;
-    const storageUrl = await uploadToR2({
-      bytes: optimized.bytes,
-      key,
-      contentType: optimized.contentType,
-    });
     const changed: boolean = await ctx.runMutation(
-      internal.jobs.completeImage,
+      internal.jobs.markImagePostprocessing,
       {
         imageId: image._id,
-        generatedImageUrl: storageUrl,
-        storageUrl,
+        inputUrl,
+        inputContentType: contentType,
+        inputExtension: extension,
         providerBatchId: job.batchId,
         providerRequestId: result.providerRequestId,
         providerResponseId: result.providerResponseId,
-        transparentCutoutUrl: processed.transparentCutoutUrl,
-        backgroundRemovalProvider: processed.backgroundRemovalProvider,
-        backgroundRemovalCostUsd: processed.backgroundRemovalCostUsd,
-        backgroundRemovalRequestId: processed.backgroundRemovalRequestId,
         inputTokens: usage.inputTokens,
         outputTokens: usage.outputTokens,
         costUsd,
         costRateMultiplier,
       },
     );
-    log("batch", "stored", {
+    log("batch", "staged", {
       jobId: job._id,
-      handle: safeHandle,
       type: image.imageType,
-      file: filename,
-      kb: Math.round(optimized.bytes.length / 1024),
+      kb: Math.round(result.bytes.length / 1024),
       costUsd,
     });
     return { ingested: changed ? 1 : 0, failed: 0 };
@@ -137,8 +103,6 @@ export async function ingestBatchItem(
       providerBatchId: job.batchId,
       providerRequestId: result.providerRequestId,
       providerResponseId: result.providerResponseId,
-      backgroundRemovalRequestId:
-        error instanceof BackgroundRemovalError ? error.requestId : undefined,
     });
     return { ingested: 0, failed: changed ? 1 : 0 };
   }
@@ -185,9 +149,10 @@ export async function ingestBatchResults(
   job: Doc<"generationJobs">,
   pending: Doc<"generatedImages">[],
   source: BatchResultSource,
+  options: BatchIngestOptions = {},
 ): Promise<BatchIngestResult> {
   if (source.kind === "items") {
-    const counts = await mapConcurrent(pending, 5, (image) =>
+    const counts = await mapConcurrent(pending, 3, async (image) =>
       ingestBatchItem(ctx, job, image, source.results.get(image._id)),
     );
     const total = counts.reduce(
@@ -199,10 +164,20 @@ export async function ingestBatchResults(
     );
     return { ...total, complete: true };
   }
+
   const apiKey = env("GEMINI_API_KEY");
   if (!apiKey) throw new Error("GEMINI_API_KEY is required.");
+
   if (source.kind === "gemini-file") {
-    const requestedOffset = job.batchResultOffset ?? 0;
+    const requestedOffset = options.resultOffset ?? job.batchResultOffset ?? 0;
+    const onResultOffset =
+      options.onResultOffset ??
+      (async (offset: number) => {
+        await ctx.runMutation(internal.jobs.setBatchResultOffset, {
+          jobId: job._id,
+          offset,
+        });
+      });
     const response = await fetch(
       `https://generativelanguage.googleapis.com/download/v1beta/${source.fileName}:download?alt=media`,
       {
@@ -219,31 +194,23 @@ export async function ingestBatchResults(
     const startOffset =
       requestedOffset && response.status === 206 ? requestedOffset : 0;
     if (startOffset !== requestedOffset) {
-      log(
-        "batch",
-        "Gemini result file ignored range request, restarting cursor",
-        { jobId: job._id, requestedOffset },
-      );
-      await ctx.runMutation(internal.jobs.setBatchResultOffset, {
+      log("batch", "Gemini result file ignored range request, restarting cursor", {
         jobId: job._id,
-        offset: 0,
+        requestedOffset,
       });
+      await onResultOffset(0);
     }
-    const chunkSize = geminiIngestChunkSize(pending);
+    const chunkSize = options.chunkSize ?? geminiIngestChunkSize(pending);
     return ingestGeminiStream(ctx, job, pending, chunkSize, (onItem) =>
       consumeJsonLines(
         response,
         startOffset,
         async (line) => onItem(JSON.parse(line)),
-        async (offset) => {
-          await ctx.runMutation(internal.jobs.setBatchResultOffset, {
-            jobId: job._id,
-            offset,
-          });
-        },
+        onResultOffset,
       ),
     );
   }
+
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/${source.batchName}`,
     {
@@ -258,20 +225,27 @@ export async function ingestBatchResults(
     ctx,
     job,
     pending,
-    geminiIngestChunkSize(pending),
+    options.chunkSize ?? geminiIngestChunkSize(pending),
     (onItem) => consumeFirstInlineResponseArray(response, onItem),
   );
 }
 
-export async function cleanupGeminiBatchFiles(job: Doc<"generationJobs">) {
-  if (job.imageProvider !== "gemini") return;
+export async function cleanupGeminiInputFile(
+  jobId: string,
+  fileName: string | null | undefined,
+) {
   try {
-    await deleteGeminiFile(job.batchInputFileName);
+    await deleteGeminiFile(fileName);
   } catch (error) {
     log("batch", "Gemini input file cleanup failed", {
-      jobId: job._id,
-      fileName: job.batchInputFileName,
+      jobId,
+      fileName,
       error: error instanceof Error ? error.message : String(error),
     });
   }
+}
+
+export async function cleanupGeminiBatchFiles(job: Doc<"generationJobs">) {
+  if (job.imageProvider !== "gemini") return;
+  await cleanupGeminiInputFile(job._id, job.batchInputFileName);
 }
