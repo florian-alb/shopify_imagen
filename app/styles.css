@@ -642,6 +642,14 @@
   cursor: copy;
 }
 
+.retouch-canvas[data-tool="hand"] {
+  cursor: grab;
+}
+
+.retouch-canvas[data-tool="hand"]:active {
+  cursor: grabbing;
+}
+
 .retouch-brush-preview {
   position: absolute;
   top: 0;
