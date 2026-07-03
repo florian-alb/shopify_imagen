@@ -3,21 +3,19 @@ import { useAction, useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
 import {
   ArrowLeft,
-  Check,
   ChevronLeft,
   ChevronRight,
   ExternalLink,
-  GripVertical,
   ListChecks,
-  Paintbrush,
   RefreshCw,
   Send,
   Trash2,
   WandSparkles,
-  X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Dialog as DialogPrimitive } from "radix-ui";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Gallery } from "@/components/common/Gallery";
+import { ImageStateBadge } from "@/components/common/ImageStateBadge";
+import { Lightbox, useLightbox } from "@/components/common/Lightbox";
 import {
   ImageRetouchDialog,
   type RetouchTarget,
@@ -68,12 +66,10 @@ import {
   getReviewStatus,
   isPushReady,
   isReviewable,
-  type ReviewStatus,
 } from "@/features/images/lib/review";
 import {
   generatedImageStateLabel,
   generatedImageStateTone,
-  type GeneratedImageStateTone,
 } from "@/features/images/lib/state";
 import { getShopifyAdminUrl } from "@/features/shopify/lib/admin";
 import { shopifyMediaId } from "@/features/shopify/lib/media";
@@ -150,10 +146,7 @@ function ProductDetailPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [reviewingImageId, setReviewingImageId] =
     useState<Id<"generatedImages"> | null>(null);
-  const [lightbox, setLightbox] = useState<{
-    images: LightboxImage[];
-    index: number;
-  } | null>(null);
+  const lightbox = useLightbox();
   const [deleteTarget, setDeleteTarget] =
     useState<Doc<"generatedImages"> | null>(null);
   const [retouchTarget, setRetouchTarget] = useState<RetouchTarget | null>(
@@ -169,10 +162,6 @@ function ProductDetailPage() {
     productId: string;
     images: ShopifyGalleryImage[];
   } | null>(null);
-
-  const openLightbox = useCallback((images: LightboxImage[], index: number) => {
-    if (images.length) setLightbox({ images, index });
-  }, []);
 
   const product = data?.product;
   const images = data?.images ?? [];
@@ -608,7 +597,7 @@ function ProductDetailPage() {
                 label: image.altText ?? "Shopify product",
               }))}
               emptyText="Aucune image Shopify."
-              onZoom={openLightbox}
+              onZoom={lightbox.open}
               reorder={
                 canReorderShopifyImages
                   ? {
@@ -651,7 +640,7 @@ function ProductDetailPage() {
                 statusLabel: "Generation en cours",
               }))}
               emptyText="Aucune image generee."
-              onZoom={openLightbox}
+              onZoom={lightbox.open}
             />
           </section>
 
@@ -801,7 +790,7 @@ function ProductDetailPage() {
                 <span className="min-w-0 flex-1 truncate text-sm font-medium">
                   {image.imageType}
                 </span>
-                <GeneratedImageStateBadge image={image} />
+                  <ImageStateBadge image={image} />
               </Label>
             ))}
           </div>
@@ -832,11 +821,9 @@ function ProductDetailPage() {
       </AlertDialog>
 
       <Lightbox
-        state={lightbox}
-        onIndexChange={(index) =>
-          setLightbox((current) => (current ? { ...current, index } : current))
-        }
-        onClose={() => setLightbox(null)}
+        state={lightbox.state}
+        onIndexChange={lightbox.setIndex}
+        onClose={lightbox.close}
       />
 
       <AlertDialog
@@ -913,110 +900,6 @@ function ProductNavigationButton({
   );
 }
 
-type LightboxImage = { url: string; label?: string };
-
-function Lightbox({
-  state,
-  onIndexChange,
-  onClose,
-}: {
-  state: { images: LightboxImage[]; index: number } | null;
-  onIndexChange: (index: number) => void;
-  onClose: () => void;
-}) {
-  const open = state !== null;
-  const images = state?.images ?? [];
-  const index = state?.index ?? 0;
-  const current = open ? images[index] : null;
-  const hasMultiple = images.length > 1;
-
-  const go = useCallback(
-    (delta: number) => {
-      if (!images.length) return;
-      onIndexChange((index + delta + images.length) % images.length);
-    },
-    [index, images.length, onIndexChange],
-  );
-
-  useEffect(() => {
-    if (!open) return;
-    function onKey(event: KeyboardEvent) {
-      if (event.key === "ArrowRight") go(1);
-      else if (event.key === "ArrowLeft") go(-1);
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, go]);
-
-  return (
-    <DialogPrimitive.Root
-      open={open}
-      onOpenChange={(next) => !next && onClose()}
-    >
-      <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm data-open:animate-in data-open:fade-in-0" />
-        <DialogPrimitive.Content
-          className="fixed inset-0 z-50 flex flex-col items-center justify-center p-4 outline-none sm:p-10"
-          onClick={onClose}
-        >
-          <DialogPrimitive.Title className="sr-only">
-            {current?.label ?? "Image preview"}
-          </DialogPrimitive.Title>
-          {current ? (
-            <img
-              src={current.url}
-              alt={current.label ?? "Image"}
-              className="max-h-[85vh] max-w-full rounded-lg object-contain shadow-2xl"
-              onClick={(event) => event.stopPropagation()}
-            />
-          ) : null}
-          {current?.label ? (
-            <span className="mt-3 rounded-full bg-black/60 px-3 py-1 text-sm font-medium text-white">
-              {current.label}
-              {hasMultiple ? ` · ${index + 1} / ${images.length}` : ""}
-            </span>
-          ) : null}
-
-          <DialogPrimitive.Close
-            className="absolute top-4 right-4 rounded-full bg-black/50 p-2 text-white transition hover:bg-black/70"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <X className="size-5" />
-            <span className="sr-only">Close</span>
-          </DialogPrimitive.Close>
-
-          {hasMultiple ? (
-            <>
-              <button
-                type="button"
-                aria-label="Previous image"
-                className="absolute left-3 top-1/2 -translate-y-1/2 rounded-full bg-black/50 p-2 text-white transition hover:bg-black/70 sm:left-6"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  go(-1);
-                }}
-              >
-                <ChevronLeft className="size-6" />
-              </button>
-              <button
-                type="button"
-                aria-label="Next image"
-                className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-black/50 p-2 text-white transition hover:bg-black/70 sm:right-6"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  go(1);
-                }}
-              >
-                <ChevronRight className="size-6" />
-              </button>
-            </>
-          ) : null}
-        </DialogPrimitive.Content>
-      </DialogPrimitive.Portal>
-    </DialogPrimitive.Root>
-  );
-}
-
 function GenerateDialog({
   open,
   onOpenChange,
@@ -1081,257 +964,6 @@ function Fact({ label, value }: { label: string; value: string }) {
   );
 }
 
-type GalleryItem = {
-  id?: string;
-  url: string;
-  label?: string;
-  caption?: string;
-  retouched?: boolean;
-  reviewStatus?: ReviewStatus;
-  statusLabel?: string;
-  statusTone?: GeneratedImageStateTone;
-  reviewable?: boolean;
-  reviewing?: boolean;
-  onApprove?: () => void;
-  onReject?: () => void;
-  onRetouch?: () => void;
-  onDelete?: () => void;
-};
-
-type PendingGalleryItem = {
-  id: string;
-  caption?: string;
-  statusLabel: string;
-};
-
-type GalleryReorder = {
-  dragId: string | null;
-  disabled: boolean;
-  onDragStart: (id: string) => void;
-  onDragOver: (id: string) => void;
-  onCommit: () => void;
-};
-
-function Gallery({
-  title,
-  description,
-  items,
-  pendingItems = [],
-  emptyText,
-  onZoom,
-  reorder,
-}: {
-  title: string;
-  description?: string;
-  items: GalleryItem[];
-  pendingItems?: PendingGalleryItem[];
-  emptyText: string;
-  onZoom: (images: LightboxImage[], index: number) => void;
-  reorder?: GalleryReorder;
-}) {
-  const itemCount = items.length + pendingItems.length;
-  const lightboxImages = items.map((item) => ({
-    url: item.url,
-    label: item.label,
-  }));
-  return (
-    <Card className="min-h-72 rounded-lg">
-      <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle className="text-lg">{title}</CardTitle>
-        <div className="flex items-center gap-2">
-          {reorder?.disabled ? <BusyIcon busy /> : null}
-          <StateBadge>{itemCount}</StateBadge>
-        </div>
-      </CardHeader>
-      <CardContent>
-        {description ? (
-          <p className="mb-3 text-xs text-muted-foreground">{description}</p>
-        ) : null}
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-          {itemCount ? (
-            <>
-              {items.map((item, index) => {
-              const canDrag = Boolean(reorder && item.id && !reorder.disabled);
-              return (
-                <figure
-                  key={item.id ?? `${item.url}-${index}`}
-                  draggable={canDrag}
-                  onDragStart={(event) => {
-                    if (!item.id || !reorder) return;
-                    event.dataTransfer.effectAllowed = "move";
-                    reorder.onDragStart(item.id);
-                  }}
-                  onDragOver={(event) => {
-                    if (!canDrag || !item.id || !reorder) return;
-                    event.preventDefault();
-                    event.dataTransfer.dropEffect = "move";
-                    reorder.onDragOver(item.id);
-                  }}
-                  onDrop={(event) => {
-                    if (!canDrag || !reorder) return;
-                    event.preventDefault();
-                    void reorder.onCommit();
-                  }}
-                  onDragEnd={() => reorder && void reorder.onCommit()}
-                  data-dragging={reorder?.dragId === item.id ? "" : undefined}
-                  data-testid={
-                    reorder ? `shopify-image-${index + 1}` : undefined
-                  }
-                  className={`group relative overflow-hidden rounded-lg ring-1 ring-border transition data-dragging:opacity-50${
-                    canDrag ? " cursor-grab active:cursor-grabbing" : ""
-                  }${item.reviewStatus === "rejected" ? " bg-muted opacity-70 grayscale" : ""}${
-                    item.reviewStatus === "approved" ? " ring-emerald-200" : ""
-                  }`}
-                >
-                  <button
-                    type="button"
-                    onClick={() => onZoom(lightboxImages, index)}
-                    className="image-tile w-full cursor-zoom-in rounded-none transition hover:opacity-90"
-                  >
-                    <img
-                      src={item.url}
-                      alt={item.label ?? title}
-                      draggable={false}
-                    />
-                  </button>
-                  {reorder && item.id ? (
-                    <span className="pointer-events-none absolute top-1.5 left-1.5 flex items-center gap-1 rounded-md bg-background/85 px-1.5 py-1 text-xs font-medium shadow-sm backdrop-blur-sm">
-                      <GripVertical className="size-3.5" />
-                      {index + 1}
-                    </span>
-                  ) : null}
-          {item.onDelete ? (
-            <Button
-              variant="destructive"
-              size="icon-sm"
-              aria-label="Delete image"
-                      onClick={item.onDelete}
-                      className="absolute top-1.5 right-1.5 bg-background/80 opacity-0 backdrop-blur-sm transition group-hover:opacity-100 focus-visible:opacity-100"
-                    >
-              <Trash2 />
-            </Button>
-          ) : null}
-          {item.onRetouch ? (
-            <Button
-              variant="outline"
-              size="icon-sm"
-              aria-label={`Retoucher ${item.caption ?? item.label ?? "image"}`}
-              title="Retoucher"
-              onClick={item.onRetouch}
-              className="absolute top-1.5 right-10 bg-background/80 opacity-0 backdrop-blur-sm transition group-hover:opacity-100 focus-visible:opacity-100"
-            >
-              <Paintbrush />
-            </Button>
-          ) : null}
-          {item.caption || item.statusLabel || item.reviewable ? (
-            <figcaption className="grid gap-2 px-2 py-2">
-              <div className="flex min-w-0 items-center justify-between gap-2">
-                <span className="flex min-w-0 items-center gap-1.5">
-                  {item.caption ? (
-                    <span className="truncate text-xs font-medium">
-                      {item.caption}
-                    </span>
-                  ) : null}
-                  {item.retouched ? (
-                    <Badge variant="outline" className="shrink-0 text-[0.65rem]">
-                      Retouche
-                    </Badge>
-                  ) : null}
-                </span>
-                {item.statusLabel ? (
-                  <StateBadge state={item.statusTone}>
-                    {item.statusLabel}
-                          </StateBadge>
-                        ) : null}
-                      </div>
-                      {item.reviewable ? (
-                        <div className="grid grid-cols-2 gap-1">
-                          <Button
-                            type="button"
-                            aria-label={`Approve ${item.caption ?? item.label ?? "image"}`}
-                            title="Approve"
-                            variant={
-                              item.reviewStatus === "approved"
-                                ? "default"
-                                : "outline"
-                            }
-                            size="icon-sm"
-                            disabled={item.reviewing}
-                            onClick={item.onApprove}
-                          >
-                            <Check />
-                          </Button>
-                          <Button
-                            type="button"
-                            aria-label={`Reject ${item.caption ?? item.label ?? "image"}`}
-                            title="Reject"
-                            variant={
-                              item.reviewStatus === "rejected"
-                                ? "destructive"
-                                : "outline"
-                            }
-                            size="icon-sm"
-                            disabled={item.reviewing}
-                            onClick={item.onReject}
-                          >
-                            <X />
-                          </Button>
-                        </div>
-                      ) : null}
-                    </figcaption>
-                  ) : null}
-                </figure>
-              );
-              })}
-              {pendingItems.map((item) => (
-                <GeneratingGalleryCard key={item.id} item={item} />
-              ))}
-            </>
-          ) : (
-            <p className="col-span-2 text-sm text-muted-foreground">
-              {emptyText}
-            </p>
-          )}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function GeneratingGalleryCard({ item }: { item: PendingGalleryItem }) {
-  return (
-    <figure className="relative overflow-hidden rounded-lg bg-muted/30 ring-1 ring-border">
-      <div className="image-tile generated-wave-tile w-full rounded-none">
-        <div className="generated-wave generated-wave-a" />
-        <div className="generated-wave generated-wave-b" />
-        <div className="generated-wave generated-wave-c" />
-      </div>
-      <figcaption className="grid gap-1.5 px-2 py-2">
-        {item.caption ? (
-          <span className="truncate text-xs font-medium" title={item.caption}>
-            {item.caption}
-          </span>
-        ) : null}
-        <div className="min-w-0">
-          <StateBadge state="warning">{item.statusLabel}</StateBadge>
-        </div>
-      </figcaption>
-    </figure>
-  );
-}
-
-function GeneratedImageStateBadge({
-  image,
-}: {
-  image: Doc<"generatedImages">;
-}) {
-  return (
-    <StateBadge state={generatedImageStateTone(image)}>
-      {generatedImageStateLabel(image)}
-    </StateBadge>
-  );
-}
-
 function HistoryItem({
   image,
   onDelete,
@@ -1350,7 +982,7 @@ function HistoryItem({
         <span className="flex items-center gap-2">
           {image.imageType}
           <Separator orientation="vertical" className="h-4" />
-          <GeneratedImageStateBadge image={image} />
+          <ImageStateBadge image={image} />
           <Badge variant="outline">{providerLabel}</Badge>
         </span>
       </AccordionTrigger>
