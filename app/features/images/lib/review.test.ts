@@ -86,6 +86,24 @@ describe("generated image state helpers", () => {
       "danger",
     );
   });
+  it("keeps non-reviewable generation states explicit", () => {
+    expect(generatedImageStateLabel(generatedImage({ status: "canceled" }))).toBe(
+      "Canceled",
+    );
+    expect(generatedImageStateTone(generatedImage({ status: "canceled" }))).toBe(
+      "danger",
+    );
+    expect(
+      generatedImageStateLabel(
+        generatedImage({ status: "queued", storageUrl: undefined }),
+      ),
+    ).toBe("queued");
+    expect(
+      generatedImageStateTone(
+        generatedImage({ status: "queued", storageUrl: undefined }),
+      ),
+    ).toBe("warning");
+  });
 });
 
 describe("reviewAggregateBadge", () => {

@@ -51,4 +51,22 @@ describe("job search helpers", () => {
     expect(parsePageSize("50")).toBe(50);
     expect(parsePageSize("10")).toBeUndefined();
   });
+
+  it("keeps non-default pagination and ignores non-string product ids", () => {
+    expect(
+      validateJobSearch({
+        productId: 123,
+        page: "02",
+        pageSize: 100,
+      }),
+    ).toEqual({
+      productId: undefined,
+      status: undefined,
+      executionMode: undefined,
+      provider: undefined,
+      review: undefined,
+      page: 2,
+      pageSize: 100,
+    });
+  });
 });

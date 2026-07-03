@@ -2,9 +2,14 @@ import { useAction } from "convex/react";
 import { toast } from "sonner";
 import { useEffect, useRef, useState } from "react";
 
-import { shopifyMediaId } from "@/features/shopify/lib/media";
 import { errorMessage } from "@/lib/errors";
 import { api, type Doc } from "@/lib/convex";
+import {
+  canReorderShopifyImageOrder,
+  reorderShopifyImageOrder,
+  shopifyImageIdsMatch,
+  shopifyMediaIds,
+} from "../lib";
 
 import type { ShopifyGalleryImage } from "../types";
 
@@ -32,18 +37,11 @@ export function useShopifyImageReorder({
     localShopifyOrder?.productId === productId
       ? localShopifyOrder.images
       : serverShopifyImages;
-  const canReorderShopifyImages =
-    shopifyImages.length > 1 &&
-    shopifyImages.every((image) => shopifyMediaId(image));
+  const canReorderShopifyImages = canReorderShopifyImageOrder(shopifyImages);
 
   useEffect(() => {
     if (!localShopifyOrder || localShopifyOrder.productId !== productId) return;
-    const localIds = localShopifyOrder.images.map(shopifyMediaId);
-    const serverIds = serverShopifyImages.map(shopifyMediaId);
-    if (
-      localIds.length === serverIds.length &&
-      localIds.every((id, index) => id === serverIds[index])
-    ) {
+    if (shopifyImageIdsMatch(localShopifyOrder.images, serverShopifyImages)) {
       setLocalShopifyOrder(null);
     }
   }, [localShopifyOrder, productId, serverShopifyImages]);
@@ -56,16 +54,13 @@ export function useShopifyImageReorder({
   function reorderShopifyImageOver(overMediaId: string) {
     const draggedMediaId = dragShopifyMediaIdRef.current;
     if (!draggedMediaId || draggedMediaId === overMediaId) return;
-    const from = shopifyImages.findIndex(
-      (image) => shopifyMediaId(image) === draggedMediaId,
+    const next = reorderShopifyImageOrder(
+      shopifyImages,
+      draggedMediaId,
+      overMediaId,
     );
-    const to = shopifyImages.findIndex(
-      (image) => shopifyMediaId(image) === overMediaId,
-    );
-    if (from === -1 || to === -1) return;
-    const next = [...shopifyImages];
-    const [draggedImage] = next.splice(from, 1);
-    next.splice(to, 0, draggedImage);
+    if (next === shopifyImages) return;
+
     setLocalShopifyOrder({ productId, images: next });
   }
 
@@ -79,7 +74,7 @@ export function useShopifyImageReorder({
     try {
       const result = await reorderProductImages({
         productId: product._id,
-        orderedMediaIds: localShopifyOrder.images.map(shopifyMediaId),
+        orderedMediaIds: shopifyMediaIds(localShopifyOrder.images),
       });
       toast.success(
         result.pending

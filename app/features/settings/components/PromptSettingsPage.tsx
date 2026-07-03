@@ -49,14 +49,12 @@ import { type Doc, type Id } from "@/lib/convex";
 import { usePromptTemplatesEditor } from "../hooks/usePromptTemplatesEditor";
 import {
   backgroundDraftsEqual,
-  compilePromptPreview,
   defaultAiDraftForPromptName,
   defaultBackgroundDraft,
   defaultPromptAiDraft,
   modelReferenceBusyValue,
   modelReferenceKeys,
   newPromptTabValue,
-  normalizePromptName,
   normalizeReferenceImageCount,
   promptAiDraft,
   promptAiDraftsEqual,

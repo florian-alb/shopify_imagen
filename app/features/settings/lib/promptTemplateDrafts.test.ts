@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   backgroundDraftsEqual,
+  compilePromptPreview,
   defaultAiDraftForPromptName,
+  normalizePromptName,
   normalizeReferenceImageCount,
 } from "./promptTemplateDrafts";
 
@@ -41,5 +43,22 @@ describe("prompt template draft helpers", () => {
         },
       ),
     ).toBe(true);
+  });
+
+  it("normalizes prompt names across spacing and dash variants", () => {
+    expect(normalizePromptName("  Studio\u2014Flat   Lay ")).toBe(
+      "studio - flat lay",
+    );
+    expect(normalizePromptName(null)).toBe("");
+  });
+
+  it("compiles prompt preview without duplicating the master prompt", () => {
+    expect(compilePromptPreview("Master", "Template")).toBe(
+      "Master\n\nTemplate",
+    );
+    expect(compilePromptPreview("Master", "Master\n\nTemplate")).toBe(
+      "Master\n\nTemplate",
+    );
+    expect(compilePromptPreview("", "Template")).toBe("Template");
   });
 });
