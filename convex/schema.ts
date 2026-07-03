@@ -56,10 +56,19 @@ const jobStatus = v.union(
 const imageStatus = v.union(
   v.literal("queued"),
   v.literal("generating"),
+  v.literal("postprocessing"),
   v.literal("generated"),
   v.literal("uploaded"),
   v.literal("canceled"),
   v.literal("failed"),
+);
+
+const batchSegmentStatus = v.union(
+  v.literal("submitting"),
+  v.literal("running"),
+  v.literal("completed"),
+  v.literal("failed"),
+  v.literal("cancelled"),
 );
 
 const reviewStatus = v.union(
@@ -250,6 +259,10 @@ export default defineSchema({
     batchInputFileName: v.optional(v.union(v.string(), v.null())),
     batchIngestionStartedAt: v.optional(v.union(v.number(), v.null())),
     batchResultOffset: v.optional(v.number()),
+    batchSubmitStartedAt: v.optional(v.number()),
+    allBatchesSubmittedAt: v.optional(v.number()),
+    firstResultReadyAt: v.optional(v.number()),
+    firstImageStoredAt: v.optional(v.number()),
     vibeAnalysis: v.optional(v.boolean()),
     imageProvider: v.optional(
       v.union(v.literal("openai"), v.literal("gemini")),
@@ -280,6 +293,31 @@ export default defineSchema({
     .index("by_created", ["createdAt"])
     .index("by_shop_and_status", ["shopId", "status"])
     .index("by_shop_and_created", ["shopId", "createdAt"]),
+
+  generationBatchSegments: defineTable({
+    jobId: v.id("generationJobs"),
+    provider: v.union(v.literal("openai"), v.literal("gemini")),
+    batchId: v.optional(v.union(v.string(), v.null())),
+    inputFileName: v.optional(v.union(v.string(), v.null())),
+    batchStatus: v.optional(v.union(v.string(), v.null())),
+    status: batchSegmentStatus,
+    imageCount: v.number(),
+    ingestedCount: v.optional(v.number()),
+    failedCount: v.optional(v.number()),
+    resultOffset: v.optional(v.number()),
+    ingestionStartedAt: v.optional(v.union(v.number(), v.null())),
+    submittedAt: v.optional(v.number()),
+    providerDoneAt: v.optional(v.number()),
+    ingestionCompletedAt: v.optional(v.number()),
+    error: v.optional(v.union(v.string(), v.null())),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_job", ["jobId"])
+    .index("by_status", ["status"])
+    .index("by_job_and_status", ["jobId", "status"])
+    .index("by_batch_id", ["batchId"]),
+
   generatedImages: defineTable({
     shopId: v.optional(v.id("shops")),
     productId: v.id("products"),
@@ -312,7 +350,12 @@ export default defineSchema({
       v.union(v.string(), v.null()),
     ),
     backgroundRemovalInputExtension: v.optional(v.union(v.string(), v.null())),
+    postProcessingInputUrl: v.optional(v.union(v.string(), v.null())),
+    postProcessingInputContentType: v.optional(v.union(v.string(), v.null())),
+    postProcessingInputExtension: v.optional(v.union(v.string(), v.null())),
+    postProcessingStartedAt: v.optional(v.union(v.number(), v.null())),
     transparentCutoutUrl: v.optional(v.union(v.string(), v.null())),
+    batchSegmentId: v.optional(v.union(v.id("generationBatchSegments"), v.null())),
     providerBatchId: v.optional(v.union(v.string(), v.null())),
     providerRequestId: v.optional(v.union(v.string(), v.null())),
     providerResponseId: v.optional(v.union(v.string(), v.null())),
@@ -339,6 +382,9 @@ export default defineSchema({
     .index("by_product", ["productId"])
     .index("by_job", ["jobId"])
     .index("by_status", ["status"])
+    .index("by_job_and_status", ["jobId", "status"])
+    .index("by_provider_batch_id", ["providerBatchId"])
+    .index("by_batch_segment", ["batchSegmentId"])
     .index("by_review_status_and_reviewed_at", ["reviewStatus", "reviewedAt"])
     .index("by_shop_and_product", ["shopId", "productId"])
     .index("by_shop_and_job", ["shopId", "jobId"])

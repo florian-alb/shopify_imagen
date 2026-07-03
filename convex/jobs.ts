@@ -531,6 +531,279 @@ export const markImagesGenerating = internalMutation({
   },
 });
 
+function isTerminalBatchSegmentStatus(
+  status: Doc<"generationBatchSegments">["status"],
+) {
+  return status === "completed" || status === "failed" || status === "cancelled";
+}
+
+export const markBatchSubmitStarted = internalMutation({
+  args: { jobId: v.id("generationJobs") },
+  handler: async (ctx, args) => {
+    const job = await ctx.db.get(args.jobId);
+    if (!job || job.status === "cancelled") return false;
+    const now = Date.now();
+    await ctx.db.patch(args.jobId, {
+      batchSubmitStartedAt: job.batchSubmitStartedAt ?? now,
+      updatedAt: now,
+    });
+    return true;
+  },
+});
+
+export const markAllBatchesSubmitted = internalMutation({
+  args: { jobId: v.id("generationJobs") },
+  handler: async (ctx, args) => {
+    const job = await ctx.db.get(args.jobId);
+    if (!job || job.status === "cancelled") return false;
+    const now = Date.now();
+    await ctx.db.patch(args.jobId, {
+      allBatchesSubmittedAt: job.allBatchesSubmittedAt ?? now,
+      updatedAt: now,
+    });
+    return true;
+  },
+});
+
+export const markFirstResultReady = internalMutation({
+  args: { jobId: v.id("generationJobs") },
+  handler: async (ctx, args) => {
+    const job = await ctx.db.get(args.jobId);
+    if (!job || job.firstResultReadyAt) return false;
+    await ctx.db.patch(args.jobId, {
+      firstResultReadyAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    return true;
+  },
+});
+
+export const createBatchSegment = internalMutation({
+  args: {
+    jobId: v.id("generationJobs"),
+    provider: v.union(v.literal("openai"), v.literal("gemini")),
+    imageCount: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    return await ctx.db.insert("generationBatchSegments", {
+      jobId: args.jobId,
+      provider: args.provider,
+      batchId: null,
+      inputFileName: null,
+      batchStatus: null,
+      status: "submitting",
+      imageCount: args.imageCount,
+      ingestedCount: 0,
+      failedCount: 0,
+      resultOffset: 0,
+      ingestionStartedAt: null,
+      error: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+  },
+});
+
+export const setBatchSegmentSubmitted = internalMutation({
+  args: {
+    segmentId: v.id("generationBatchSegments"),
+    batchId: v.string(),
+    inputFileName: v.optional(v.union(v.string(), v.null())),
+    batchStatus: v.optional(v.union(v.string(), v.null())),
+  },
+  handler: async (ctx, args) => {
+    const segment = await ctx.db.get(args.segmentId);
+    if (!segment) return false;
+    const job = await ctx.db.get(segment.jobId);
+    const now = Date.now();
+    await ctx.db.patch(args.segmentId, {
+      batchId: args.batchId,
+      inputFileName: args.inputFileName ?? null,
+      batchStatus: args.batchStatus ?? null,
+      status: "running",
+      submittedAt: now,
+      updatedAt: now,
+    });
+    if (job && !job.batchId) {
+      await ctx.db.patch(job._id, {
+        batchId: args.batchId,
+        batchStatus: args.batchStatus ?? null,
+        batchInputFileName: args.inputFileName ?? null,
+        updatedAt: now,
+      });
+    }
+    return true;
+  },
+});
+
+export const setBatchSegmentStatus = internalMutation({
+  args: {
+    segmentId: v.id("generationBatchSegments"),
+    status: v.union(
+      v.literal("submitting"),
+      v.literal("running"),
+      v.literal("completed"),
+      v.literal("failed"),
+      v.literal("cancelled"),
+    ),
+    batchStatus: v.optional(v.union(v.string(), v.null())),
+    error: v.optional(v.union(v.string(), v.null())),
+    ingestedCount: v.optional(v.number()),
+    failedCount: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const segment = await ctx.db.get(args.segmentId);
+    if (!segment) return false;
+    const now = Date.now();
+    await ctx.db.patch(args.segmentId, {
+      status: args.status,
+      batchStatus: args.batchStatus ?? segment.batchStatus ?? null,
+      error: args.error ?? null,
+      ingestedCount: args.ingestedCount ?? segment.ingestedCount ?? 0,
+      failedCount: args.failedCount ?? segment.failedCount ?? 0,
+      providerDoneAt: isTerminalBatchSegmentStatus(args.status)
+        ? (segment.providerDoneAt ?? now)
+        : segment.providerDoneAt,
+      ingestionCompletedAt:
+        args.status === "completed" || args.status === "failed"
+          ? (segment.ingestionCompletedAt ?? now)
+          : segment.ingestionCompletedAt,
+      ingestionStartedAt: isTerminalBatchSegmentStatus(args.status)
+        ? null
+        : segment.ingestionStartedAt,
+      updatedAt: now,
+    });
+    return true;
+  },
+});
+
+export const setBatchSegmentResultOffset = internalMutation({
+  args: { segmentId: v.id("generationBatchSegments"), offset: v.number() },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.segmentId, {
+      resultOffset: args.offset,
+      updatedAt: Date.now(),
+    });
+  },
+});
+
+export const acquireBatchSegmentIngestion = internalMutation({
+  args: { segmentId: v.id("generationBatchSegments") },
+  handler: async (ctx, args) => {
+    const segment = await ctx.db.get(args.segmentId);
+    if (!segment || segment.status !== "running") return false;
+    const now = Date.now();
+    if (
+      segment.ingestionStartedAt &&
+      now - segment.ingestionStartedAt < BATCH_INGESTION_LEASE_MS
+    )
+      return false;
+    await ctx.db.patch(args.segmentId, {
+      ingestionStartedAt: now,
+      updatedAt: now,
+    });
+    return true;
+  },
+});
+
+export const releaseBatchSegmentIngestion = internalMutation({
+  args: { segmentId: v.id("generationBatchSegments") },
+  handler: async (ctx, args) => {
+    const segment = await ctx.db.get(args.segmentId);
+    if (!segment) return;
+    await ctx.db.patch(args.segmentId, {
+      ingestionStartedAt: null,
+      updatedAt: Date.now(),
+    });
+  },
+});
+
+export const batchSegmentsForJob = internalQuery({
+  args: { jobId: v.id("generationJobs") },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("generationBatchSegments")
+      .withIndex("by_job", (q) => q.eq("jobId", args.jobId))
+      .collect();
+  },
+});
+
+export const batchSegmentInternal = internalQuery({
+  args: { segmentId: v.id("generationBatchSegments") },
+  handler: async (ctx, args) => {
+    return await ctx.db.get(args.segmentId);
+  },
+});
+
+export const pendingBatchSegments = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const submitting = await ctx.db
+      .query("generationBatchSegments")
+      .withIndex("by_status", (q) => q.eq("status", "submitting"))
+      .collect();
+    const running = await ctx.db
+      .query("generationBatchSegments")
+      .withIndex("by_status", (q) => q.eq("status", "running"))
+      .collect();
+    return [...submitting, ...running];
+  },
+});
+
+export const markSegmentImagesGenerating = internalMutation({
+  args: {
+    segmentId: v.id("generationBatchSegments"),
+    imageIds: v.array(v.id("generatedImages")),
+    providerBatchId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    for (const imageId of args.imageIds) {
+      const image = await ctx.db.get(imageId);
+      if (!image || image.status !== "queued") continue;
+      await ctx.db.patch(imageId, {
+        status: "generating",
+        batchSegmentId: args.segmentId,
+        providerBatchId: args.providerBatchId,
+        updatedAt: now,
+      });
+    }
+  },
+});
+
+export const assignImagesToBatchSegment = internalMutation({
+  args: {
+    segmentId: v.id("generationBatchSegments"),
+    imageIds: v.array(v.id("generatedImages")),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    for (const imageId of args.imageIds) {
+      const image = await ctx.db.get(imageId);
+      if (!image || image.status !== "queued") continue;
+      await ctx.db.patch(imageId, {
+        batchSegmentId: args.segmentId,
+        updatedAt: now,
+      });
+    }
+  },
+});
+
+export const imagesForBatchSegment = internalQuery({
+  args: {
+    segmentId: v.id("generationBatchSegments"),
+  },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("generatedImages")
+      .withIndex("by_batch_segment", (q) =>
+        q.eq("batchSegmentId", args.segmentId),
+      )
+      .collect();
+  },
+});
+
 export const pendingBatchJobs = internalQuery({
   args: {},
   handler: async (ctx) => {
@@ -625,8 +898,12 @@ export const completeImage = internalMutation({
       transparentCutoutUrl: args.transparentCutoutUrl,
       backgroundRemovalProvider: args.backgroundRemovalProvider,
       backgroundRemovalCostUsd: args.backgroundRemovalCostUsd,
-      backgroundRemovalRequestId: args.backgroundRemovalRequestId,
-      status: "generated",
+    backgroundRemovalRequestId: args.backgroundRemovalRequestId,
+    postProcessingInputUrl: null,
+    postProcessingInputContentType: null,
+    postProcessingInputExtension: null,
+    postProcessingStartedAt: null,
+    status: "generated",
       reviewStatus: "pending",
       reviewedAt: undefined,
       reviewedByUserId: undefined,
@@ -635,15 +912,102 @@ export const completeImage = internalMutation({
       outputTokens: args.outputTokens,
       costUsd: args.costUsd,
       costRateMultiplier: args.costRateMultiplier,
-      updatedAt: Date.now(),
-    });
-    await ctx.db.patch(image.jobId, {
-      completedTasks: (await ctx.db.get(image.jobId))!.completedTasks + 1,
-      updatedAt: Date.now(),
-    });
+    updatedAt: Date.now(),
+  });
+  const job = await ctx.db.get(image.jobId);
+  await ctx.db.patch(image.jobId, {
+    completedTasks: (job?.completedTasks ?? 0) + 1,
+    firstImageStoredAt: job?.firstImageStoredAt ?? Date.now(),
+    updatedAt: Date.now(),
+  });
     await refreshJobSummary(ctx, image.jobId);
     await refreshProductSummary(ctx, image.productId);
     return true;
+  },
+});
+
+export const markImagePostprocessing = internalMutation({
+  args: {
+    imageId: v.id("generatedImages"),
+    inputUrl: v.string(),
+    inputContentType: v.string(),
+    inputExtension: v.string(),
+    providerBatchId: v.optional(v.union(v.string(), v.null())),
+    providerRequestId: v.optional(v.union(v.string(), v.null())),
+    providerResponseId: v.optional(v.union(v.string(), v.null())),
+    inputTokens: v.optional(v.number()),
+    outputTokens: v.optional(v.number()),
+    costUsd: v.optional(v.number()),
+    costRateMultiplier: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const image = await ctx.db.get(args.imageId);
+    if (
+      !image ||
+      image.status === "generated" ||
+      image.status === "uploaded" ||
+      image.status === "failed" ||
+      image.status === "canceled"
+    )
+      return false;
+    await ctx.db.patch(args.imageId, {
+      status: "postprocessing",
+      postProcessingInputUrl: args.inputUrl,
+      postProcessingInputContentType: args.inputContentType,
+      postProcessingInputExtension: args.inputExtension,
+      postProcessingStartedAt: null,
+      providerBatchId: args.providerBatchId,
+      providerRequestId: args.providerRequestId,
+      providerResponseId: args.providerResponseId,
+      inputTokens: args.inputTokens,
+      outputTokens: args.outputTokens,
+      costUsd: args.costUsd,
+      costRateMultiplier: args.costRateMultiplier,
+      error: null,
+      updatedAt: Date.now(),
+    });
+    return true;
+  },
+});
+
+const POSTPROCESSING_LEASE_MS = 11 * 60 * 1000;
+
+export const claimPostprocessingImages = internalMutation({
+  args: { jobId: v.id("generationJobs"), limit: v.number() },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const images = await ctx.db
+      .query("generatedImages")
+      .withIndex("by_job_and_status", (q) =>
+        q.eq("jobId", args.jobId).eq("status", "postprocessing"),
+      )
+      .take(Math.max(1, args.limit * 4));
+    const claimed: Doc<"generatedImages">[] = [];
+    for (const image of images) {
+      if (claimed.length >= args.limit) break;
+      if (
+        image.postProcessingStartedAt &&
+        now - image.postProcessingStartedAt < POSTPROCESSING_LEASE_MS
+      )
+        continue;
+      await ctx.db.patch(image._id, {
+        postProcessingStartedAt: now,
+        updatedAt: now,
+      });
+      claimed.push({ ...image, postProcessingStartedAt: now });
+    }
+    return claimed;
+  },
+});
+
+export const pendingPostprocessingJobs = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const images = await ctx.db
+      .query("generatedImages")
+      .withIndex("by_status", (q) => q.eq("status", "postprocessing"))
+      .take(100);
+    return Array.from(new Set(images.map((image) => image.jobId)));
   },
 });
 
@@ -939,6 +1303,218 @@ export const reviewImages = mutation({
   },
 });
 
+export const regenerateImage = mutation({
+  args: {
+    imageId: v.id("generatedImages"),
+    regenerationInstructions: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const userId = await requireUserId(ctx);
+    const scope = await getActiveShopScope(ctx, userId);
+    const image = await ctx.db.get(args.imageId);
+    if (!image || !shopMatchesScope(image, scope)) {
+      throw new Error("Image not found.");
+    }
+    if (isActiveImageStatus(image.status)) {
+      throw new Error("Image regeneration is already in progress.");
+    }
+    if (
+      image.status !== "generated" &&
+      image.status !== "uploaded" &&
+      image.status !== "failed" &&
+      image.status !== "canceled"
+    ) {
+      throw new Error("Only completed or failed images can be regenerated.");
+    }
+
+    const instructions = args.regenerationInstructions?.trim();
+    if (instructions && instructions.length > 2000) {
+      throw new Error("Regeneration instructions must be 2000 characters or fewer.");
+    }
+
+    const job = await ctx.db.get(image.jobId);
+    if (!job || !shopMatchesScope(job, scope)) {
+      throw new Error("Job not found.");
+    }
+    if (!isTerminalJobStatus(job.status)) {
+      throw new Error("Wait for the job to finish before regenerating an image.");
+    }
+
+    const product = await ctx.db.get(image.productId);
+    if (!product || !shopMatchesScope(product, scope)) {
+      throw new Error("Product not found.");
+    }
+
+    const { imageProvider, imageModel, executionMode } = await currentGenerationEngine(
+      ctx,
+      scope,
+    );
+    const prompts = await promptsForScope(ctx, scope);
+    const promptSettings = await promptSettingsForScope(ctx, scope);
+    const modelReferences = sanitizeModelReferences(promptSettings?.modelReferences);
+    const { planned } = buildImageTasks({
+      products: [product],
+      prompts,
+      promptSettings,
+      modelReferences,
+      selectedImageTypes: [image.imageType],
+      regenerationInstructions: instructions || undefined,
+    });
+    const task = planned[0];
+    if (!task) {
+      throw new Error("Image type is no longer available for generation.");
+    }
+
+    const now = Date.now();
+    const existingImages = await ctx.db
+      .query("generatedImages")
+      .withIndex("by_job", (q) => q.eq("jobId", job._id))
+      .collect();
+    const completedTasks = existingImages.filter(
+      (img) =>
+        img._id !== image._id &&
+        (img.status === "generated" || img.status === "uploaded"),
+    ).length;
+    const failedTasks = existingImages.filter(
+      (img) =>
+        img._id !== image._id &&
+        (img.status === "failed" || img.status === "canceled"),
+    ).length;
+
+    const existingSegments = await ctx.db
+      .query("generationBatchSegments")
+      .withIndex("by_job", (q) => q.eq("jobId", job._id))
+      .collect();
+    for (const segment of existingSegments) {
+      if (isTerminalBatchSegmentStatus(segment.status)) continue;
+      await ctx.db.patch(segment._id, {
+        status: "cancelled",
+        ingestionStartedAt: null,
+        updatedAt: now,
+      });
+    }
+
+    const affectedJobIds = new Set<Id<"generationJobs">>([job._id]);
+    const otherImages = await ctx.db
+      .query("generatedImages")
+      .withIndex("by_product", (q) => q.eq("productId", image.productId))
+      .collect();
+    for (const otherImage of otherImages) {
+      if (otherImage.jobId === job._id) continue;
+      if (otherImage.imageType !== image.imageType) continue;
+      if (!isActiveImageStatus(otherImage.status)) continue;
+      await ctx.db.patch(otherImage._id, supersedeImagePatch(now));
+      affectedJobIds.add(otherImage.jobId);
+    }
+
+    const previousBatchIds = Array.from(
+      new Set([
+        ...(job.previousBatchIds ?? []),
+        ...(job.batchId ? [job.batchId] : []),
+        ...existingSegments
+          .map((segment) => segment.batchId)
+          .filter((batchId): batchId is string => Boolean(batchId)),
+      ]),
+    );
+    const effectiveExecutionMode = job.executionMode ?? executionMode;
+    const effectiveImageProvider =
+      image.imageProvider ?? job.imageProvider ?? imageProvider;
+    const effectiveImageModel = image.imageModel ?? job.imageModel ?? imageModel;
+
+    await ctx.db.patch(image._id, {
+      imageProvider: effectiveImageProvider,
+      imageModel: effectiveImageModel,
+      promptUsed: task.promptUsed,
+      finalPromptUsed: task.promptUsed,
+      promptKind: task.promptKind,
+      modelReferenceKey: task.modelReferenceKey,
+      modelReferenceStorageId: task.modelReferenceStorageId,
+      modelReferenceUrl: task.modelReferenceUrl,
+      useVibeAnalysis: task.useVibeAnalysis,
+      vibeUsed: null,
+      referenceImageCount: task.referenceImageCount,
+      sourceImageUrls: task.sourceImageUrls,
+      sourceImageUrl: task.sourceImageUrl,
+      sourceImageUrl2: task.sourceImageUrl2,
+      ...task.background,
+      generatedImageUrl: null,
+      storageUrl: null,
+      transparentCutoutUrl: null,
+      retouchSourceImageId: null,
+      retouchTool: null,
+      retouchedAt: undefined,
+      retouchedByUserId: undefined,
+      backgroundRemovalInputUrl: null,
+      backgroundRemovalInputContentType: null,
+      backgroundRemovalInputExtension: null,
+      backgroundRemovalCostUsd: undefined,
+      backgroundRemovalRequestId: null,
+      postProcessingInputUrl: null,
+      postProcessingInputContentType: null,
+      postProcessingInputExtension: null,
+      postProcessingStartedAt: null,
+      batchSegmentId: null,
+      providerBatchId: null,
+      providerRequestId: null,
+      providerResponseId: null,
+      status: "queued",
+      reviewStatus: "pending",
+      reviewedAt: undefined,
+      reviewedByUserId: undefined,
+      shopifyMediaId: null,
+      error: null,
+      inputTokens: undefined,
+      outputTokens: undefined,
+      costUsd: undefined,
+      costRateMultiplier: undefined,
+      updatedAt: now,
+    });
+
+    await ctx.db.patch(job._id, {
+      status: "queued",
+      executionMode: effectiveExecutionMode,
+      batchId: null,
+      previousBatchIds,
+      batchStatus: null,
+      batchInputFileName: null,
+      batchIngestionStartedAt: null,
+      batchResultOffset: 0,
+      batchSubmitStartedAt: undefined,
+      allBatchesSubmittedAt: undefined,
+      firstResultReadyAt: undefined,
+      firstImageStoredAt: undefined,
+      error: null,
+      totalTasks: existingImages.length,
+      completedTasks,
+      failedTasks,
+      completedAt: undefined,
+      selectedImageTypes: Array.from(
+        new Set([...(job.selectedImageTypes ?? []), image.imageType]),
+      ),
+      productIds: Array.from(new Set([...job.productIds, image.productId])),
+      updatedAt: now,
+    });
+    for (const jobId of affectedJobIds) {
+      await refreshJobSummary(ctx, jobId);
+    }
+    await refreshProductSummary(ctx, product._id);
+    await ctx.db.patch(product._id, {
+      latestJobId: job._id,
+      updatedAt: now,
+    });
+
+    await ctx.scheduler.runAfter(
+      0,
+      effectiveExecutionMode === "batch"
+        ? internal.generation.submitBatch
+        : internal.generation.processJob,
+      { jobId: job._id },
+    );
+
+    return job._id;
+  },
+});
+
 export const retry = mutation({
   args: { jobId: v.id("generationJobs") },
   handler: async (ctx, args) => {
@@ -959,9 +1535,21 @@ export const retry = mutation({
     if (!toRetry.length) throw new Error("No failed images to retry.");
     const canResumePostProcessing = canResumeBackgroundRemoval(toRetry);
 
-    const now = Date.now();
-    const affectedProductIds = new Set<Id<"products">>();
-    const affectedJobIds = new Set<Id<"generationJobs">>([args.jobId]);
+  const now = Date.now();
+  const affectedProductIds = new Set<Id<"products">>();
+  const affectedJobIds = new Set<Id<"generationJobs">>([args.jobId]);
+  const existingSegments = await ctx.db
+    .query("generationBatchSegments")
+    .withIndex("by_job", (q) => q.eq("jobId", args.jobId))
+    .collect();
+  for (const segment of existingSegments) {
+    if (isTerminalBatchSegmentStatus(segment.status)) continue;
+    await ctx.db.patch(segment._id, {
+      status: "cancelled",
+      ingestionStartedAt: null,
+      updatedAt: now,
+    });
+  }
 
     // Cancel any stuck images from OTHER jobs on the same products so they
     // don't show as phantom "generating"/"queued" entries on the product page.
@@ -991,18 +1579,28 @@ export const retry = mutation({
     const kept = images.filter(
       (img) => img.status === "generated" || img.status === "uploaded",
     );
-    const previousBatchIds = job.batchId
-      ? Array.from(new Set([...(job.previousBatchIds ?? []), job.batchId]))
-      : (job.previousBatchIds ?? []);
-    await ctx.db.patch(args.jobId, {
-      status: "queued",
-      batchId: null,
-      previousBatchIds,
-      batchStatus: null,
-      batchInputFileName: null,
-      batchIngestionStartedAt: null,
-      batchResultOffset: 0,
-      error: null,
+  const previousBatchIds = Array.from(
+    new Set([
+      ...(job.previousBatchIds ?? []),
+      ...(job.batchId ? [job.batchId] : []),
+      ...existingSegments
+        .map((segment) => segment.batchId)
+        .filter((batchId): batchId is string => Boolean(batchId)),
+    ]),
+  );
+  await ctx.db.patch(args.jobId, {
+    status: "queued",
+    batchId: null,
+    previousBatchIds,
+    batchStatus: null,
+    batchInputFileName: null,
+    batchIngestionStartedAt: null,
+    batchResultOffset: 0,
+    batchSubmitStartedAt: undefined,
+    allBatchesSubmittedAt: undefined,
+    firstResultReadyAt: undefined,
+    firstImageStoredAt: undefined,
+    error: null,
       totalTasks: toRetry.length + kept.length,
       failedTasks: 0,
       completedTasks: kept.length,
