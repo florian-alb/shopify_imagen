@@ -3,6 +3,7 @@ import {
   Droplets,
   FlipHorizontal2,
   FlipVertical2,
+  Hand,
   Loader2,
   Paintbrush,
   Pipette,
@@ -43,7 +44,7 @@ export type RetouchTarget = {
 
 export type RetouchSaveMode = "version" | "overwrite";
 
-type Tool = "brush" | "picker";
+type Tool = "brush" | "picker" | "hand";
 type CanvasTransform = "rotateClockwise" | "flipHorizontal" | "flipVertical";
 
 type Point = {
@@ -69,6 +70,14 @@ type CanvasSnapshot = {
   height: number;
 };
 
+type PanState = {
+  pointerId: number;
+  startX: number;
+  startY: number;
+  scrollLeft: number;
+  scrollTop: number;
+};
+
 const HISTORY_LIMIT = 12;
 const SWATCHES = ["#ffffff", "#f8faf8", "#f1f3f0", "#e6e9e5", "#d7ddd8"];
 
@@ -90,9 +99,11 @@ export function ImageRetouchDialog({
   ) => Promise<void>;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
   const loadTokenRef = useRef(0);
   const undoStackRef = useRef<CanvasSnapshot[]>([]);
   const redoStackRef = useRef<CanvasSnapshot[]>([]);
+  const panRef = useRef<PanState | null>(null);
   const drawingRef = useRef(false);
   const lastPointRef = useRef<Point | null>(null);
   const [tool, setTool] = useState<Tool>("brush");
@@ -391,6 +402,21 @@ export function ImageRetouchDialog({
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     if (!imageSize || loading || error) return;
+    if (tool === "hand") {
+      const scroll = scrollRef.current;
+      if (!scroll) return;
+      event.currentTarget.setPointerCapture(event.pointerId);
+      panRef.current = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        scrollLeft: scroll.scrollLeft,
+        scrollTop: scroll.scrollTop,
+      };
+      hideBrushPreview();
+      return;
+    }
+
     updateBrushPreview(event);
     const point = canvasPoint(event);
     if (!point) return;
@@ -408,6 +434,16 @@ export function ImageRetouchDialog({
   };
 
   const handlePointerMove = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    if (tool === "hand" && panRef.current?.pointerId === event.pointerId) {
+      const scroll = scrollRef.current;
+      if (!scroll) return;
+      scroll.scrollLeft =
+        panRef.current.scrollLeft - (event.clientX - panRef.current.startX);
+      scroll.scrollTop =
+        panRef.current.scrollTop - (event.clientY - panRef.current.startY);
+      return;
+    }
+
     updateBrushPreview(event);
     if (!drawingRef.current || tool !== "brush") return;
     const point = canvasPoint(event);
@@ -417,6 +453,9 @@ export function ImageRetouchDialog({
   const stopDrawing = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    if (panRef.current?.pointerId === event.pointerId) {
+      panRef.current = null;
     }
     drawingRef.current = false;
     lastPointRef.current = null;
@@ -505,10 +544,10 @@ export function ImageRetouchDialog({
                 <Label className="text-xs uppercase text-muted-foreground">
                   Outils
                 </Label>
-                <div className="grid grid-cols-2 gap-2">
-                  <Button
-                    type="button"
-                    variant={tool === "brush" ? "default" : "outline"}
+              <div className="grid grid-cols-3 gap-2">
+                <Button
+                  type="button"
+                  variant={tool === "brush" ? "default" : "outline"}
                     size="sm"
                     onClick={() => setTool("brush")}
                   >
@@ -521,11 +560,20 @@ export function ImageRetouchDialog({
                     size="sm"
                     onClick={() => setTool("picker")}
                   >
-                    <Pipette data-icon="inline-start" />
-                    Pipette
-                  </Button>
-                </div>
+                  <Pipette data-icon="inline-start" />
+                  Pipette
+                </Button>
+                <Button
+                  type="button"
+                  variant={tool === "hand" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setTool("hand")}
+                >
+                  <Hand data-icon="inline-start" />
+                  Main
+                </Button>
               </div>
+            </div>
 
               <Separator />
 
@@ -736,7 +784,7 @@ export function ImageRetouchDialog({
                   Chargement de l'image
                 </div>
               ) : null}
-              <div className="retouch-canvas-scroll">
+              <div ref={scrollRef} className="retouch-canvas-scroll">
                 <div className="retouch-canvas-frame">
                   <canvas
                     ref={canvasRef}
