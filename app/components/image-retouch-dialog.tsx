@@ -12,6 +12,7 @@ import {
   RotateCw,
   Save,
   Undo2,
+  X,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
@@ -34,6 +35,13 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import type { Id } from "../../convex/_generated/dataModel";
 
 export type RetouchTarget = {
@@ -80,6 +88,17 @@ type PanState = {
 
 const HISTORY_LIMIT = 12;
 const SWATCHES = ["#ffffff", "#f8faf8", "#f1f3f0", "#e6e9e5", "#d7ddd8"];
+
+const toolButtonClass =
+  "rounded-[0.65rem] text-muted-foreground transition-all duration-150 hover:bg-foreground/5 hover:text-foreground active:translate-y-px active:scale-[0.98]";
+const activeToolButtonClass =
+  "bg-primary text-primary-foreground shadow-[inset_0_1px_0_rgb(255_255_255_/_0.2),0_6px_16px_rgb(0_0_0_/_0.12)] hover:bg-primary hover:text-primary-foreground";
+const panelSectionClass = "grid gap-3";
+const fieldGroupClass = "grid gap-2";
+const fieldLabelClass = "text-xs font-medium text-muted-foreground";
+const rangeRowClass =
+  "grid grid-cols-[minmax(0,1fr)_3.25rem] items-center gap-2 text-xs tabular-nums text-muted-foreground";
+const rangeInputClass = "w-full accent-primary";
 
 export function ImageRetouchDialog({
   target,
@@ -508,7 +527,7 @@ export function ImageRetouchDialog({
     }
   };
 
-  const displayWidth = imageSize ? Math.min(imageSize.width, 980) * zoom : 720;
+  const displayWidth = imageSize ? Math.min(imageSize.width, 1280) * zoom : 720;
   const busy = Boolean(saving || localSaving);
   const canEdit = Boolean(imageSize && !loading && !error);
   const showBrushPreview =
@@ -516,350 +535,465 @@ export function ImageRetouchDialog({
     tool === "brush" &&
     canEdit &&
     brushPreview.size > 0;
+  const zoomPercent = Math.round(zoom * 100);
+  const activeToolLabel =
+    tool === "brush" ? "Pinceau" : tool === "picker" ? "Pipette" : "Main";
+  const historyReadout = historyState.pastCount
+    ? `${historyState.pastCount} retour${
+        historyState.pastCount > 1 ? "s" : ""
+      } disponible${historyState.pastCount > 1 ? "s" : ""}${
+        historyState.futureCount
+          ? ` · ${historyState.futureCount} avance${
+              historyState.futureCount > 1 ? "s" : ""
+            }`
+          : ""
+      }`
+    : "Aucune modification";
 
   return (
-    <Dialog open={target !== null} onOpenChange={onOpenChange}>
-      <DialogContent className="retouch-dialog-content max-h-[calc(100vh-2rem)] overflow-hidden p-0 sm:max-w-6xl">
-        <div className="retouch-shell">
-          <DialogHeader className="retouch-header">
-            <div>
-              <DialogTitle className="flex items-center gap-2">
-                <Paintbrush className="size-5 text-[var(--retouch-blue)]" />
-                Retouche manuelle
-              </DialogTitle>
-              <DialogDescription>
-                Effacez les images fantomes sur fond clair sans relancer l'IA.
-              </DialogDescription>
-            </div>
-            {imageSize ? (
-              <span className="retouch-size">
-                {imageSize.width} x {imageSize.height}px
-              </span>
-            ) : null}
-          </DialogHeader>
+    <TooltipProvider>
+      <Dialog open={target !== null} onOpenChange={onOpenChange}>
+        <DialogContent
+          className="!h-[calc(100dvh-2rem)] !max-h-none !w-[calc(100vw-2rem)] !max-w-none overflow-hidden rounded-2xl p-0 sm:!max-w-none max-[900px]:!h-[100dvh] max-[900px]:!max-h-[100dvh] max-[900px]:!w-screen max-[900px]:!max-w-screen max-[900px]:rounded-none"
+          showCloseButton={false}
+        >
+          <div className="grid h-full grid-rows-[auto_minmax(0,1fr)_auto_auto] overflow-hidden bg-background">
+            <DialogHeader className="flex min-h-14 items-center justify-between gap-4 border-b bg-card/90 px-4 py-2.5 max-[900px]:flex-wrap max-[900px]:items-start max-[900px]:px-3">
+              <div className="grid min-w-0 gap-0.5">
+                <DialogTitle className="flex items-center gap-2 text-[0.98rem] font-semibold leading-tight text-foreground">
+                  <Paintbrush className="size-4 text-primary" />
+                  Retouche image
+                </DialogTitle>
+                <DialogDescription className="text-xs leading-snug text-muted-foreground max-[640px]:hidden">
+                  Effacez les images fantomes sur fond clair sans relancer l'IA.
+                </DialogDescription>
+              </div>
 
-          <div className="retouch-layout">
-            <aside className="retouch-tools" aria-label="Outils de retouche">
-              <div className="retouch-tool-group retouch-tool-mode">
-                <Label className="text-xs uppercase text-muted-foreground">
-                  Outils
-                </Label>
-              <div className="grid grid-cols-3 gap-2">
-                <Button
-                  type="button"
-                  variant={tool === "brush" ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => setTool("brush")}
-                  >
-                    <Paintbrush data-icon="inline-start" />
-                    Pinceau
-                  </Button>
-                  <Button
-                    type="button"
-                    variant={tool === "picker" ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => setTool("picker")}
-                  >
-                  <Pipette data-icon="inline-start" />
-                  Pipette
-                </Button>
-                <Button
-                  type="button"
-                  variant={tool === "hand" ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setTool("hand")}
+              <div
+                className="flex min-w-0 flex-none items-center justify-end gap-2 max-[900px]:w-full max-[900px]:justify-start max-[900px]:overflow-x-auto max-[640px]:gap-1.5"
+                aria-label="Actions rapides"
+              >
+                {imageSize ? (
+                  <span className="inline-flex min-h-8 flex-none items-center rounded-lg border bg-background/80 px-2.5 text-xs tabular-nums text-muted-foreground max-[640px]:hidden">
+                    {imageSize.width} x {imageSize.height}px
+                  </span>
+                ) : null}
+
+                <div
+                  className="inline-flex min-h-8 items-center gap-0.5 rounded-lg border bg-background/80 px-1 text-xs tabular-nums text-muted-foreground"
+                  aria-label="Zoom"
                 >
-                  <Hand data-icon="inline-start" />
-                  Main
-                </Button>
-              </div>
-            </div>
-
-              <Separator />
-
-              <div className="retouch-tool-group retouch-tool-transform">
-                <Label className="text-xs uppercase text-muted-foreground">
-                  Transformer
-                </Label>
-                <div className="retouch-actions-grid">
                   <Button
                     type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={!canEdit}
-                    onClick={() => applyCanvasTransform("rotateClockwise")}
-                  >
-                    <RotateCw data-icon="inline-start" />
-                    Rotation
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={!canEdit}
-                    onClick={() => applyCanvasTransform("flipHorizontal")}
-                  >
-                    <FlipHorizontal2 data-icon="inline-start" />
-                    Miroir H
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={!canEdit}
-                    onClick={() => applyCanvasTransform("flipVertical")}
-                  >
-                    <FlipVertical2 data-icon="inline-start" />
-                    Miroir V
-                  </Button>
-                </div>
-              </div>
-
-              <Separator />
-
-              <div className="retouch-tool-group retouch-tool-color">
-                <Label
-                  htmlFor="retouch-color"
-                  className="text-xs uppercase text-muted-foreground"
-                >
-                  Couleur
-                </Label>
-                <div className="flex items-center gap-2">
-                  <input
-                    id="retouch-color"
-                    type="color"
-                    value={brushColor}
-                    onChange={(event) => setBrushColor(event.target.value)}
-                    className="retouch-color-input"
-                  />
-                  <input
-                    value={brushColor}
-                    onChange={(event) => setBrushColor(event.target.value)}
-                    className="retouch-hex-input"
-                    aria-label="Couleur du pinceau"
-                  />
-                </div>
-                <div className="grid grid-cols-5 gap-1">
-                  {SWATCHES.map((swatch) => (
-                    <button
-                      key={swatch}
-                      type="button"
-                      className="retouch-swatch"
-                      style={{ backgroundColor: swatch }}
-                      aria-label={`Utiliser ${swatch}`}
-                      onClick={() => setBrushColor(swatch)}
-                    />
-                  ))}
-                </div>
-              </div>
-
-              <div className="retouch-tool-group retouch-tool-size">
-                <Label
-                  htmlFor="retouch-size"
-                  className="text-xs uppercase text-muted-foreground"
-                >
-                  Taille
-                </Label>
-                <div className="retouch-range-row">
-                  <input
-                    id="retouch-size"
-                    type="range"
-                    min={4}
-                    max={140}
-                    value={brushSize}
-                    onChange={(event) =>
-                      setBrushSize(Number(event.target.value))
-                    }
-                  />
-                  <span>{brushSize}px</span>
-                </div>
-              </div>
-
-              <div className="retouch-tool-group retouch-tool-opacity">
-                <Label
-                  htmlFor="retouch-opacity"
-                  className="text-xs uppercase text-muted-foreground"
-                >
-                  Opacite
-                </Label>
-                <div className="retouch-range-row">
-                  <input
-                    id="retouch-opacity"
-                    type="range"
-                    min={10}
-                    max={100}
-                    value={brushOpacity}
-                    onChange={(event) =>
-                      setBrushOpacity(Number(event.target.value))
-                    }
-                  />
-                  <span>{brushOpacity}%</span>
-                </div>
-              </div>
-
-              <Separator />
-
-              <div className="retouch-history-panel">
-                <div className="retouch-actions-grid">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={!historyState.canUndo}
-                    onClick={undo}
-                  >
-                    <Undo2 data-icon="inline-start" />
-                    Reculer
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={!historyState.canRedo}
-                    onClick={redo}
-                  >
-                    <Redo2 data-icon="inline-start" />
-                    Avancer
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
+                    variant="ghost"
+                    size="icon-sm"
+                    disabled={!imageSize}
                     onClick={() =>
                       setZoom((value) => Math.max(0.35, value - 0.15))
                     }
+                    aria-label="Zoom arriere"
                   >
-                    <ZoomOut data-icon="inline-start" />
-                    Zoom
+                    <ZoomOut />
                   </Button>
+                  <span className="min-w-12 text-center max-[640px]:min-w-10">
+                    {zoomPercent}%
+                  </span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    disabled={!imageSize}
+                    onClick={() =>
+                      setZoom((value) => Math.min(2.4, value + 0.15))
+                    }
+                    aria-label="Zoom avant"
+                  >
+                    <ZoomIn />
+                  </Button>
+                </div>
+
+                <div
+                  className="inline-flex min-h-8 items-center gap-0.5 rounded-lg border bg-background/80 px-1"
+                  aria-label="Historique"
+                >
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    disabled={!historyState.canUndo}
+                    onClick={undo}
+                    aria-label="Annuler"
+                  >
+                    <Undo2 />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    disabled={!historyState.canRedo}
+                    onClick={redo}
+                    aria-label="Retablir"
+                  >
+                    <Redo2 />
+                  </Button>
+                </div>
+
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  disabled={busy}
+                  onClick={() => onOpenChange(false)}
+                  aria-label="Fermer"
+                >
+                  <X />
+                </Button>
+              </div>
+            </DialogHeader>
+
+            <div className="grid min-h-0 overflow-hidden min-[901px]:grid-cols-[3.25rem_minmax(0,1fr)_18rem] max-[1100px]:min-[901px]:grid-cols-[3.25rem_minmax(0,1fr)_16rem] max-[900px]:grid-rows-[auto_minmax(0,1fr)_auto]">
+              <aside
+                className="flex min-h-0 min-w-0 flex-col items-center gap-2 border-r bg-card/80 px-2 py-3 max-[900px]:flex-row max-[900px]:justify-center max-[900px]:border-b max-[900px]:border-r-0 max-[900px]:p-2"
+                aria-label="Outils"
+              >
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className={cn(
+                        toolButtonClass,
+                        tool === "brush" && activeToolButtonClass,
+                      )}
+                      aria-pressed={tool === "brush"}
+                      aria-label="Pinceau"
+                      onClick={() => setTool("brush")}
+                    >
+                      <Paintbrush />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">Pinceau</TooltipContent>
+                </Tooltip>
+
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className={cn(
+                        toolButtonClass,
+                        tool === "picker" && activeToolButtonClass,
+                      )}
+                      aria-pressed={tool === "picker"}
+                      aria-label="Pipette"
+                      onClick={() => setTool("picker")}
+                    >
+                      <Pipette />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">Pipette</TooltipContent>
+                </Tooltip>
+
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className={cn(
+                        toolButtonClass,
+                        tool === "hand" && activeToolButtonClass,
+                      )}
+                      aria-pressed={tool === "hand"}
+                      aria-label="Main"
+                      onClick={() => setTool("hand")}
+                    >
+                      <Hand />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">Main</TooltipContent>
+                </Tooltip>
+              </aside>
+
+              <main className="relative grid min-h-0 min-w-0 grid-rows-[minmax(0,1fr)_auto] bg-[#f7f8f5] [background-image:linear-gradient(90deg,rgba(15,23,42,.055)_1px,transparent_1px),linear-gradient(rgba(15,23,42,.055)_1px,transparent_1px)] [background-size:32px_32px]">
+                {loading ? (
+                  <div className="absolute inset-4 z-10 grid content-center place-items-center gap-2 rounded-xl border border-dashed bg-background/80 text-sm text-muted-foreground">
+                    <Loader2 className="size-5 animate-spin" />
+                    Chargement de l'image
+                  </div>
+                ) : null}
+
+                <div
+                  ref={scrollRef}
+                  className="grid min-h-0 place-items-center overflow-auto p-5 max-[900px]:p-3"
+                >
+                  <div className="relative w-fit leading-none">
+                    <canvas
+                      ref={canvasRef}
+                      className="block h-auto max-w-none touch-none rounded-md border bg-white shadow-[0_1px_2px_rgb(32_35_38_/_0.08),0_14px_38px_rgb(32_35_38_/_0.12)] data-[tool=brush]:cursor-none data-[tool=hand]:cursor-grab data-[tool=picker]:cursor-copy"
+                      style={{ width: displayWidth }}
+                      aria-label={`Retoucher ${target?.label ?? "image"}`}
+                      onPointerEnter={updateBrushPreview}
+                      onPointerDown={handlePointerDown}
+                      onPointerMove={handlePointerMove}
+                      onPointerUp={stopDrawing}
+                      onPointerCancel={stopDrawing}
+                      onPointerLeave={hideBrushPreview}
+                      data-tool={tool}
+                    />
+                    {showBrushPreview ? (
+                      <div
+                        className="pointer-events-none absolute left-0 top-0 z-20 rounded-full border-[1.5px] bg-primary/10 shadow-[0_0_0_1px_rgb(255_255_255_/_0.78),0_2px_8px_rgb(32_35_38_/_0.18)] will-change-transform"
+                        style={{
+                          width: brushPreview.size,
+                          height: brushPreview.size,
+                          borderColor: brushColor,
+                          transform: `translate(${
+                            brushPreview.x - brushPreview.size / 2
+                          }px, ${brushPreview.y - brushPreview.size / 2}px)`,
+                        }}
+                      />
+                    ) : null}
+                  </div>
+                </div>
+              </main>
+
+              <aside
+                className="flex min-h-0 min-w-0 flex-col gap-4 overflow-y-auto overscroll-contain border-l bg-card/80 p-4 max-[900px]:grid max-[900px]:max-h-64 max-[900px]:grid-cols-2 max-[900px]:border-l-0 max-[900px]:border-t max-[900px]:p-3 max-[640px]:max-h-60 max-[640px]:grid-cols-1"
+                aria-label="Reglages"
+              >
+                <section className={panelSectionClass}>
+                  <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                    <span>Outil actif</span>
+                    <strong className="text-sm font-semibold text-foreground">
+                      {activeToolLabel}
+                    </strong>
+                  </div>
+                  <p className="m-0 text-xs leading-relaxed text-muted-foreground">
+                    {tool === "brush"
+                      ? "Peindre avec une couleur proche du fond."
+                      : tool === "picker"
+                        ? "Cliquez dans l'image pour prelever une couleur."
+                        : "Glissez dans l'image pour vous deplacer."}
+                  </p>
+                </section>
+
+                <section
+                  className={cn(panelSectionClass, "max-[900px]:row-span-2")}
+                >
+                  <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                    <Paintbrush className="size-4" />
+                    Pinceau
+                  </div>
+
+                  <div className={fieldGroupClass}>
+                    <Label htmlFor="retouch-size" className={fieldLabelClass}>
+                      Taille
+                    </Label>
+                    <div className={rangeRowClass}>
+                      <input
+                        id="retouch-size"
+                        type="range"
+                        min={4}
+                        max={140}
+                        value={brushSize}
+                        className={rangeInputClass}
+                        onChange={(event) =>
+                          setBrushSize(Number(event.target.value))
+                        }
+                      />
+                      <span>{brushSize}px</span>
+                    </div>
+                  </div>
+
+                  <div className={fieldGroupClass}>
+                    <Label
+                      htmlFor="retouch-opacity"
+                      className={fieldLabelClass}
+                    >
+                      Opacite
+                    </Label>
+                    <div className={rangeRowClass}>
+                      <input
+                        id="retouch-opacity"
+                        type="range"
+                        min={10}
+                        max={100}
+                        value={brushOpacity}
+                        className={rangeInputClass}
+                        onChange={(event) =>
+                          setBrushOpacity(Number(event.target.value))
+                        }
+                      />
+                      <span>{brushOpacity}%</span>
+                    </div>
+                  </div>
+
+                  <div className={fieldGroupClass}>
+                    <Label htmlFor="retouch-color" className={fieldLabelClass}>
+                      Couleur
+                    </Label>
+                    <div className="grid grid-cols-[2.25rem_minmax(0,1fr)] items-center gap-2">
+                      <input
+                        id="retouch-color"
+                        type="color"
+                        value={brushColor}
+                        onChange={(event) => setBrushColor(event.target.value)}
+                        className="h-9 w-9 cursor-pointer overflow-hidden rounded-lg border bg-background p-0 focus-visible:border-ring focus-visible:shadow-[0_0_0_3px_color-mix(in_oklch,var(--ring)_22%,transparent)]"
+                      />
+                      <input
+                        value={brushColor}
+                        onChange={(event) => setBrushColor(event.target.value)}
+                        className="h-9 min-w-0 rounded-lg border bg-background px-2.5 text-xs tabular-nums text-foreground outline-none focus:border-ring focus:shadow-[0_0_0_3px_color-mix(in_oklch,var(--ring)_22%,transparent)]"
+                        aria-label="Couleur du pinceau"
+                      />
+                    </div>
+                    <div className="grid grid-cols-5 gap-2">
+                      {SWATCHES.map((swatch) => (
+                        <button
+                          key={swatch}
+                          type="button"
+                          className={cn(
+                            "aspect-square min-h-8 cursor-pointer rounded-full border shadow-[inset_0_0_0_1px_rgb(255_255_255_/_0.5)] outline-none transition-all duration-150 hover:-translate-y-px focus-visible:border-ring focus-visible:shadow-[0_0_0_3px_color-mix(in_oklch,var(--ring)_22%,transparent)]",
+                            brushColor.toLowerCase() === swatch &&
+                              "border-primary shadow-[inset_0_0_0_2px_rgb(255_255_255_/_0.85),0_0_0_2px_color-mix(in_oklch,var(--primary)_35%,transparent)]",
+                          )}
+                          style={{ backgroundColor: swatch }}
+                          aria-label={`Utiliser ${swatch}`}
+                          onClick={() => setBrushColor(swatch)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </section>
+
+                <Separator />
+
+                <section className={panelSectionClass}>
+                  <div className="text-sm font-semibold text-foreground">
+                    Transformer
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 max-[640px]:grid-cols-1 [&>button:first-child]:col-span-2 max-[640px]:[&>button:first-child]:col-span-1">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={!canEdit}
+                      onClick={() => applyCanvasTransform("rotateClockwise")}
+                    >
+                      <RotateCw data-icon="inline-start" />
+                      Rotation
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={!canEdit}
+                      onClick={() => applyCanvasTransform("flipHorizontal")}
+                    >
+                      <FlipHorizontal2 data-icon="inline-start" />
+                      Miroir H
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={!canEdit}
+                      onClick={() => applyCanvasTransform("flipVertical")}
+                    >
+                      <FlipVertical2 data-icon="inline-start" />
+                      Miroir V
+                    </Button>
+                  </div>
+                </section>
+
+                <section className={panelSectionClass}>
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={() =>
-                      setZoom((value) => Math.min(2.4, value + 0.15))
-                    }
+                    disabled={!imageSize || loading}
+                    onClick={resetCanvas}
+                    className="w-full"
                   >
-                    <ZoomIn data-icon="inline-start" />
-                    Zoom
+                    <RotateCcw data-icon="inline-start" />
+                    Recharger
                   </Button>
-                </div>
-                <p className="retouch-history-readout" aria-live="polite">
-                  {historyState.pastCount
-                    ? `${historyState.pastCount} retour${
-                        historyState.pastCount > 1 ? "s" : ""
-                      } disponible${historyState.pastCount > 1 ? "s" : ""}`
-                    : "Aucune modification"}
-                  {historyState.futureCount
-                    ? ` · ${historyState.futureCount} avance${
-                        historyState.futureCount > 1 ? "s" : ""
-                      }`
-                    : ""}
-                </p>
-              </div>
 
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={!imageSize || loading}
-                onClick={resetCanvas}
+                  <div className="flex items-start gap-2 rounded-xl border border-primary/25 bg-primary/5 p-3 text-xs leading-relaxed text-muted-foreground">
+                    <Droplets className="size-4 flex-none text-primary" />
+                    <span>
+                      Le blanc est le point de depart. Utilisez la pipette si le
+                      fond est legerement casse.
+                    </span>
+                  </div>
+                </section>
+              </aside>
+            </div>
+
+            {error ? (
+              <Alert variant="destructive" className="mx-4 mt-3">
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            ) : null}
+
+            <DialogFooter className="m-0 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 rounded-none border-t bg-card/90 px-4 py-3 max-[640px]:grid-cols-1 max-[640px]:gap-2 max-[640px]:px-3">
+              <div
+                className="min-w-0 text-xs tabular-nums text-muted-foreground max-[640px]:hidden flex gap-1"
+                aria-live="polite"
               >
-                <RotateCcw data-icon="inline-start" />
-                Recharger
-              </Button>
-
-              <div className="retouch-meter">
-                <Droplets className="size-4" />
-                <span>
-                  Pinceau blanc, pipette pour les fonds legerement casses.
-                </span>
+                <span className="block truncate">{activeToolLabel}</span>
+                <Separator orientation="vertical" />
+                <span className="block truncate">{historyReadout}</span>
               </div>
-            </aside>
-
-            <main className="retouch-stage">
-              {loading ? (
-                <div className="retouch-loading">
-                  <Loader2 className="size-5 animate-spin" />
-                  Chargement de l'image
-                </div>
-              ) : null}
-              <div ref={scrollRef} className="retouch-canvas-scroll">
-                <div className="retouch-canvas-frame">
-                  <canvas
-                    ref={canvasRef}
-                    className="retouch-canvas"
-                    style={{ width: displayWidth }}
-                    aria-label={`Retoucher ${target?.label ?? "image"}`}
-                    onPointerEnter={updateBrushPreview}
-                    onPointerDown={handlePointerDown}
-                    onPointerMove={handlePointerMove}
-                    onPointerUp={stopDrawing}
-                    onPointerCancel={stopDrawing}
-                    onPointerLeave={hideBrushPreview}
-                    data-tool={tool}
-                  />
-                  {showBrushPreview ? (
-                    <div
-                      className="retouch-brush-preview"
-                      style={{
-                        width: brushPreview.size,
-                        height: brushPreview.size,
-                        borderColor: brushColor,
-                        transform: `translate(${
-                          brushPreview.x - brushPreview.size / 2
-                        }px, ${brushPreview.y - brushPreview.size / 2}px)`,
-                      }}
+              <div className="flex items-center justify-end gap-2 max-[640px]:grid max-[640px]:w-full max-[640px]:grid-cols-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => onOpenChange(false)}
+                >
+                  Fermer
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={!canEdit || busy}
+                  onClick={() => void save("version")}
+                >
+                  {busy ? (
+                    <Loader2
+                      data-icon="inline-start"
+                      className="animate-spin"
                     />
-                  ) : null}
-                </div>
+                  ) : (
+                    <Check data-icon="inline-start" />
+                  )}
+                  Enregistrer une version
+                </Button>
+                <Button
+                  type="button"
+                  disabled={!canEdit || busy}
+                  onClick={() => void save("overwrite")}
+                  className="max-[640px]:col-span-2"
+                >
+                  {busy ? (
+                    <Loader2
+                      data-icon="inline-start"
+                      className="animate-spin"
+                    />
+                  ) : (
+                    <Save data-icon="inline-start" />
+                  )}
+                  Remplacer l'image
+                </Button>
               </div>
-            </main>
+            </DialogFooter>
           </div>
-
-          {error ? (
-            <Alert variant="destructive" className="mx-4">
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          ) : null}
-
-          <DialogFooter className="retouch-footer">
-            <Button
-              type="button"
-              variant="outline"
-              disabled={busy}
-              onClick={() => onOpenChange(false)}
-            >
-              Fermer
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={!canEdit || busy}
-              onClick={() => void save("version")}
-            >
-              {busy ? (
-                <Loader2 data-icon="inline-start" className="animate-spin" />
-              ) : (
-                <Check data-icon="inline-start" />
-              )}
-              Enregistrer une version
-            </Button>
-            <Button
-              type="button"
-              disabled={!canEdit || busy}
-              onClick={() => void save("overwrite")}
-            >
-              {busy ? (
-                <Loader2 data-icon="inline-start" className="animate-spin" />
-              ) : (
-                <Save data-icon="inline-start" />
-              )}
-              Enregistrer et écraser
-            </Button>
-          </DialogFooter>
-        </div>
-      </DialogContent>
-    </Dialog>
+        </DialogContent>
+      </Dialog>
+    </TooltipProvider>
   );
 }
