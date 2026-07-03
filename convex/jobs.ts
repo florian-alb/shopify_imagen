@@ -784,6 +784,7 @@ export const insertRetouchedImage = internalMutation({
   args: {
     sourceImageId: v.id("generatedImages"),
     storageUrl: v.string(),
+    saveMode: v.optional(v.union(v.literal("version"), v.literal("overwrite"))),
   },
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
@@ -802,6 +803,28 @@ export const insertRetouchedImage = internalMutation({
     }
 
     const now = Date.now();
+    if ((args.saveMode ?? "version") === "overwrite") {
+      await ctx.db.patch(source._id, {
+        generatedImageUrl: args.storageUrl,
+        storageUrl: args.storageUrl,
+        retouchSourceImageId: source.retouchSourceImageId ?? source._id,
+        retouchTool: "manual_brush",
+        retouchedAt: now,
+        retouchedByUserId: userId,
+        transparentCutoutUrl: null,
+        status: "generated",
+        reviewStatus: "pending",
+        reviewedAt: undefined,
+        reviewedByUserId: undefined,
+        shopifyMediaId: null,
+        error: null,
+        updatedAt: now,
+      });
+      await refreshJobSummary(ctx, source.jobId);
+      await refreshProductSummary(ctx, source.productId);
+      return source._id;
+    }
+
     const imageId = await ctx.db.insert("generatedImages", {
       ...(source.shopId ? { shopId: source.shopId } : {}),
       productId: source.productId,

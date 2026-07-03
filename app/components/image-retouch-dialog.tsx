@@ -1,11 +1,15 @@
 import {
   Check,
   Droplets,
+  FlipHorizontal2,
+  FlipVertical2,
   Loader2,
   Paintbrush,
   Pipette,
   Redo2,
   RotateCcw,
+  RotateCw,
+  Save,
   Undo2,
   ZoomIn,
   ZoomOut,
@@ -37,7 +41,10 @@ export type RetouchTarget = {
   label: string;
 };
 
+export type RetouchSaveMode = "version" | "overwrite";
+
 type Tool = "brush" | "picker";
+type CanvasTransform = "rotateClockwise" | "flipHorizontal" | "flipVertical";
 
 type Point = {
   x: number;
@@ -56,6 +63,12 @@ type BrushPreview = {
   visible: boolean;
 };
 
+type CanvasSnapshot = {
+  imageData: ImageData;
+  width: number;
+  height: number;
+};
+
 const HISTORY_LIMIT = 12;
 const SWATCHES = ["#ffffff", "#f8faf8", "#f1f3f0", "#e6e9e5", "#d7ddd8"];
 
@@ -70,12 +83,16 @@ export function ImageRetouchDialog({
   saving?: boolean;
   onOpenChange: (open: boolean) => void;
   onPrepareSource?: (target: RetouchTarget) => Promise<string>;
-  onSave: (target: RetouchTarget, blob: Blob) => Promise<void>;
+  onSave: (
+    target: RetouchTarget,
+    blob: Blob,
+    mode: RetouchSaveMode,
+  ) => Promise<void>;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const loadTokenRef = useRef(0);
-  const undoStackRef = useRef<ImageData[]>([]);
-  const redoStackRef = useRef<ImageData[]>([]);
+  const undoStackRef = useRef<CanvasSnapshot[]>([]);
+  const redoStackRef = useRef<CanvasSnapshot[]>([]);
   const drawingRef = useRef(false);
   const lastPointRef = useRef<Point | null>(null);
   const [tool, setTool] = useState<Tool>("brush");
@@ -123,12 +140,22 @@ export function ImageRetouchDialog({
     syncHistoryState();
   }, [syncHistoryState]);
 
-  const pushHistory = useCallback(() => {
+  const captureSnapshot = useCallback((): CanvasSnapshot | null => {
     const canvas = canvasRef.current;
     const context = canvas?.getContext("2d", { willReadFrequently: true });
-    if (!canvas || !context) return;
+    if (!canvas || !context) return null;
+
+    return {
+      imageData: context.getImageData(0, 0, canvas.width, canvas.height),
+      width: canvas.width,
+      height: canvas.height,
+    };
+  }, []);
+
+  const pushHistory = useCallback(() => {
     try {
-      const snapshot = context.getImageData(0, 0, canvas.width, canvas.height);
+      const snapshot = captureSnapshot();
+      if (!snapshot) return;
       undoStackRef.current = [...undoStackRef.current, snapshot].slice(
         -HISTORY_LIMIT,
       );
@@ -137,13 +164,17 @@ export function ImageRetouchDialog({
     } catch {
       setError("Cette image ne permet pas la retouche dans le navigateur.");
     }
-  }, [syncHistoryState]);
+  }, [captureSnapshot, syncHistoryState]);
 
-  const restoreSnapshot = useCallback((snapshot: ImageData) => {
+  const restoreSnapshot = useCallback((snapshot: CanvasSnapshot) => {
     const canvas = canvasRef.current;
-    const context = canvas?.getContext("2d");
-    if (!canvas || !context) return;
-    context.putImageData(snapshot, 0, 0);
+    if (!canvas) return;
+    canvas.width = snapshot.width;
+    canvas.height = snapshot.height;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) return;
+    context.putImageData(snapshot.imageData, 0, 0);
+    setImageSize({ width: snapshot.width, height: snapshot.height });
   }, []);
 
   const resetCanvas = useCallback(async () => {
@@ -307,6 +338,57 @@ export function ImageRetouchDialog({
     [brushColor, brushOpacity, brushSize],
   );
 
+  const applyCanvasTransform = useCallback(
+    (transform: CanvasTransform) => {
+      const canvas = canvasRef.current;
+      if (!canvas || !imageSize || loading || error) return;
+
+      const source = document.createElement("canvas");
+      source.width = canvas.width;
+      source.height = canvas.height;
+      const sourceContext = source.getContext("2d");
+      if (!sourceContext) return;
+      sourceContext.drawImage(canvas, 0, 0);
+
+      pushHistory();
+
+      const width = canvas.width;
+      const height = canvas.height;
+
+      if (transform === "rotateClockwise") {
+        canvas.width = height;
+        canvas.height = width;
+        const context = canvas.getContext("2d", {
+          willReadFrequently: true,
+        });
+        if (!context) return;
+        context.translate(height, 0);
+        context.rotate(Math.PI / 2);
+        context.drawImage(source, 0, 0);
+      } else {
+        const context = canvas.getContext("2d", {
+          willReadFrequently: true,
+        });
+        if (!context) return;
+        context.clearRect(0, 0, width, height);
+        context.save();
+        if (transform === "flipHorizontal") {
+          context.translate(width, 0);
+          context.scale(-1, 1);
+        } else {
+          context.translate(0, height);
+          context.scale(1, -1);
+        }
+        context.drawImage(source, 0, 0);
+        context.restore();
+      }
+
+      setImageSize({ width: canvas.width, height: canvas.height });
+      hideBrushPreview();
+    },
+    [error, hideBrushPreview, imageSize, loading, pushHistory],
+  );
+
   const handlePointerDown = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     if (!imageSize || loading || error) return;
     updateBrushPreview(event);
@@ -341,30 +423,24 @@ export function ImageRetouchDialog({
   };
 
   const undo = () => {
-    const canvas = canvasRef.current;
-    const context = canvas?.getContext("2d", { willReadFrequently: true });
     const previous = undoStackRef.current.pop();
-    if (!canvas || !context || !previous) return;
-    redoStackRef.current.push(
-      context.getImageData(0, 0, canvas.width, canvas.height),
-    );
+    const current = captureSnapshot();
+    if (!current || !previous) return;
+    redoStackRef.current.push(current);
     restoreSnapshot(previous);
     syncHistoryState();
   };
 
   const redo = () => {
-    const canvas = canvasRef.current;
-    const context = canvas?.getContext("2d", { willReadFrequently: true });
     const next = redoStackRef.current.pop();
-    if (!canvas || !context || !next) return;
-    undoStackRef.current.push(
-      context.getImageData(0, 0, canvas.width, canvas.height),
-    );
+    const current = captureSnapshot();
+    if (!current || !next) return;
+    undoStackRef.current.push(current);
     restoreSnapshot(next);
     syncHistoryState();
   };
 
-  const save = async () => {
+  const save = async (mode: RetouchSaveMode) => {
     const canvas = canvasRef.current;
     if (!target || !canvas) return;
 
@@ -381,7 +457,7 @@ export function ImageRetouchDialog({
           reject(exportError);
         }
       });
-      await onSave(target, blob);
+      await onSave(target, blob, mode);
     } catch (saveError) {
       setError(
         saveError instanceof Error
@@ -447,6 +523,46 @@ export function ImageRetouchDialog({
                   >
                     <Pipette data-icon="inline-start" />
                     Pipette
+                  </Button>
+                </div>
+              </div>
+
+              <Separator />
+
+              <div className="retouch-tool-group retouch-tool-transform">
+                <Label className="text-xs uppercase text-muted-foreground">
+                  Transformer
+                </Label>
+                <div className="retouch-actions-grid">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={!canEdit}
+                    onClick={() => applyCanvasTransform("rotateClockwise")}
+                  >
+                    <RotateCw data-icon="inline-start" />
+                    Rotation
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={!canEdit}
+                    onClick={() => applyCanvasTransform("flipHorizontal")}
+                  >
+                    <FlipHorizontal2 data-icon="inline-start" />
+                    Miroir H
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={!canEdit}
+                    onClick={() => applyCanvasTransform("flipVertical")}
+                  >
+                    <FlipVertical2 data-icon="inline-start" />
+                    Miroir V
                   </Button>
                 </div>
               </div>
@@ -670,8 +786,9 @@ export function ImageRetouchDialog({
             </Button>
             <Button
               type="button"
+              variant="outline"
               disabled={!canEdit || busy}
-              onClick={() => void save()}
+              onClick={() => void save("version")}
             >
               {busy ? (
                 <Loader2 data-icon="inline-start" className="animate-spin" />
@@ -679,6 +796,18 @@ export function ImageRetouchDialog({
                 <Check data-icon="inline-start" />
               )}
               Enregistrer une version
+            </Button>
+            <Button
+              type="button"
+              disabled={!canEdit || busy}
+              onClick={() => void save("overwrite")}
+            >
+              {busy ? (
+                <Loader2 data-icon="inline-start" className="animate-spin" />
+              ) : (
+                <Save data-icon="inline-start" />
+              )}
+              Enregistrer et écraser
             </Button>
           </DialogFooter>
         </div>
