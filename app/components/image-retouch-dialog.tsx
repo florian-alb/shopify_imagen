@@ -623,7 +623,7 @@ export function ImageRetouchDialog({
   };
 
   const resizeBrush = useCallback((delta: number) => {
-    setBrushSize((value) => clamp(value + delta, 4, 140));
+    setBrushSize((value) => clamp(value + delta, 4, 500));
   }, []);
 
   const resizeBrushOpacity = useCallback((delta: number) => {

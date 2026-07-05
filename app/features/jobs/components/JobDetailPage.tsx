@@ -6,7 +6,6 @@ import {
   ChevronLeft,
   ChevronRight,
   ExternalLink,
-  Eye,
   Loader2,
   Paintbrush,
   RefreshCw,
@@ -34,7 +33,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle
 } from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -42,11 +40,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { GeneratedImageTile } from "@/features/images/components/GeneratedImageTile";
 import {
   getReviewStatus,
   isReviewable,
@@ -796,7 +790,7 @@ function JobProductReviewCard({
       <CardContent>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           {images.map((image) => (
-            <ReviewImageTile
+            <GeneratedImageTile
               key={image._id}
               image={image}
               reviewing={reviewing}
@@ -812,123 +806,6 @@ function JobProductReviewCard({
         </div>
       </CardContent>
     </Card>
-  );
-}
-
-function ReviewImageTile({
-  image,
-  reviewing,
-  retrying,
-  regenerating,
-  onPreview,
-  onReview,
-  onRegenerate,
-  onRetouch,
-  onRetry
-}: {
-  image: Doc<"generatedImages">;
-  reviewing: boolean;
-  retrying: boolean;
-  regenerating: boolean;
-  onPreview: () => void;
-  onReview: (reviewStatus: "approved" | "rejected") => void;
-  onRegenerate: () => void;
-  onRetouch: () => void;
-  onRetry: () => void;
-}) {
-  const reviewable = isReviewable(image);
-  return (
-    <article className="overflow-hidden rounded-lg border bg-background">
-      <button
-        type="button"
-        className="image-tile group relative block w-full cursor-zoom-in rounded-none"
-        disabled={!image.storageUrl}
-        onClick={onPreview}
-      >
-        {image.storageUrl ? (
-          <>
-            <img src={image.storageUrl} alt={image.imageType} />
-            <span className="absolute right-2 top-2 rounded-full bg-black/55 p-1.5 text-white opacity-0 transition group-hover:opacity-100">
-              <Eye className="size-3.5" />
-            </span>
-          </>
-        ) : (
-          <span className="grid size-full place-items-center text-xs text-muted-foreground">{image.status}</span>
-        )}
-      </button>
-      <div className="grid gap-2 p-2">
-      <div className="flex min-w-0 items-center justify-between gap-2">
-        <p className="truncate text-sm font-medium">{image.imageType}</p>
-        <ImageStateBadge image={image} />
-      </div>
-      {image.retouchSourceImageId ? (
-        <Badge variant="outline" className="w-fit text-[0.65rem]">
-          Retouche
-        </Badge>
-      ) : null}
-      {image.error ? <p className="line-clamp-2 text-xs text-destructive">{image.error}</p> : null}
-        {image.status === "failed" ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                aria-label={`Retry ${image.imageType}`}
-                variant="outline"
-                size="icon-sm"
-                disabled={retrying || regenerating}
-                onClick={onRetry}
-              >
-                {retrying || regenerating ? <Loader2 className="animate-spin" /> : <RefreshCw />}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>retry</TooltipContent>
-          </Tooltip>
-        ) : null}
-        {reviewable ? (
-      <div className="grid grid-cols-4 gap-1">
-            <Button
-              aria-label={`Approve ${image.imageType}`}
-              title="Approve"
-              variant={getReviewStatus(image) === "approved" ? "default" : "outline"}
-              size="icon-sm"
-              disabled={reviewing}
-              onClick={() => onReview("approved")}
-            >
-              <Check />
-            </Button>
-            <Button
-              aria-label={`Reject ${image.imageType}`}
-              title="Reject"
-              variant={getReviewStatus(image) === "rejected" ? "destructive" : "outline"}
-              size="icon-sm"
-              disabled={reviewing}
-              onClick={() => onReview("rejected")}
-            >
-              <X />
-            </Button>
-            <Button
-              aria-label={`Regenerate ${image.imageType}`}
-              title="Regenerate"
-              variant="outline"
-              size="icon-sm"
-              disabled={regenerating}
-              onClick={onRegenerate}
-        >
-          {regenerating ? <Loader2 className="animate-spin" /> : <RotateCcw />}
-        </Button>
-        <Button
-          aria-label={`Retoucher ${image.imageType}`}
-          title="Retoucher"
-          variant="outline"
-          size="icon-sm"
-          disabled={!image.storageUrl}
-          onClick={onRetouch}
-        >
-          <Paintbrush />
-        </Button>
-      </div>
-        ) : null}
-      </div>
-    </article>
   );
 }
 
