@@ -29,7 +29,7 @@ export function JobStickyPublishBar({
     <div className="sticky-actions">
       <Card
         size="sm"
-        className="studio-card flex-row items-center justify-between gap-3 rounded-lg p-3 shadow-2xl"
+        className="flex-row items-center justify-between gap-3 rounded-lg p-3 shadow-2xl"
       >
         <div className="min-w-0">
           <p className="text-sm font-medium">

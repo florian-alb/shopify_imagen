@@ -56,6 +56,39 @@ function uniqueUrls(urls: Array<string | null | undefined>) {
   return Array.from(new Set(urls.filter((url): url is string => Boolean(url))));
 }
 
+function executionPatchForJob(
+  job: Doc<"generationJobs">,
+  images: Doc<"generatedImages">[],
+  now = job.updatedAt,
+) {
+  if (job.isHidden || job.status === "cancelled") return {};
+  const completedTasks = images.filter(
+    (image) => image.status === "generated" || image.status === "uploaded",
+  ).length;
+  const failedTasks = images.filter(
+    (image) => image.status === "failed" || image.status === "canceled",
+  ).length;
+  const done = completedTasks + failedTasks >= job.totalTasks;
+  return {
+    completedTasks,
+    failedTasks,
+    ...(done
+      ? {
+          status: failedTasks > 0 ? ("failed" as const) : ("completed" as const),
+          error:
+            failedTasks > 0 ? `${failedTasks} image task(s) failed.` : null,
+          completedAt: job.completedAt ?? now,
+        }
+      : job.status === "failed" || job.status === "completed"
+        ? {
+            status: "running" as const,
+            completedAt: undefined,
+            error: null,
+          }
+        : {}),
+  };
+}
+
 export async function refreshJobSummary(
   ctx: { db: any },
   jobId: Id<"generationJobs">,
@@ -72,7 +105,9 @@ export async function refreshJobSummary(
       image.storageUrl &&
       (image.status === "generated" || image.status === "uploaded"),
   );
+  const executionPatch = executionPatchForJob(job, images, Date.now());
   const patch = {
+    ...executionPatch,
     generationCost: costSummary.generationCost,
     inputTokens: costSummary.inputTokens,
     outputTokens: costSummary.outputTokens,
@@ -131,8 +166,17 @@ export const list = query({
       matched += 1;
       if (page.length >= limit + 1) break;
     }
+    const pageJobs = await Promise.all(
+      page.slice(0, limit).map(async (job) => {
+        const images = await ctx.db
+          .query("generatedImages")
+          .withIndex("by_job", (q) => q.eq("jobId", job._id))
+          .collect();
+        return { ...job, ...executionPatchForJob(job, images) };
+      }),
+    );
     return {
-      page: page.slice(0, limit).map(listedJob),
+      page: pageJobs.map(listedJob),
       offset,
       limit,
       hasPrevious: offset > 0,
@@ -227,10 +271,11 @@ export const get = query({
       .query("generatedImages")
       .withIndex("by_job", (q) => q.eq("jobId", args.jobId))
       .collect();
+    const currentJob = { ...job, ...executionPatchForJob(job, images) };
     const products = await Promise.all(
       job.productIds.map((id) => ctx.db.get(id)),
     );
-    return { job, images, products: products.filter(Boolean) };
+    return { job: currentJob, images, products: products.filter(Boolean) };
   },
 });
 
@@ -993,6 +1038,33 @@ export const completeImage = internalMutation({
           firstImageStoredAt: job.firstImageStoredAt ?? now,
           updatedAt: now,
         });
+      }
+      if (source.status === "failed" || source.status === "canceled") {
+        const sourceJob = await ctx.db.get(source.jobId);
+        if (sourceJob) {
+          const completedTasks = Math.min(
+            sourceJob.totalTasks,
+            sourceJob.completedTasks + 1,
+          );
+          const failedTasks = Math.max(0, sourceJob.failedTasks - 1);
+          const done = completedTasks + failedTasks >= sourceJob.totalTasks;
+          await ctx.db.patch(sourceJob._id, {
+            completedTasks,
+            failedTasks,
+            status: done
+              ? failedTasks > 0
+                ? "failed"
+                : "completed"
+              : sourceJob.status === "failed" || sourceJob.status === "cancelled"
+                ? "running"
+                : sourceJob.status,
+            error:
+              failedTasks > 0 ? `${failedTasks} image task(s) failed.` : null,
+            completedAt: done ? now : undefined,
+            firstImageStoredAt: sourceJob.firstImageStoredAt ?? now,
+            updatedAt: now,
+          });
+        }
       }
       await ctx.db.delete(image._id);
       await refreshJobSummary(ctx, source.jobId);

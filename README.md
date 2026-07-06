@@ -98,15 +98,15 @@ Ouvre l'URL affichée par Vite, généralement **http://localhost:5173**.
 ## 🔐 Environnement
 
 ### Convex & Auth
-| Variable                                  | Rôle                                                                              |
-| ----------------------------------------- | --------------------------------------------------------------------------------- |
-| `CONVEX_DEPLOYMENT`                       | déploiement Convex dev actif, **auto-écrit dans `.env.local`** par `convex dev`   |
-| `CONVEX_DEPLOY_KEY`                       | clé de déploiement (CI/Vercel uniquement, jamais en local)                        |
-| `VITE_CONVEX_URL`, `VITE_CONVEX_SITE_URL` | URLs Convex côté client (seules variables `VITE_` exposées au navigateur)         |
-| `AUTH_SECRET`, `AUTH_URL`, `SITE_URL`     | config Convex Auth                                                                |
-| `JWT_PRIVATE_KEY`, `JWKS`                 | clés générées par la commande de setup Convex Auth                                |
-| `AUTH_ADMIN_EMAIL`                        | adresse du premier compte admin approuvé                                          |
-| `AUTH_SETUP_SECRET`                       | secret requis pour créer le premier admin                                         |
+| Variable                                  | Rôle                                                                            |
+| ----------------------------------------- | ------------------------------------------------------------------------------- |
+| `CONVEX_DEPLOYMENT`                       | déploiement Convex dev actif, **auto-écrit dans `.env.local`** par `convex dev` |
+| `CONVEX_DEPLOY_KEY`                       | clé de déploiement (CI/Vercel uniquement, jamais en local)                      |
+| `VITE_CONVEX_URL`, `VITE_CONVEX_SITE_URL` | URLs Convex côté client (seules variables `VITE_` exposées au navigateur)       |
+| `AUTH_SECRET`, `AUTH_URL`, `SITE_URL`     | config Convex Auth                                                              |
+| `JWT_PRIVATE_KEY`, `JWKS`                 | clés générées par la commande de setup Convex Auth                              |
+| `AUTH_ADMIN_EMAIL`                        | adresse du premier compte admin approuvé                                        |
+| `AUTH_SETUP_SECRET`                       | secret requis pour créer le premier admin                                       |
 
 Les inscriptions suivantes créent des comptes `users.approvalStatus = "pending"`.
 Un admin doit passer ce champ à `"approved"` dans le dashboard Convex pour autoriser l'accès.
@@ -219,7 +219,7 @@ Flux « tout repasser en WebP » : régénérer (force) → push avec *Replace e
 ## 🔎 Validation
 
 ```bash
-npm run typecheck                 # tsc app + review-ui
+npm run typecheck                 # tsc app
 npx tsc --noEmit -p convex/tsconfig.json   # fonctions Convex
 npm run build
 npx convex dev --once             # régénère _generated, typecheck & push Convex

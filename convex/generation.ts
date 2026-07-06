@@ -36,6 +36,8 @@ import {
 import { generateWithOpenAi } from "./generation/openAi";
 import {
   cancelOpenAiBatch as cancelOpenAiBatchClient,
+  cleanupOpenAiBatchReferencesForImages,
+  cleanupStaleOpenAiBatchReferencesFromR2,
   pollOpenAiBatch as pollOpenAiBatchClient,
   submitOpenAiBatch,
 } from "./generation/openAiBatch";
@@ -101,6 +103,13 @@ export const deleteFromStorage = internalAction({
   },
 });
 
+export const cleanupStaleOpenAiBatchReferences = internalAction({
+  args: {},
+  handler: async () => {
+    await cleanupStaleOpenAiBatchReferencesFromR2();
+  },
+});
+
 async function cleanupStorageUrls(urls: string[], label: string) {
   for (const url of urls) {
     try {
@@ -111,6 +120,14 @@ async function cleanupStorageUrls(urls: string[], label: string) {
       );
     }
   }
+}
+
+async function cleanupOpenAiBatchReferencesForJobImages(
+  job: Doc<"generationJobs">,
+  images: Doc<"generatedImages">[],
+) {
+  if (job.executionMode !== "batch" || job.imageProvider !== "openai") return;
+  await cleanupOpenAiBatchReferencesForImages(images);
 }
 
 async function scheduleBatchPoll(
@@ -364,6 +381,9 @@ export const submitBatch = internalAction({
             error: message,
           });
         }
+        if (provider === "openai") {
+          await cleanupOpenAiBatchReferencesForImages(preparedImages);
+        }
         await ctx.runMutation(internal.jobs.finishJobIfDone, {
           jobId: args.jobId,
         });
@@ -413,6 +433,7 @@ async function processTerminalBatch(
         reason: "Provider batch was cancelled.",
         batchStatus: poll.batchStatus ?? job.batchStatus ?? null,
       });
+      await cleanupOpenAiBatchReferencesForJobImages(job, pending);
       await cleanupGeminiBatchFiles(job);
       return { state: "cancelled" as const };
     }
@@ -429,6 +450,7 @@ async function processTerminalBatch(
           error: poll.error,
         });
       }
+      await cleanupOpenAiBatchReferencesForJobImages(job, pending);
       await ctx.runMutation(internal.jobs.finishJobIfDone, { jobId: job._id });
       await cleanupGeminiBatchFiles(job);
       return { state: "failed" as const, error: poll.error };

@@ -76,7 +76,7 @@ function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
         <HeadContent />
       </head>
       <body>
-        <a href="#main-content" className="skip-link">
+        <a href="#main-content" className="fixed left-4 top-4 z-50 -translate-y-[160%] rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground transition-transform duration-150 focus:translate-y-0">
           Aller au contenu
         </a>
         {children}

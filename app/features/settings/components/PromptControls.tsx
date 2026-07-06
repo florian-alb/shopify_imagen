@@ -25,7 +25,7 @@ export function PromptAiControls({
   onChange: (values: Partial<PromptAiDraft>) => void;
 }) {
   return (
-    <section className="mt-4 rounded-lg border border-white/10 bg-white/[0.03] p-3">
+    <section className="mt-4 rounded-lg border border-border bg-card p-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h3 className="text-sm font-medium text-foreground">Reglages IA</h3>
@@ -33,7 +33,7 @@ export function PromptAiControls({
             Analyse visuelle et references envoyees pour ce prompt.
           </p>
         </div>
-        <Label className="flex h-8 cursor-pointer items-center gap-2 rounded-lg border border-white/10 bg-background/40 px-3 text-sm">
+        <Label className="flex h-8 cursor-pointer items-center gap-2 rounded-lg border border-border bg-background/40 px-3 text-sm">
           <Checkbox
             checked={draft.useVibeAnalysis}
             onCheckedChange={(checked) =>
@@ -77,7 +77,7 @@ export function BackgroundControls({
   onChange: (values: Partial<BackgroundDraft>) => void;
 }) {
   return (
-    <section className="mt-4 rounded-lg border border-white/10 bg-white/[0.03] p-3">
+    <section className="mt-4 rounded-lg border border-border bg-card p-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h3 className="text-sm font-medium text-foreground">
@@ -87,7 +87,7 @@ export function BackgroundControls({
             Post-traitement FAL facultatif configure pour ce type d'image.
           </p>
         </div>
-        <Label className="flex h-8 cursor-pointer items-center gap-2 rounded-lg border border-white/10 bg-background/40 px-3 text-sm">
+        <Label className="flex h-8 cursor-pointer items-center gap-2 rounded-lg border border-border bg-background/40 px-3 text-sm">
           <Checkbox
             checked={draft.removeBackground}
             onCheckedChange={(checked) =>
@@ -148,7 +148,7 @@ export function BackgroundControls({
           </div>
         </div>
 
-        <Label className="mt-6 flex h-9 cursor-pointer items-center gap-2 rounded-lg border border-white/10 bg-background/40 px-3 text-sm">
+        <Label className="mt-6 flex h-9 cursor-pointer items-center gap-2 rounded-lg border border-border bg-background/40 px-3 text-sm">
           <Checkbox
             checked={draft.backgroundShadow}
             onCheckedChange={(checked) =>

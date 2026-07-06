@@ -18,5 +18,11 @@ crons.interval(
   internal.shopify.cleanupStaleRejectedImages,
   {},
 );
+crons.interval(
+  "cleanup stale OpenAI batch references",
+  { hours: 12 },
+  internal.generation.cleanupStaleOpenAiBatchReferences,
+  {},
+);
 
 export default crons;

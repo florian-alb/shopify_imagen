@@ -14,7 +14,7 @@ export function ActiveShopBanner({
   onChange: () => void;
 }) {
   return (
-    <section className="mb-4 rounded-lg border border-white/10 bg-white/3 p-4">
+    <section className="mb-4 rounded-lg border border-border bg-card p-4">
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">

@@ -67,8 +67,8 @@ export function PromptTemplateEditor({
   ) => void;
 }) {
   return (
-    <TabsContent key={prompt._id} value={prompt.imageType}>
-      <Card className="studio-card rounded-lg">
+    <TabsContent key={prompt._id} value={prompt.imageType} className="min-w-0">
+      <Card className="rounded-lg">
         <CardHeader className="flex flex-row items-start justify-between gap-2">
           <div>
             {editing ? (
@@ -104,7 +104,7 @@ export function PromptTemplateEditor({
             )}
           </div>
           <div className="flex items-center gap-3">
-            <Label className="flex h-8 cursor-pointer items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 text-sm">
+            <Label className="flex h-8 cursor-pointer items-center gap-2 rounded-lg border border-border bg-card px-3 text-sm">
               <Checkbox
                 checked={prompt.isPreset === true}
                 onCheckedChange={(checked) =>

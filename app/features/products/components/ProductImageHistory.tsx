@@ -27,7 +27,7 @@ export function ProductImageHistory({
   onDelete: (image: Doc<"generatedImages">) => void;
 }) {
   return (
-    <Card className="studio-card mb-4 rounded-lg">
+    <Card className="mb-4 rounded-lg">
       <CardHeader className="flex flex-row items-center justify-between gap-3">
         <CardTitle className="text-lg">Historique prompts et images</CardTitle>
         {hasProductJobs ? (

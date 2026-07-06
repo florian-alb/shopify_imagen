@@ -69,11 +69,11 @@ export function ShopOnboarding({
   return (
     <form
       onSubmit={onSubmit}
-      className="grid gap-4 rounded-lg border border-white/10 bg-white/[0.03] p-4"
+      className="grid gap-4 rounded-lg border border-border bg-card p-4"
     >
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-center gap-3">
-          <span className="grid size-10 place-items-center rounded-lg border border-white/10 bg-black/20 text-muted-foreground">
+          <span className="grid size-10 place-items-center rounded-lg border border-border bg-muted text-muted-foreground">
             <KeyRound className="size-4" />
           </span>
           <div>
@@ -89,7 +89,7 @@ export function ShopOnboarding({
       </div>
 
       <div className="grid gap-4">
-        <div className="min-w-0 rounded-lg border border-white/10 bg-black/10 p-4">
+        <div className="min-w-0 rounded-lg border border-border bg-muted p-4">
           <p className="mb-4 text-xs font-medium text-muted-foreground">
             Etape {step} sur 4
           </p>
@@ -150,7 +150,7 @@ export function ShopOnboarding({
         </div>
       </div>
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
-        <DialogContent className="border-white/10 bg-card sm:max-w-4xl">
+        <DialogContent className="border-border bg-card sm:max-w-4xl">
           <DialogHeader>
             <DialogTitle>Apercu de l'etape {step}</DialogTitle>
           </DialogHeader>
@@ -176,7 +176,7 @@ function OnboardingProgress({ step }: { step: number }) {
                 "grid size-8 place-items-center rounded-full border text-xs font-medium transition-colors",
                 complete || active
                   ? "border-primary/50 bg-primary/15 text-primary"
-                  : "border-white/10 bg-white/[0.03] text-muted-foreground",
+                  : "border-border bg-card text-muted-foreground",
               ].join(" ")}
             >
               {complete ? <Check className="size-4" /> : item}
@@ -220,7 +220,7 @@ function StepOne({
         </div>
         <div>
           <Label htmlFor="shop-domain">Domaine</Label>
-          <div className="mt-2 flex min-h-10 items-center overflow-hidden rounded-lg border border-white/10 bg-black/20 focus-within:ring-2 focus-within:ring-ring/50">
+          <div className="mt-2 flex min-h-10 items-center overflow-hidden rounded-lg border border-border bg-muted focus-within:ring-2 focus-within:ring-ring/50">
             <Input
               id="shop-domain"
               className="h-10 flex-1 border-0 shadow-none focus-visible:ring-0"
@@ -237,7 +237,7 @@ function StepOne({
           </div>
         </div>
       </div>
-      <div className="rounded-lg border border-dashed border-white/10 bg-black/20 px-3 py-2 font-mono text-sm">
+      <div className="rounded-lg border border-dashed border-border bg-muted px-3 py-2 font-mono text-sm">
         {normalizedDomain || "q8r4mz-2x.myshopify.com"}
       </div>
     </div>
@@ -298,7 +298,7 @@ function StepThree({
           Colle ces valeurs dans l'app Shopify avant de créer les clés.
         </p>
       </div>
-      <div className="overflow-hidden rounded-lg border border-white/10">
+      <div className="overflow-hidden rounded-lg border border-border">
         <CopyRow label="URL de l'application" value={appUrl} />
         <CopyRow label="URL de redirection" value={redirectUrl} />
         <CopyRow label="Scopes Admin API" value={ADMIN_SCOPES} />
@@ -387,7 +387,7 @@ function InstructionLine({
 
 function CopyValue({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex min-w-0 items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+    <div className="flex min-w-0 items-center gap-2 rounded-lg border border-border bg-muted px-3 py-2">
       <div className="min-w-0">
         <p className="text-xs font-medium text-muted-foreground">{label}</p>
         <p className="truncate font-mono text-sm">{value}</p>
@@ -399,7 +399,7 @@ function CopyValue({ label, value }: { label: string; value: string }) {
 
 function CopyRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="grid grid-cols-[1fr_auto] items-start gap-3 border-b border-white/10 p-3 last:border-b-0">
+    <div className="grid grid-cols-[1fr_auto] items-start gap-3 border-b border-border p-3 last:border-b-0">
       <div className="min-w-0">
         <p className="text-xs font-medium text-muted-foreground">{label}</p>
         <p className="mt-1 break-words font-mono text-sm">{value}</p>
@@ -454,7 +454,7 @@ function OnboardingVisual({
               className={`mb-2 rounded px-2 py-1 ${
                 index === step - 1
                   ? "bg-emerald-400/15 text-emerald-200"
-                  : "bg-white/5"
+                  : "bg-muted"
               }`}
             >
               {item}
@@ -487,12 +487,12 @@ function OnboardingVisual({
 function VisualStepDomain() {
   return (
     <div className="grid gap-3">
-      <div className="rounded bg-white/5 p-3">
-        <div className="h-2 w-24 rounded bg-white/30" />
+      <div className="rounded bg-muted p-3">
+        <div className="h-2 w-24 rounded bg-muted-foreground/30" />
         <div className="mt-3 h-8 rounded bg-emerald-400/10" />
       </div>
-      <div className="rounded bg-white/5 p-3">
-        <div className="h-2 w-20 rounded bg-white/30" />
+      <div className="rounded bg-muted p-3">
+        <div className="h-2 w-20 rounded bg-muted-foreground/30" />
         <div className="mt-3 h-6 rounded bg-white/10" />
       </div>
     </div>
@@ -523,8 +523,8 @@ function VisualStepConfig() {
         <div className="h-2 w-28 rounded bg-emerald-100/50" />
         <div className="mt-3 h-7 rounded bg-white/10" />
       </div>
-      <div className="rounded bg-white/5 p-3">
-        <div className="h-2 w-20 rounded bg-white/30" />
+      <div className="rounded bg-muted p-3">
+        <div className="h-2 w-20 rounded bg-muted-foreground/30" />
         <div className="mt-3 grid gap-2">
           <div className="h-5 rounded bg-white/10" />
           <div className="h-5 rounded bg-white/10" />
@@ -538,12 +538,12 @@ function VisualStepConfig() {
 function VisualStepCredentials() {
   return (
     <div className="grid gap-3">
-      <div className="rounded bg-white/5 p-3">
-        <div className="h-2 w-16 rounded bg-white/30" />
+      <div className="rounded bg-muted p-3">
+        <div className="h-2 w-16 rounded bg-muted-foreground/30" />
         <div className="mt-3 h-8 rounded bg-emerald-400/10" />
       </div>
-      <div className="rounded bg-white/5 p-3">
-        <div className="h-2 w-24 rounded bg-white/30" />
+      <div className="rounded bg-muted p-3">
+        <div className="h-2 w-24 rounded bg-muted-foreground/30" />
         <div className="mt-3 h-8 rounded bg-white/10" />
       </div>
     </div>

@@ -85,7 +85,7 @@ export function PublishImagesDialog({
                   })
                 }
               />
-              <div className="image-tile size-12 shrink-0 overflow-hidden rounded-md ring-1 ring-border">
+              <div className="block size-12 shrink-0 overflow-hidden rounded-md bg-muted ring-1 ring-border [&>img]:size-full [&>img]:object-cover">
                 <img src={image.storageUrl!} alt={image.imageType} />
               </div>
               <span className="min-w-0 flex-1 truncate text-sm font-medium">

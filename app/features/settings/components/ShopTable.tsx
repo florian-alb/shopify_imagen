@@ -25,8 +25,8 @@ export function ShopTable({
   onUseShop: (shopId: Id<"shops">) => void;
 }) {
   return (
-    <div className="overflow-hidden rounded-lg border border-white/10">
-      <Table className="table-studio">
+    <div className="overflow-hidden rounded-lg border border-border">
+      <Table className="[&_td]:h-16 [&_th]:text-[0.72rem] [&_th]:font-medium [&_th]:text-muted-foreground">
         <TableHeader>
           <TableRow className="hover:bg-transparent">
             <TableHead>Boutique</TableHead>
@@ -48,7 +48,7 @@ export function ShopTable({
               <TableRow key={shop._id ?? shop.domain}>
                 <TableCell className="min-w-52">
                   <div className="flex items-center gap-2">
-                    <span className="grid size-8 place-items-center rounded-lg bg-white/[0.04] text-muted-foreground ring-1 ring-white/10">
+                    <span className="grid size-8 place-items-center rounded-lg bg-muted text-muted-foreground ring-1 ring-border">
                       <Store className="size-4" />
                     </span>
                     <div className="min-w-0">

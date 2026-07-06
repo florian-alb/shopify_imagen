@@ -15,7 +15,7 @@ export function JobProgressCard({
   progress: number;
 }) {
   return (
-    <Card className="studio-card mb-5 rounded-lg">
+    <Card className="mb-5 rounded-lg">
       <CardContent className="pt-1">
         <div className="mb-3 flex flex-wrap justify-between gap-2 text-sm">
           <span>{progress}% termine</span>
