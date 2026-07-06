@@ -25,6 +25,8 @@ import type { GenerationStatus } from "@/lib/status";
 
 const readableBadgeBase = "h-6 border px-2.5 text-xs font-medium";
 
+export const pageContentClass = "w-full px-4 py-4 md:px-5";
+
 const statusClasses: Record<GenerationStatus, string> = {
   not_started:
     "border-stone-300 bg-stone-100 text-stone-800 dark:border-stone-600/60 dark:bg-stone-800 dark:text-stone-200",
@@ -54,7 +56,7 @@ export function PageHeader({
   children?: ReactNode;
 }) {
   return (
-    <header className="mb-4 flex flex-col gap-3 border-b border-white/10 pb-4 lg:flex-row lg:items-end lg:justify-between">
+    <header className="mb-4 flex flex-col gap-3 border-b border-border pb-4 lg:flex-row lg:items-end lg:justify-between">
       <div className="min-w-0">
         {eyebrow ? (
           <p className="mb-1 text-sm text-muted-foreground">{eyebrow}</p>
@@ -128,7 +130,7 @@ export function EmptyState({
   return (
     <Card className="min-h-56 justify-center rounded-lg">
       <CardContent className="mx-auto max-w-md p-8 text-center">
-        <div className="mx-auto mb-4 grid size-12 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-primary">
+        <div className="mx-auto mb-4 grid size-12 place-items-center rounded-lg border border-border bg-muted text-primary">
           {loading ? (
             <LoaderCircle className="size-5 animate-spin" />
           ) : (
@@ -209,7 +211,7 @@ export function NumberedPaginator({
   };
 
   return (
-    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
+    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-2">
       {onPageSizeChange ? (
         <Field orientation="horizontal" className="w-fit">
           <FieldLabel

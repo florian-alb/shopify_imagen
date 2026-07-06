@@ -2,7 +2,13 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "convex/react";
 import { useMemo } from "react";
 import { FilterSelect } from "@/components/common/FilterSelect";
-import { EmptyState, NumberedPaginator, PageHeader, StateBadge } from "@/components/page";
+import {
+  EmptyState,
+  NumberedPaginator,
+  PageHeader,
+  StateBadge,
+  pageContentClass,
+} from "@/components/page";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -123,8 +129,11 @@ export function JobsPage({ search }: { search: JobSearch }) {
   };
 
   return (
-    <main className="mx-auto w-full max-w-[96rem] p-4 md:p-5">
-      <PageHeader eyebrow={`${jobs.length} operations visibles`} title="Generations">
+    <main className={pageContentClass}>
+      <PageHeader
+        eyebrow={`${jobs.length} operations visibles`}
+        title="Generations"
+      >
         Suivi des jobs image, review et couts d'execution.
       </PageHeader>
       {cost ? (

@@ -13,11 +13,9 @@ export function AppShell({ children }: { children: ReactNode }) {
         <DesktopTopbar />
         <main
           id="main-content"
-          className="min-h-[calc(100dvh-4rem)] px-4 pb-4 max-md:min-h-[calc(100dvh-3.5rem)] max-md:px-0 max-md:pb-0"
+          className="min-h-[calc(100dvh-4rem)] bg-background max-md:min-h-[calc(100dvh-3.5rem)]"
         >
-          <div className="min-h-[calc(100dvh-5rem)] overflow-clip rounded-xl border bg-background max-md:min-h-[calc(100dvh-3.5rem)] max-md:rounded-none max-md:border-x-0 max-md:border-b-0">
-            {children}
-          </div>
+          {children}
         </main>
       </SidebarInset>
     </SidebarProvider>
