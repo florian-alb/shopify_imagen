@@ -2,9 +2,9 @@ name: CI
 
 on:
   pull_request:
-    branches: [main]
-  push:
     branches: [main, dev]
+  push:
+    branches: [main]
 
 jobs:
   verify:
@@ -38,7 +38,7 @@ jobs:
 
   deploy-convex-dev:
     needs: verify
-    if: github.ref == 'refs/heads/dev' && github.event_name == 'push'
+    if: github.base_ref == 'dev' && github.event_name == 'pull_request'
     runs-on: ubuntu-latest
 
     steps:
