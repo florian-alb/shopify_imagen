@@ -13,9 +13,6 @@ export function JobReviewToolbar({
   executionMode,
   filter,
   images,
-  reviewing,
-  visibleReviewableCount,
-  onApproveVisible,
   onFilterChange,
 }: {
   counts: JobReviewCounts;
@@ -40,14 +37,6 @@ export function JobReviewToolbar({
             reference.
           </p>
         </div>
-        <Button
-          variant="outline"
-          disabled={!visibleReviewableCount || reviewing}
-          onClick={onApproveVisible}
-        >
-          <Check data-icon="inline-start" />
-          Approuver visibles
-        </Button>
       </div>
       <div className="flex flex-wrap gap-2">
         {reviewFilters.map((item) => {

@@ -96,6 +96,9 @@ export function JobDetailPage({ jobId }: { jobId: string }) {
         rejectedCount={page.viewModel.rejectedCount}
         pushableCount={page.viewModel.pushableImages.length}
         onPublish={page.actions.openGlobalPublish}
+        onApproveVisible={page.actions.reviewVisible}
+        visibleReviewableCount={page.viewModel.visibleReviewable.length}
+        reviewing={page.review.reviewing}
       />
 
       <JobImagePreviewDialog

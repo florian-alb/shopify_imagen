@@ -1,4 +1,4 @@
-import { Send } from "lucide-react";
+import { Check, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 
@@ -8,14 +8,20 @@ export function JobStickyPublishBar({
   pushableCount,
   rejectedCount,
   reviewableCount,
+  visibleReviewableCount,
+  reviewing,
   onPublish,
+  onApproveVisible,
 }: {
   approvedCount: number;
   pendingCount: number;
   pushableCount: number;
   rejectedCount: number;
   reviewableCount: number;
+  visibleReviewableCount: number;
+  reviewing: boolean;
   onPublish: () => void;
+  onApproveVisible: () => void;
 }) {
   if (!reviewableCount) return null;
 
@@ -38,10 +44,20 @@ export function JobStickyPublishBar({
               : "Aucune nouvelle image a publier"}
           </p>
         </div>
-        <Button disabled={!pushableCount} onClick={onPublish}>
-          <Send data-icon="inline-start" />
-          Publier {pushableCount || ""}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="secondary"
+            disabled={!visibleReviewableCount || reviewing}
+            onClick={onApproveVisible}
+          >
+            <Check data-icon="inline-start" />
+            Approver {visibleReviewableCount || ""}
+          </Button>
+          <Button disabled={!pushableCount} onClick={onPublish}>
+            <Send data-icon="inline-start" />
+            Publier {pushableCount || ""}
+          </Button>
+        </div>
       </Card>
     </div>
   );
