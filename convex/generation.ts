@@ -101,6 +101,18 @@ export const deleteFromStorage = internalAction({
   },
 });
 
+async function cleanupStorageUrls(urls: string[], label: string) {
+  for (const url of urls) {
+    try {
+      await deleteFromR2(url);
+    } catch (error) {
+      console.warn(
+        `${label}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+}
+
 async function scheduleBatchPoll(
   ctx: Pick<ActionCtx, "scheduler">,
   jobId: Id<"generationJobs">,
@@ -1105,7 +1117,7 @@ async function processPostprocessingImage(
       key,
       contentType: optimized.contentType,
     });
-    await ctx.runMutation(internal.jobs.completeImage, {
+    const completion = await ctx.runMutation(internal.jobs.completeImage, {
       imageId: image._id,
       generatedImageUrl: storageUrl,
       storageUrl,
@@ -1121,6 +1133,10 @@ async function processPostprocessingImage(
       costUsd: image.costUsd,
       costRateMultiplier: image.costRateMultiplier,
     });
+    await cleanupStorageUrls(
+      completion.cleanupUrls,
+      "Regenerated image cleanup failed",
+    );
     await deleteFromR2(image.postProcessingInputUrl).catch(() => undefined);
     log("postprocess", "stored", {
       jobId: image.jobId,
@@ -1373,7 +1389,7 @@ export const processJob = internalAction({
           key,
           contentType: optimized.contentType,
         });
-        await ctx.runMutation(internal.jobs.completeImage, {
+        const completion = await ctx.runMutation(internal.jobs.completeImage, {
           imageId: image._id,
           generatedImageUrl: storageUrl,
           storageUrl,
@@ -1388,6 +1404,10 @@ export const processJob = internalAction({
           costUsd,
           costRateMultiplier,
         });
+        await cleanupStorageUrls(
+          completion.cleanupUrls,
+          "Regenerated image cleanup failed",
+        );
         done += 1;
         log("realtime", "stored", {
           handle: product.handle,

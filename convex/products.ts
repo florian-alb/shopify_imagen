@@ -63,6 +63,10 @@ const productPrimaryAction = v.union(
   v.literal("done")
 );
 
+function visibleGeneratedImages(images: Doc<"generatedImages">[]) {
+  return images.filter((image) => !image.retrySourceImageId);
+}
+
 const productFilterArgs = {
   search: v.optional(v.string()),
   productType: v.optional(v.string()),
@@ -220,7 +224,11 @@ export const getWithImages = query({
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
       .order("desc")
       .collect();
-    return { product: { ...product, ...calculateProductWorkflow(images) }, images };
+    const visibleImages = visibleGeneratedImages(images);
+    return {
+      product: { ...product, ...calculateProductWorkflow(visibleImages) },
+      images: visibleImages,
+    };
   }
 });
 
@@ -372,7 +380,7 @@ export async function recalculateProductStatus(ctx: { db: any }, productId: Id<"
     .query("generatedImages")
     .withIndex("by_product", (q: any) => q.eq("productId", productId))
     .collect();
-  return calculateProductStatus(images);
+  return calculateProductStatus(visibleGeneratedImages(images));
 }
 
 export async function refreshProductSummary(ctx: { db: any }, productId: Id<"products">) {
@@ -380,7 +388,7 @@ export async function refreshProductSummary(ctx: { db: any }, productId: Id<"pro
     .query("generatedImages")
     .withIndex("by_product", (q: any) => q.eq("productId", productId))
     .collect();
-  const summary = calculateProductWorkflow(images);
+  const summary = calculateProductWorkflow(visibleGeneratedImages(images));
   await ctx.db.patch(productId, {
     ...summary,
     updatedAt: Date.now()
