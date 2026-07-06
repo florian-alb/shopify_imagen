@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   applyStudioPromptContract,
   referenceImageCountForStudio,
-} from "./studioPromptContract";
+} from "../../jobs/studioPromptContract";
 
 describe("studio prompt contract", () => {
   test("adds final right-facing side-profile constraints", () => {

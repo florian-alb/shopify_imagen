@@ -3,17 +3,17 @@ import { ImageRetouchDialog } from "@/components/image-retouch-dialog";
 import { EmptyState } from "@/components/page";
 
 import { DeleteImageDialog } from "./DeleteImageDialog";
-import { GenerateImagesDialog } from "./GenerateImagesDialog";
+import { ImageTypeSelectionDialog } from "./ImageTypeSelectionDialog";
 import { ProductFacts } from "./ProductFacts";
 import { ProductHeader } from "./ProductHeader";
 import { ProductImageHistory } from "./ProductImageHistory";
 import { ProductImagesSection } from "./ProductImagesSection";
 import { PublishImagesDialog } from "./PublishImagesDialog";
+import { useGeneratedImageRetouch } from "@/features/images/hooks/useGeneratedImageRetouch";
 import { useProductDetail } from "../hooks/useProductDetail";
 import { useProductImageDelete } from "../hooks/useProductImageDelete";
 import { useProductImageGeneration } from "../hooks/useProductImageGeneration";
 import { useProductImagePublish } from "../hooks/useProductImagePublish";
-import { useProductImageRetouch } from "../hooks/useProductImageRetouch";
 import { useProductImageReview } from "../hooks/useProductImageReview";
 import { useProductImagesViewModel } from "../hooks/useProductImagesViewModel";
 import { useShopifyImageReorder } from "../hooks/useShopifyImageReorder";
@@ -41,7 +41,7 @@ export function ProductDetailPage({
     availableTypes: viewModel.availableTypes,
   });
   const review = useProductImageReview();
-  const retouch = useProductImageRetouch();
+  const retouch = useGeneratedImageRetouch();
   const publish = useProductImagePublish({
     product: detail.product,
     readyImages: viewModel.readyImages,
@@ -111,19 +111,13 @@ export function ProductDetailPage({
             generatingGalleryImages={viewModel.generatingGalleryImages}
             approvedCount={viewModel.approvedImages.length}
             pendingCount={viewModel.pendingImages.length}
-            rejectedCount={viewModel.rejectedImages.length}
-            reviewingImageId={review.reviewingImageId}
-            onReview={review.setImageReview}
-            onRetouch={(image) =>
-              retouch.setTarget({
-                id: image._id,
-                url: image.storageUrl!,
-                label: image.imageType,
-              })
-            }
-            onDelete={deletion.setTarget}
-            onZoom={lightbox.open}
-          />
+          rejectedCount={viewModel.rejectedImages.length}
+          reviewingImageId={review.reviewingImageId}
+          onReview={review.setImageReview}
+          onRetouch={retouch.openRetouch}
+          onDelete={deletion.setTarget}
+          onZoom={lightbox.open}
+        />
 
           <ProductImageHistory
             productId={productId}
@@ -140,21 +134,24 @@ export function ProductDetailPage({
         </div>
       </div>
 
-      <GenerateImagesDialog
+      <ImageTypeSelectionDialog
         open={generation.open}
         onOpenChange={generation.setOpen}
         types={viewModel.availableTypes}
         selectedTypes={generation.selectedTypes}
-        onToggle={generation.toggleType}
         busy={generation.busy}
         onGenerate={() => void generation.generate()}
+        title="Generate images"
+        description="Select image types for this product. Each type maps to a prompt template."
+        submitLabel="Start background job"
+        onToggleType={generation.toggleType}
       />
 
       <ImageRetouchDialog
         target={retouch.target}
         saving={retouch.saving}
         onOpenChange={(open) => {
-          if (!open && !retouch.saving) retouch.setTarget(null);
+          if (!open) retouch.closeRetouch();
         }}
         onPrepareSource={(target) =>
           retouch.prepareRetouchSource({ sourceImageId: target.id })

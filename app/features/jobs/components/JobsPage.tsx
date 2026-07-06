@@ -1,17 +1,12 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "convex/react";
-import { useMemo, type ReactNode } from "react";
+import { useMemo } from "react";
+import { FilterSelect } from "@/components/common/FilterSelect";
 import { EmptyState, NumberedPaginator, PageHeader, StateBadge } from "@/components/page";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SelectItem } from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -311,29 +306,5 @@ export function JobsPage({ search }: { search: JobSearch }) {
         </>
       )}
     </main>
-  );
-}
-
-function FilterSelect({
-  value,
-  placeholder,
-  onChange,
-  children,
-}: {
-  value: string;
-  placeholder: string;
-  onChange: (value: string) => void;
-  children: ReactNode;
-}) {
-  return (
-    <Select value={value} onValueChange={onChange}>
-      <SelectTrigger className="h-9 w-full">
-        <SelectValue placeholder={placeholder} />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value="all">{placeholder}</SelectItem>
-        {children}
-      </SelectContent>
-    </Select>
   );
 }
