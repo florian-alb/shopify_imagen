@@ -283,6 +283,7 @@ export default defineSchema({
     reviewApproved: v.optional(v.number()),
     reviewRejected: v.optional(v.number()),
     error: v.optional(v.union(v.string(), v.null())),
+    isHidden: v.optional(v.boolean()),
     createdByUserId: v.optional(v.id("users")),
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -341,6 +342,9 @@ export default defineSchema({
     modelReferenceUrl: v.optional(v.union(v.string(), v.null())),
     generatedImageUrl: v.optional(v.union(v.string(), v.null())),
     storageUrl: v.optional(v.union(v.string(), v.null())),
+    retrySourceImageId: v.optional(v.union(v.id("generatedImages"), v.null())),
+    activeRetryImageId: v.optional(v.union(v.id("generatedImages"), v.null())),
+    retryError: v.optional(v.union(v.string(), v.null())),
     retouchSourceImageId: v.optional(v.union(v.id("generatedImages"), v.null())),
     retouchTool: v.optional(v.union(v.literal("manual_brush"), v.null())),
     retouchedAt: v.optional(v.number()),
@@ -383,6 +387,7 @@ export default defineSchema({
     .index("by_job", ["jobId"])
     .index("by_status", ["status"])
     .index("by_job_and_status", ["jobId", "status"])
+    .index("by_retry_source", ["retrySourceImageId"])
     .index("by_provider_batch_id", ["providerBatchId"])
     .index("by_batch_segment", ["batchSegmentId"])
     .index("by_review_status_and_reviewed_at", ["reviewStatus", "reviewedAt"])

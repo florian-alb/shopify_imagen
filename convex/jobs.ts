@@ -47,6 +47,15 @@ import {
   shopMatchesScope,
 } from "./shopScope";
 
+type CompleteImageResult = {
+  completed: boolean;
+  cleanupUrls: string[];
+};
+
+function uniqueUrls(urls: Array<string | null | undefined>) {
+  return Array.from(new Set(urls.filter((url): url is string => Boolean(url))));
+}
+
 export async function refreshJobSummary(
   ctx: { db: any },
   jobId: Id<"generationJobs">,
@@ -109,6 +118,7 @@ export const list = query({
       .withIndex("by_created")
       .order("desc");
     for await (const job of jobs) {
+      if (job.isHidden) continue;
       if (!shopMatchesScope(job, scope)) continue;
       if (args.productId && !job.productIds.includes(args.productId)) continue;
       const effectiveExecutionMode = job.executionMode ?? "realtime";
@@ -137,7 +147,7 @@ export const costSummary = query({
     const userId = await requireUserId(ctx);
     const scope = await getActiveShopScope(ctx, userId);
     const jobs = (await ctx.db.query("generationJobs").collect()).filter(
-      (job: Doc<"generationJobs">) => shopMatchesScope(job, scope),
+      (job: Doc<"generationJobs">) => !job.isHidden && shopMatchesScope(job, scope),
     );
     const products = (await ctx.db.query("products").collect()).filter(
       (product: Doc<"products">) => shopMatchesScope(product, scope),
@@ -888,7 +898,108 @@ export const completeImage = internalMutation({
       image.status === "failed" ||
       image.status === "canceled"
     )
-      return false;
+      return { completed: false, cleanupUrls: [] } satisfies CompleteImageResult;
+    if (image.retrySourceImageId) {
+      const source = await ctx.db.get(image.retrySourceImageId);
+      const uploadedUrls = uniqueUrls([
+        args.generatedImageUrl,
+        args.storageUrl,
+        args.transparentCutoutUrl,
+      ]);
+      if (!source || source.activeRetryImageId !== image._id) {
+        await ctx.db.patch(args.imageId, {
+          status: "canceled",
+          error: "Retry result ignored because a newer retry is active.",
+          updatedAt: Date.now(),
+        });
+        const staleJob = await ctx.db.get(image.jobId);
+        if (staleJob) {
+          await ctx.db.patch(staleJob._id, {
+            failedTasks: staleJob.failedTasks + 1,
+            updatedAt: Date.now(),
+          });
+        }
+        return { completed: false, cleanupUrls: uploadedUrls } satisfies CompleteImageResult;
+      }
+
+      const cleanupUrls = uniqueUrls([
+        source.storageUrl,
+        source.generatedImageUrl,
+        source.backgroundRemovalInputUrl,
+        source.postProcessingInputUrl,
+        source.transparentCutoutUrl,
+      ]).filter((url) => !uploadedUrls.includes(url));
+
+      const now = Date.now();
+      await ctx.db.patch(source._id, {
+        imageProvider: image.imageProvider,
+        imageModel: image.imageModel,
+        promptUsed: image.promptUsed,
+        finalPromptUsed: image.finalPromptUsed ?? image.promptUsed,
+        promptKind: image.promptKind,
+        modelReferenceKey: image.modelReferenceKey,
+        modelReferenceStorageId: image.modelReferenceStorageId,
+        modelReferenceUrl: image.modelReferenceUrl,
+        useVibeAnalysis: image.useVibeAnalysis,
+        vibeUsed: image.vibeUsed ?? null,
+        referenceImageCount: image.referenceImageCount,
+        sourceImageUrls: image.sourceImageUrls,
+        sourceImageUrl: image.sourceImageUrl,
+        sourceImageUrl2: image.sourceImageUrl2,
+        removeBackground: image.removeBackground,
+        backgroundMode: image.backgroundMode,
+        backgroundColor: image.backgroundColor,
+        backgroundShadow: image.backgroundShadow,
+        generatedImageUrl: args.generatedImageUrl,
+        storageUrl: args.storageUrl,
+        transparentCutoutUrl: args.transparentCutoutUrl,
+        retouchSourceImageId: null,
+        retouchTool: null,
+        retouchedAt: undefined,
+        retouchedByUserId: undefined,
+        backgroundRemovalInputUrl: null,
+        backgroundRemovalInputContentType: null,
+        backgroundRemovalInputExtension: null,
+        backgroundRemovalProvider: args.backgroundRemovalProvider,
+        backgroundRemovalCostUsd: args.backgroundRemovalCostUsd,
+        backgroundRemovalRequestId: args.backgroundRemovalRequestId,
+        postProcessingInputUrl: null,
+        postProcessingInputContentType: null,
+        postProcessingInputExtension: null,
+        postProcessingStartedAt: null,
+        batchSegmentId: null,
+        providerBatchId: args.providerBatchId,
+        providerRequestId: args.providerRequestId,
+        providerResponseId: args.providerResponseId,
+        status: "generated",
+        reviewStatus: "pending",
+        reviewedAt: undefined,
+        reviewedByUserId: undefined,
+        shopifyMediaId: null,
+        error: null,
+        inputTokens: args.inputTokens,
+        outputTokens: args.outputTokens,
+        costUsd: args.costUsd,
+        costRateMultiplier: args.costRateMultiplier,
+        activeRetryImageId: null,
+        retryError: null,
+        updatedAt: now,
+      });
+
+      const job = await ctx.db.get(image.jobId);
+      if (job) {
+        await ctx.db.patch(job._id, {
+          completedTasks: job.completedTasks + 1,
+          firstImageStoredAt: job.firstImageStoredAt ?? now,
+          updatedAt: now,
+        });
+      }
+      await ctx.db.delete(image._id);
+      await refreshJobSummary(ctx, source.jobId);
+      await refreshJobSummary(ctx, image.jobId);
+      await refreshProductSummary(ctx, source.productId);
+      return { completed: true, cleanupUrls } satisfies CompleteImageResult;
+    }
     await ctx.db.patch(args.imageId, {
       generatedImageUrl: args.generatedImageUrl,
       storageUrl: args.storageUrl,
@@ -922,7 +1033,7 @@ export const completeImage = internalMutation({
   });
     await refreshJobSummary(ctx, image.jobId);
     await refreshProductSummary(ctx, image.productId);
-    return true;
+    return { completed: true, cleanupUrls: [] } satisfies CompleteImageResult;
   },
 });
 
@@ -1071,6 +1182,19 @@ export const failImage = internalMutation({
     )
       return false;
     const job = await ctx.db.get(image.jobId);
+    if (image.retrySourceImageId) {
+      const source = await ctx.db.get(image.retrySourceImageId);
+      if (source?.activeRetryImageId === image._id) {
+        await ctx.db.patch(source._id, {
+          activeRetryImageId: null,
+          retryError: args.error,
+          ...(source.status === "failed" || source.status === "canceled"
+            ? { error: args.error }
+            : {}),
+          updatedAt: Date.now(),
+        });
+      }
+    }
     await ctx.db.patch(args.imageId, {
       status: "failed",
       error: args.error,
@@ -1336,10 +1460,12 @@ export const regenerateImage = mutation({
     if (!job || !shopMatchesScope(job, scope)) {
       throw new Error("Job not found.");
     }
-    if (!isTerminalJobStatus(job.status)) {
-      throw new Error("Wait for the job to finish before regenerating an image.");
+    if (image.activeRetryImageId) {
+      const activeRetry = await ctx.db.get(image.activeRetryImageId);
+      if (activeRetry && isActiveImageStatus(activeRetry.status)) {
+        throw new Error("Image regeneration is already in progress.");
+      }
     }
-
     const product = await ctx.db.get(image.productId);
     if (!product || !shopMatchesScope(product, scope)) {
       throw new Error("Product not found.");
@@ -1366,62 +1492,51 @@ export const regenerateImage = mutation({
     }
 
     const now = Date.now();
-    const existingImages = await ctx.db
-      .query("generatedImages")
-      .withIndex("by_job", (q) => q.eq("jobId", job._id))
-      .collect();
-    const completedTasks = existingImages.filter(
-      (img) =>
-        img._id !== image._id &&
-        (img.status === "generated" || img.status === "uploaded"),
-    ).length;
-    const failedTasks = existingImages.filter(
-      (img) =>
-        img._id !== image._id &&
-        (img.status === "failed" || img.status === "canceled"),
-    ).length;
-
-    const existingSegments = await ctx.db
-      .query("generationBatchSegments")
-      .withIndex("by_job", (q) => q.eq("jobId", job._id))
-      .collect();
-    for (const segment of existingSegments) {
-      if (isTerminalBatchSegmentStatus(segment.status)) continue;
-      await ctx.db.patch(segment._id, {
-        status: "cancelled",
-        ingestionStartedAt: null,
-        updatedAt: now,
-      });
-    }
-
-    const affectedJobIds = new Set<Id<"generationJobs">>([job._id]);
-    const otherImages = await ctx.db
-      .query("generatedImages")
-      .withIndex("by_product", (q) => q.eq("productId", image.productId))
-      .collect();
-    for (const otherImage of otherImages) {
-      if (otherImage.jobId === job._id) continue;
-      if (otherImage.imageType !== image.imageType) continue;
-      if (!isActiveImageStatus(otherImage.status)) continue;
-      await ctx.db.patch(otherImage._id, supersedeImagePatch(now));
-      affectedJobIds.add(otherImage.jobId);
-    }
-
-    const previousBatchIds = Array.from(
-      new Set([
-        ...(job.previousBatchIds ?? []),
-        ...(job.batchId ? [job.batchId] : []),
-        ...existingSegments
-          .map((segment) => segment.batchId)
-          .filter((batchId): batchId is string => Boolean(batchId)),
-      ]),
-    );
     const effectiveExecutionMode = job.executionMode ?? executionMode;
     const effectiveImageProvider =
       image.imageProvider ?? job.imageProvider ?? imageProvider;
     const effectiveImageModel = image.imageModel ?? job.imageModel ?? imageModel;
+    const retryShopId = image.shopId ?? job.shopId;
+    const retryJobId = await ctx.db.insert("generationJobs", {
+      ...(retryShopId ? { shopId: retryShopId } : {}),
+      status: "queued",
+      mode: "single",
+      executionMode: effectiveExecutionMode,
+      batchId: null,
+      previousBatchIds: [],
+      batchStatus: null,
+      batchInputFileName: null,
+      batchIngestionStartedAt: null,
+      batchResultOffset: 0,
+      vibeAnalysis: task.useVibeAnalysis,
+      imageProvider: effectiveImageProvider,
+      imageModel: effectiveImageModel,
+      productIds: [product._id],
+      selectedImageTypes: [image.imageType],
+      forceRegenerate: true,
+      totalTasks: 1,
+      completedTasks: 0,
+      failedTasks: 0,
+      generationCost: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      pricedImageCount: 0,
+      reviewTotal: 0,
+      reviewPending: 0,
+      reviewApproved: 0,
+      reviewRejected: 0,
+      error: null,
+      isHidden: true,
+      createdByUserId: userId,
+      createdAt: now,
+      updatedAt: now,
+    });
 
-    await ctx.db.patch(image._id, {
+    const retryImageId = await ctx.db.insert("generatedImages", {
+      ...(retryShopId ? { shopId: retryShopId } : {}),
+      productId: product._id,
+      jobId: retryJobId,
+      imageType: image.imageType,
       imageProvider: effectiveImageProvider,
       imageModel: effectiveImageModel,
       promptUsed: task.promptUsed,
@@ -1457,6 +1572,9 @@ export const regenerateImage = mutation({
       providerBatchId: null,
       providerRequestId: null,
       providerResponseId: null,
+      retrySourceImageId: image._id,
+      activeRetryImageId: null,
+      retryError: null,
       status: "queued",
       reviewStatus: "pending",
       reviewedAt: undefined,
@@ -1467,39 +1585,13 @@ export const regenerateImage = mutation({
       outputTokens: undefined,
       costUsd: undefined,
       costRateMultiplier: undefined,
+      createdAt: now,
       updatedAt: now,
     });
 
-    await ctx.db.patch(job._id, {
-      status: "queued",
-      executionMode: effectiveExecutionMode,
-      batchId: null,
-      previousBatchIds,
-      batchStatus: null,
-      batchInputFileName: null,
-      batchIngestionStartedAt: null,
-      batchResultOffset: 0,
-      batchSubmitStartedAt: undefined,
-      allBatchesSubmittedAt: undefined,
-      firstResultReadyAt: undefined,
-      firstImageStoredAt: undefined,
-      error: null,
-      totalTasks: existingImages.length,
-      completedTasks,
-      failedTasks,
-      completedAt: undefined,
-      selectedImageTypes: Array.from(
-        new Set([...(job.selectedImageTypes ?? []), image.imageType]),
-      ),
-      productIds: Array.from(new Set([...job.productIds, image.productId])),
-      updatedAt: now,
-    });
-    for (const jobId of affectedJobIds) {
-      await refreshJobSummary(ctx, jobId);
-    }
-    await refreshProductSummary(ctx, product._id);
-    await ctx.db.patch(product._id, {
-      latestJobId: job._id,
+    await ctx.db.patch(image._id, {
+      activeRetryImageId: retryImageId,
+      retryError: null,
       updatedAt: now,
     });
 
@@ -1508,10 +1600,11 @@ export const regenerateImage = mutation({
       effectiveExecutionMode === "batch"
         ? internal.generation.submitBatch
         : internal.generation.processJob,
-      { jobId: job._id },
+      { jobId: retryJobId },
     );
 
-    return job._id;
+    return retryJobId;
+
   },
 });
 
