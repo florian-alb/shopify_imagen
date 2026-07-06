@@ -1,6 +1,6 @@
 import { Lightbox, useLightbox } from "@/components/common/Lightbox";
 import { ImageRetouchDialog } from "@/components/image-retouch-dialog";
-import { EmptyState } from "@/components/page";
+import { EmptyState, pageContentClass } from "@/components/page";
 
 import { DeleteImageDialog } from "./DeleteImageDialog";
 import { ImageTypeSelectionDialog } from "./ImageTypeSelectionDialog";
@@ -50,7 +50,7 @@ export function ProductDetailPage({
 
   if (detail.data === undefined) {
     return (
-      <main className="mx-auto w-full max-w-[96rem] p-4 md:p-5">
+      <main className={pageContentClass}>
         <EmptyState
           loading
           title="Loading product"
@@ -62,7 +62,7 @@ export function ProductDetailPage({
 
   if (!detail.product) {
     return (
-      <main className="mx-auto w-full max-w-[96rem] p-4 md:p-5">
+      <main className={pageContentClass}>
         <EmptyState
           title="Product not found"
           body="The product may not be synced into Convex yet."
@@ -82,7 +82,7 @@ export function ProductDetailPage({
     : undefined;
 
   return (
-    <main className="mx-auto w-full max-w-[96rem] p-4 md:p-5">
+    <main className={pageContentClass}>
       <ProductHeader
         productId={productId}
         product={detail.product}

@@ -1,5 +1,5 @@
 import { Plus } from "lucide-react";
-import { EmptyState, PageHeader } from "@/components/page";
+import { EmptyState, PageHeader, pageContentClass } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,8 +17,8 @@ export function PromptSettingsPage() {
     page;
 
   return (
-    <main className="mx-auto w-full max-w-[96rem] p-4 md:p-5">
-      <PageHeader eyebrow="Configuration" title="Prompts">
+    <main className={pageContentClass}>
+      <PageHeader title="Prompts">
         Editeur des prompts utilises par les generations image.
       </PageHeader>
 

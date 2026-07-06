@@ -5,7 +5,12 @@ import {
   Sparkles,
   Store,
 } from "lucide-react";
-import { BusyIcon, PageHeader, StateBadge } from "@/components/page";
+import {
+  BusyIcon,
+  PageHeader,
+  StateBadge,
+  pageContentClass,
+} from "@/components/page";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSettingsPage } from "../hooks/useSettingsPage";
@@ -20,10 +25,9 @@ export function SettingsPage() {
   const page = useSettingsPage();
 
   return (
-    <main className="mx-auto w-full max-w-[96rem] p-4 md:p-5">
+    <main className={pageContentClass}>
       <PageHeader
         title="Parametres"
-        eyebrow="Configuration"
         action={
           <>
             <StateBadge state={page.provider === "gemini" ? "success" : "neutral"}>
