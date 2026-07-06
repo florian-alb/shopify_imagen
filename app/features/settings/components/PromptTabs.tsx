@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { GripVertical, Plus } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { type Doc, type Id } from "@/lib/convex";
 import {
@@ -18,6 +19,7 @@ export function PromptTabs({
   onReorderOver,
   onStartDrag,
   onTabChange,
+  onCreateTemplate,
 }: {
   children: ReactNode;
   currentTab: string | undefined;
@@ -29,17 +31,25 @@ export function PromptTabs({
   onReorderOver: (promptId: Id<"promptTemplates">) => void;
   onStartDrag: (promptId: Id<"promptTemplates">) => void;
   onTabChange: (value: string) => void;
+  onCreateTemplate: () => void;
 }) {
   return (
     <Tabs
+      orientation="vertical"
       value={currentTab}
       onValueChange={onTabChange}
-      className="grid gap-4 xl:grid-cols-[18rem_minmax(0,1fr)]"
+      className="grid min-w-0 gap-4 xl:grid-cols-[18rem_minmax(0,1fr)] xl:items-start"
     >
-      <p className="text-xs text-muted-foreground xl:col-span-2">
-        Glissez les templates pour definir l'ordre de publication Shopify.
-      </p>
-      <TabsList className="h-auto w-full max-w-full flex-wrap justify-start overflow-x-auto rounded-lg border border-white/10 bg-white/3 p-2 xl:flex xl:flex-col xl:items-stretch xl:self-start xl:overflow-visible">
+      <div className="flex items-center justify-between gap-3 xl:col-span-2">
+        <p className="text-xs text-muted-foreground">
+          Glissez les templates pour definir l'ordre de publication Shopify.
+        </p>
+        <Button size="sm" onClick={onCreateTemplate}>
+          <Plus data-icon="inline-start" />
+          Template
+        </Button>
+      </div>
+      <TabsList className="flex h-auto w-full min-w-0 max-w-full flex-col items-stretch justify-start gap-1 overflow-visible rounded-lg border border-border bg-card p-2 xl:self-start">
         {orderedPrompts.map((prompt) => (
           <TabsTrigger
             key={prompt._id}
@@ -60,7 +70,7 @@ export function PromptTabs({
             }}
             onDragEnd={onCommitReorder}
             data-dragging={dragId === prompt._id ? "" : undefined}
-            className={`min-h-10 w-full cursor-grab justify-start gap-2 rounded-md border border-transparent px-3 text-sm font-medium text-muted-foreground active:cursor-grabbing data-dragging:opacity-50 data-[state=active]:border-primary/30 data-[state=active]:bg-primary/15 data-[state=active]:text-foreground data-[state=inactive]:hover:bg-muted/70 data-[state=inactive]:hover:text-foreground${
+            className={`h-auto min-h-10 w-full flex-none cursor-grab justify-start gap-2 rounded-md border border-transparent px-3 py-2 text-left text-sm font-medium text-muted-foreground after:hidden active:cursor-grabbing data-dragging:opacity-50 data-[state=active]:border-primary/30 data-[state=active]:bg-primary/15 data-[state=active]:text-foreground data-[state=inactive]:hover:bg-muted/70 data-[state=inactive]:hover:text-foreground${
               prompt.isPreset
                 ? " after:ml-auto after:size-1.5 after:rounded-full after:bg-primary after:content-['']"
                 : ""
@@ -76,7 +86,7 @@ export function PromptTabs({
         {newPromptDraft ? (
           <TabsTrigger
             value={newPromptTabValue}
-            className="min-h-10 w-full justify-start gap-2 rounded-md border border-primary/30 bg-primary/10 px-3 text-sm font-medium text-foreground data-[state=inactive]:hover:bg-primary/15"
+            className="h-auto min-h-10 w-full flex-none justify-start gap-2 rounded-md border border-primary/30 bg-primary/10 px-3 py-2 text-left text-sm font-medium text-foreground after:hidden data-[state=inactive]:hover:bg-primary/15"
           >
             <Plus className="size-3 shrink-0 opacity-70" />
             <span className="truncate">

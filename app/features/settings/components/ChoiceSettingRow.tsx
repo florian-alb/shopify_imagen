@@ -30,7 +30,7 @@ export function ChoiceSettingRow({
   onChange: (value: string) => void;
 }) {
   return (
-    <div className="grid gap-3 border-b border-white/10 p-4 last:border-b-0 md:grid-cols-[minmax(12rem,18rem)_1fr] md:items-center">
+    <div className="grid gap-3 border-b border-border p-4 last:border-b-0 md:grid-cols-[minmax(12rem,18rem)_1fr] md:items-center">
       <div>
         <Label htmlFor={id} className="font-medium">
           {label}

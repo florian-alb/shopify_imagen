@@ -5,7 +5,12 @@ import {
   Sparkles,
   Store,
 } from "lucide-react";
-import { BusyIcon, PageHeader, StateBadge } from "@/components/page";
+import {
+  BusyIcon,
+  PageHeader,
+  StateBadge,
+  pageContentClass,
+} from "@/components/page";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSettingsPage } from "../hooks/useSettingsPage";
@@ -20,10 +25,9 @@ export function SettingsPage() {
   const page = useSettingsPage();
 
   return (
-    <main className="page">
+    <main className={pageContentClass}>
       <PageHeader
         title="Parametres"
-        eyebrow="Configuration"
         action={
           <>
             <StateBadge state={page.provider === "gemini" ? "success" : "neutral"}>
@@ -61,7 +65,7 @@ export function SettingsPage() {
         onValueChange={(value) => page.setTab(value as SettingsTab)}
       >
         <div className="mb-4 overflow-x-auto pb-1">
-          <TabsList className="w-max border border-white/10 bg-white/[0.03]">
+          <TabsList className="w-max border border-border bg-card">
             <TabsTrigger value="boutique">
               <Store className="size-4" />
               Boutique

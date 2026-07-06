@@ -1,5 +1,5 @@
 import { Plus } from "lucide-react";
-import { EmptyState, PageHeader } from "@/components/page";
+import { EmptyState, PageHeader, pageContentClass } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,23 +17,12 @@ export function PromptSettingsPage() {
     page;
 
   return (
-    <main className="page">
-      <PageHeader
-        eyebrow="Configuration"
-        title="Prompts"
-        action={
-          <div className="flex gap-2">
-            <Button size="sm" onClick={templates.startCreate}>
-              <Plus data-icon="inline-start" />
-              Template
-            </Button>
-          </div>
-        }
-      >
+    <main className={pageContentClass}>
+      <PageHeader title="Prompts">
         Editeur des prompts utilises par les generations image.
       </PageHeader>
 
-      <Card className="studio-card mb-4 rounded-lg">
+      <Card className="mb-4 rounded-lg">
         <CardHeader>
           <CardTitle>Variables disponibles</CardTitle>
         </CardHeader>
@@ -91,6 +80,7 @@ export function PromptSettingsPage() {
           onReorderOver={reorder.reorderOver}
           onStartDrag={reorder.startDrag}
           onTabChange={templates.setActiveTab}
+          onCreateTemplate={templates.startCreate}
         >
           {templates.newPromptDraft ? (
             <NewPromptTemplateEditor

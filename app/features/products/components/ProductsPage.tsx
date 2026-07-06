@@ -1,6 +1,12 @@
 import { ImageIcon, RefreshCw, WandSparkles } from "lucide-react";
 
-import { BusyIcon, EmptyState, NumberedPaginator, PageHeader } from "@/components/page";
+import {
+  BusyIcon,
+  EmptyState,
+  NumberedPaginator,
+  PageHeader,
+  pageContentClass,
+} from "@/components/page";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import type { ProductSearch } from "@/lib/productFilters";
@@ -39,7 +45,7 @@ export function ProductsPage({ search }: { search: ProductSearch }) {
   } = useProductsListPage(search);
 
   return (
-    <main className="page">
+    <main className={pageContentClass}>
       <PageHeader
         eyebrow={`${
           productPage?.hasNext ? `${pageSize}+` : products.length
@@ -110,7 +116,7 @@ export function ProductsPage({ search }: { search: ProductSearch }) {
         <div className="sticky-actions">
           <Card
             size="sm"
-            className="studio-card flex-row items-center justify-between gap-3 rounded-lg p-3 shadow-2xl"
+            className="flex-row items-center justify-between gap-3 rounded-lg p-3 shadow-2xl"
           >
             <div>
               <p className="text-sm font-medium">

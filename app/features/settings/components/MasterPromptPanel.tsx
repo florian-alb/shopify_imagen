@@ -119,7 +119,7 @@ export function MasterPromptPanel({
     <Accordion
       type="single"
       collapsible
-      className="studio-card mb-4 rounded-lg border border-white/10 bg-card/80 px-4"
+      className="mb-4 rounded-lg border border-border bg-card/80 px-4"
     >
       <AccordionItem value="master-prompt" className="border-0">
         <AccordionTrigger className="py-4 hover:no-underline">

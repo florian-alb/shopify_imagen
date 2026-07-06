@@ -1,5 +1,5 @@
 import { ImageRetouchDialog } from "@/components/image-retouch-dialog";
-import { EmptyState } from "@/components/page";
+import { EmptyState, pageContentClass } from "@/components/page";
 import { JobDetailHeader } from "./JobDetailHeader";
 import { JobImagePreviewDialog } from "./JobImagePreviewDialog";
 import { JobProductReviewGrid } from "./JobProductReviewGrid";
@@ -16,7 +16,7 @@ export function JobDetailPage({ jobId }: { jobId: string }) {
 
   if (page.data === undefined) {
     return (
-      <main className="page">
+      <main className={pageContentClass}>
         <EmptyState
           loading
           title="Loading job"
@@ -28,7 +28,7 @@ export function JobDetailPage({ jobId }: { jobId: string }) {
 
   if (!page.job || !page.viewModel) {
     return (
-      <main className="page">
+      <main className={pageContentClass}>
         <EmptyState
           title="Job not found"
           body="It may have been deleted or belongs to another shop."
@@ -38,7 +38,7 @@ export function JobDetailPage({ jobId }: { jobId: string }) {
   }
 
   return (
-    <main className="page">
+    <main className={pageContentClass}>
       <JobDetailHeader
         job={page.job}
         jobState={page.viewModel.jobState}

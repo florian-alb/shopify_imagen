@@ -51,7 +51,7 @@ export function ProductTableRow({
             to="/products/$productId"
             params={{ productId: product._id }}
             search={search}
-            className="image-tile size-12 shrink-0"
+            className="block size-12 shrink-0 overflow-hidden rounded-[calc(var(--radius)+0.05rem)] bg-muted [&>img]:size-full [&>img]:object-cover"
           >
             {image ? (
               <img src={image} alt={product.title} />
@@ -102,7 +102,7 @@ export function ProductTableRow({
       </TableCell>
       <TableCell>
         <div className="flex flex-wrap gap-1">
-          <Badge variant="outline" className="border-white/10 bg-white/[0.04]">
+          <Badge variant="outline" className="border-border bg-muted">
             {product.generatedImageCount ?? 0} gen.
           </Badge>
           {product.failedImageCount ? (
@@ -128,7 +128,7 @@ export function ProductTableRow({
           {product.shopifyStatus ? (
             <Badge
               variant="outline"
-              className="border-white/10 bg-white/[0.04]"
+              className="border-border bg-muted"
             >
               {shopifyStatusLabel(product.shopifyStatus)}
             </Badge>

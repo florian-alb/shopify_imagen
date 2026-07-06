@@ -2,7 +2,13 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "convex/react";
 import { useMemo } from "react";
 import { FilterSelect } from "@/components/common/FilterSelect";
-import { EmptyState, NumberedPaginator, PageHeader, StateBadge } from "@/components/page";
+import {
+  EmptyState,
+  NumberedPaginator,
+  PageHeader,
+  StateBadge,
+  pageContentClass,
+} from "@/components/page";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -123,12 +129,15 @@ export function JobsPage({ search }: { search: JobSearch }) {
   };
 
   return (
-    <main className="page">
-      <PageHeader eyebrow={`${jobs.length} operations visibles`} title="Generations">
+    <main className={pageContentClass}>
+      <PageHeader
+        eyebrow={`${jobs.length} operations visibles`}
+        title="Generations"
+      >
         Suivi des jobs image, review et couts d'execution.
       </PageHeader>
       {cost ? (
-        <Card className="studio-card mb-4 rounded-lg">
+        <Card className="mb-4 rounded-lg">
           <CardContent className="grid gap-4 pt-1 sm:grid-cols-3">
             <div>
               <p className="text-sm text-muted-foreground">Depense totale</p>
@@ -158,7 +167,7 @@ export function JobsPage({ search }: { search: JobSearch }) {
         <EmptyState loading title="Chargement des generations" body="Lecture des operations recentes depuis Convex." />
       ) : (
         <>
-          <Card className="studio-card mb-4 rounded-lg py-3">
+          <Card className="mb-4 rounded-lg py-3">
             <CardContent className="grid gap-3 px-3 md:grid-cols-[1fr_1fr_1fr_1fr_auto]">
               <FilterSelect
                 value={statusFilter}
@@ -221,8 +230,8 @@ export function JobsPage({ search }: { search: JobSearch }) {
               }
             />
           ) : (
-            <Card className="studio-card overflow-hidden rounded-lg">
-              <Table className="table-studio min-w-[900px]">
+            <Card className="overflow-hidden rounded-lg">
+              <Table className="[&_td]:h-16 [&_th]:text-[0.72rem] [&_th]:font-medium [&_th]:text-muted-foreground min-w-[900px]">
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
                     <TableHead>Statut</TableHead>

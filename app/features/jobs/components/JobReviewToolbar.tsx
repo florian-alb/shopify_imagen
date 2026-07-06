@@ -25,7 +25,7 @@ export function JobReviewToolbar({
   onFilterChange: (filter: ReviewFilter) => void;
 }) {
   return (
-    <section className="studio-card mb-4 rounded-lg border p-4">
+    <section className="mb-4 rounded-lg border bg-card p-4">
       <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <p className="mb-1 text-xs text-muted-foreground">

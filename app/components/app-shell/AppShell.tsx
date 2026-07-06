@@ -6,13 +6,16 @@ import { MobileTopbar } from "./MobileTopbar";
 
 export function AppShell({ children }: { children: ReactNode }) {
   return (
-    <SidebarProvider className="min-h-screen bg-[var(--surface)] text-foreground">
+    <SidebarProvider className="min-h-screen bg-background text-foreground">
       <DesktopNav />
       <SidebarInset className="min-w-0 bg-transparent">
         <MobileTopbar />
         <DesktopTopbar />
-        <main id="main-content" className="studio-shell">
-          <div className="studio-panel">{children}</div>
+        <main
+          id="main-content"
+          className="min-h-[calc(100dvh-4rem)] bg-background max-md:min-h-[calc(100dvh-3.5rem)]"
+        >
+          {children}
         </main>
       </SidebarInset>
     </SidebarProvider>

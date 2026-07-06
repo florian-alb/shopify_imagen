@@ -18,7 +18,7 @@ export function MobileTopbar() {
   const [open, setOpen] = useState(false);
 
   return (
-    <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-white/10 bg-background/90 px-3 backdrop-blur md:hidden">
+    <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b bg-background/90 px-3 backdrop-blur md:hidden">
       <Link to="/products" className="flex items-center gap-2 font-medium">
         <AppLogo size="sm" />
         <span>Image Studio</span>
@@ -37,7 +37,7 @@ export function MobileTopbar() {
           </SheetTrigger>
           <SheetContent
             side="left"
-            className="w-[19rem] border-white/10 bg-sidebar p-0"
+            className="w-[19rem] border-sidebar-border bg-sidebar p-0"
           >
             <SheetTitle className="sr-only">Navigation</SheetTitle>
             <div className="flex h-full flex-col gap-5 p-4">

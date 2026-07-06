@@ -35,7 +35,7 @@ export function ProductsFilters({
   onFilterChange: (patch: Partial<ProductSearch>) => void;
 }) {
   return (
-    <Card className="studio-card mb-4 rounded-lg">
+    <Card className="mb-4 rounded-lg">
       <CardContent className="space-y-3 p-3">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <div className="flex flex-wrap gap-1">
