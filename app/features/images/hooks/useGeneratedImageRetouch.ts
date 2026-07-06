@@ -1,15 +1,20 @@
 import { useAction, useMutation } from "convex/react";
-import { toast } from "sonner";
 import { useState } from "react";
-
+import { toast } from "sonner";
 import type {
   RetouchSaveMode,
   RetouchTarget,
 } from "@/components/image-retouch-dialog";
+import { api, type Doc, type Id } from "@/lib/convex";
 import { errorMessage } from "@/lib/errors";
-import { api, type Id } from "@/lib/convex";
 
-export function useProductImageRetouch() {
+type UseGeneratedImageRetouchOptions = {
+  onSaved?: (retouchedImageId: Id<"generatedImages">) => void;
+};
+
+export function useGeneratedImageRetouch({
+  onSaved,
+}: UseGeneratedImageRetouchOptions = {}) {
   const generateRetouchUploadUrl = useMutation(
     api.jobs.generateRetouchUploadUrl,
   );
@@ -17,6 +22,19 @@ export function useProductImageRetouch() {
   const saveRetouchedImage = useAction(api.retouch.saveRetouchedImage);
   const [target, setTarget] = useState<RetouchTarget | null>(null);
   const [saving, setSaving] = useState(false);
+
+  function openRetouch(image: Doc<"generatedImages">) {
+    if (!image.storageUrl) return;
+    setTarget({
+      id: image._id,
+      url: image.storageUrl,
+      label: image.imageType,
+    });
+  }
+
+  function closeRetouch() {
+    if (!saving) setTarget(null);
+  }
 
   async function saveRetouch(
     target: RetouchTarget,
@@ -31,6 +49,7 @@ export function useProductImageRetouch() {
         headers: { "Content-Type": blob.type || "image/png" },
         body: blob,
       });
+
       if (!upload.ok) {
         throw new Error(`Upload failed with status ${upload.status}.`);
       }
@@ -40,13 +59,15 @@ export function useProductImageRetouch() {
         throw new Error("Upload response did not include storage id.");
       }
 
-      await saveRetouchedImage({
+      const retouchedImageId = await saveRetouchedImage({
         sourceImageId: target.id,
         storageId: payload.storageId as Id<"_storage">,
         contentType: blob.type || "image/png",
         saveMode: mode,
       });
+
       setTarget(null);
+      onSaved?.(retouchedImageId);
       toast.success(
         mode === "overwrite"
           ? "Image retouchee enregistree"
@@ -69,10 +90,11 @@ export function useProductImageRetouch() {
   }
 
   return {
-    target,
-    setTarget,
-    saving,
+    closeRetouch,
+    openRetouch,
     prepareRetouchSource,
     saveRetouch,
+    saving,
+    target,
   };
 }
