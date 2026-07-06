@@ -1,24 +1,4 @@
 import {
-  Check,
-  FlipHorizontal2,
-  FlipVertical2,
-  GripHorizontal,
-  Hand,
-  Loader2,
-  Minus,
-  Paintbrush,
-  Pipette,
-  Plus,
-  Redo2,
-  RotateCcw,
-  RotateCw,
-  Save,
-  Undo2,
-  X,
-  ZoomIn,
-  ZoomOut,
-} from "lucide-react";
-import {
   useCallback,
   useEffect,
   useRef,
@@ -26,116 +6,35 @@ import {
   type PointerEvent as ReactPointerEvent,
   type WheelEvent as ReactWheelEvent,
 } from "react";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
-import {
-  Popover,
-  PopoverAnchor,
-  PopoverContent,
-  PopoverHeader,
-  PopoverTitle,
-} from "@/components/ui/popover";
-import { Separator } from "@/components/ui/separator";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import { cn } from "@/lib/utils";
-import type { Id } from "../../convex/_generated/dataModel";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { BrushSettings } from "./image-retouch-dialog/BrushSettings";
+import { RetouchCanvasStage } from "./image-retouch-dialog/RetouchCanvasStage";
+import { RetouchDialogFooter } from "./image-retouch-dialog/RetouchDialogFooter";
+import { RetouchDialogHeader } from "./image-retouch-dialog/RetouchDialogHeader";
+import { RetouchErrorAlert } from "./image-retouch-dialog/RetouchErrorAlert";
+import { RetouchToolSidebar } from "./image-retouch-dialog/RetouchToolSidebar";
+import { clamp } from "./image-retouch-dialog/lib";
+import { useBrushControls } from "./image-retouch-dialog/useBrushControls";
+import { useCanvasHistory } from "./image-retouch-dialog/useCanvasHistory";
+import { useRetouchKeyboard } from "./image-retouch-dialog/useRetouchKeyboard";
+import type {
+  BrushPreview,
+  CanvasTransform,
+  ImageSize,
+  PanState,
+  Point,
+  RetouchSaveMode,
+  RetouchTarget,
+  RetouchTool,
+  ToolbarDragState,
+} from "./image-retouch-dialog/types";
+export type {
+  RetouchSaveMode,
+  RetouchTarget,
+} from "./image-retouch-dialog/types";
 
-export type RetouchTarget = {
-  id: Id<"generatedImages">;
-  url: string;
-  label: string;
-};
-
-export type RetouchSaveMode = "version" | "overwrite";
-
-type Tool = "brush" | "picker" | "hand";
-type CanvasTransform = "rotateClockwise" | "flipHorizontal" | "flipVertical";
-
-type Point = {
-  x: number;
-  y: number;
-};
-
-type ImageSize = {
-  width: number;
-  height: number;
-};
-
-type BrushPreview = {
-  x: number;
-  y: number;
-  size: number;
-  visible: boolean;
-};
-
-type CanvasSnapshot = {
-  imageData: ImageData;
-  width: number;
-  height: number;
-};
-
-type PanState = {
-  pointerId: number;
-  startX: number;
-  startY: number;
-  scrollLeft: number;
-  scrollTop: number;
-};
-
-type ToolbarDragState = {
-  pointerId: number;
-  offsetX: number;
-  offsetY: number;
-};
-
-const HISTORY_LIMIT = 12;
-
-const toolButtonClass =
-  "rounded-[0.65rem] text-muted-foreground transition-all duration-150 hover:bg-foreground/5 hover:text-foreground active:translate-y-px active:scale-[0.98]";
-const stepperClass =
-  "grid grid-cols-[1.75rem_4.5rem_1.75rem] items-center gap-1";
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
-}
-
-function parseControlNumber(value: string) {
-  const parsed = Number.parseInt(value.replace(/[^\d]/g, ""), 10);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function normalizeHexInput(value: string) {
-  const trimmed = value.trim();
-  const withHash = trimmed.startsWith("#") ? trimmed : `#${trimmed}`;
-  return withHash.toUpperCase();
-}
-
-function isValidHexColor(value: string) {
-  return /^#[0-9A-F]{6}$/.test(value);
-}
-
-function isEditableShortcutTarget(target: EventTarget | null) {
-  const element = target instanceof HTMLElement ? target : null;
-  return Boolean(
-    element?.closest("input, textarea, select, [contenteditable='true']"),
-  );
-}
+type Tool = RetouchTool;
 
 export function ImageRetouchDialog({
   target,
@@ -160,99 +59,62 @@ export function ImageRetouchDialog({
   const floatingToolbarRef = useRef<HTMLDivElement | null>(null);
   const toolbarDragRef = useRef<ToolbarDragState | null>(null);
   const loadTokenRef = useRef(0);
-  const undoStackRef = useRef<CanvasSnapshot[]>([]);
-  const redoStackRef = useRef<CanvasSnapshot[]>([]);
   const panRef = useRef<PanState | null>(null);
   const drawingRef = useRef(false);
   const lastPointRef = useRef<Point | null>(null);
-  const temporaryHandToolRef = useRef<Tool | null>(null);
 
-  const [tool, setTool] = useState<Tool>("brush");
-  const [brushColor, setBrushColor] = useState("#FFFFFF");
-  const [brushColorInput, setBrushColorInput] = useState("#FFFFFF");
-  const [brushSize, setBrushSize] = useState(60);
-  const [brushOpacity, setBrushOpacity] = useState(100);
+  const [tool, setTool] = useState<Tool>("hand");
+  const [brushSettingsOpen, setBrushSettingsOpen] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [imageSize, setImageSize] = useState<ImageSize | null>(null);
   const [loading, setLoading] = useState(false);
   const [localSaving, setLocalSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toolbarPosition, setToolbarPosition] = useState<Point | null>(null);
-  const [historyState, setHistoryState] = useState({
-    canUndo: false,
-    canRedo: false,
-    pastCount: 0,
-    futureCount: 0,
-  });
   const [brushPreview, setBrushPreview] = useState<BrushPreview>({
     x: 0,
     y: 0,
     size: 0,
     visible: false,
   });
+  const {
+    brushColor,
+    brushColorInput,
+    brushOpacity,
+    brushSize,
+    commitBrushColor,
+    resetBrushColorInput,
+    resizeBrush,
+    resizeBrushOpacity,
+    setBrushOpacity,
+    updateBrushColorFromInput,
+    updateBrushOpacityFromInput,
+    updateBrushSizeFromInput,
+  } = useBrushControls();
+  const { historyState, pushHistory, redo, resetHistory, undo } =
+    useCanvasHistory({
+      canvasRef,
+      onError: setError,
+      onImageSizeChange: setImageSize,
+    });
 
-  const syncHistoryState = useCallback(() => {
-    const next = {
-      canUndo: undoStackRef.current.length > 0,
-      canRedo: redoStackRef.current.length > 0,
-      pastCount: undoStackRef.current.length,
-      futureCount: redoStackRef.current.length,
-    };
+  const getFitToHeightZoom = useCallback((size: ImageSize) => {
+    const scrollHeight =
+      scrollRef.current?.clientHeight ??
+      stageRef.current?.clientHeight ??
+      window.innerHeight;
+    const compactPadding = window.matchMedia?.("(max-width: 900px)").matches
+      ? 24
+      : 40;
+    const availableHeight = Math.max(120, scrollHeight - compactPadding);
+    const baseDisplayHeight =
+      Math.min(size.width, 1280) * (size.height / size.width);
 
-    setHistoryState((current) =>
-      current.canUndo === next.canUndo &&
-      current.canRedo === next.canRedo &&
-      current.pastCount === next.pastCount &&
-      current.futureCount === next.futureCount
-        ? current
-        : next,
-    );
-  }, []);
-
-  const resetHistory = useCallback(() => {
-    undoStackRef.current = [];
-    redoStackRef.current = [];
-    syncHistoryState();
-  }, [syncHistoryState]);
-
-  const captureSnapshot = useCallback((): CanvasSnapshot | null => {
-    const canvas = canvasRef.current;
-    const context = canvas?.getContext("2d", { willReadFrequently: true });
-    if (!canvas || !context) return null;
-
-    return {
-      imageData: context.getImageData(0, 0, canvas.width, canvas.height),
-      width: canvas.width,
-      height: canvas.height,
-    };
-  }, []);
-
-  const pushHistory = useCallback(() => {
-    try {
-      const snapshot = captureSnapshot();
-      if (!snapshot) return;
-
-      undoStackRef.current = [...undoStackRef.current, snapshot].slice(
-        -HISTORY_LIMIT,
-      );
-      redoStackRef.current = [];
-      syncHistoryState();
-    } catch {
-      setError("Cette image ne permet pas la retouche dans le navigateur.");
+    if (!Number.isFinite(baseDisplayHeight) || baseDisplayHeight <= 0) {
+      return 1;
     }
-  }, [captureSnapshot, syncHistoryState]);
 
-  const restoreSnapshot = useCallback((snapshot: CanvasSnapshot) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    canvas.width = snapshot.width;
-    canvas.height = snapshot.height;
-    const context = canvas.getContext("2d", { willReadFrequently: true });
-    if (!context) return;
-
-    context.putImageData(snapshot.imageData, 0, 0);
-    setImageSize({ width: snapshot.width, height: snapshot.height });
+    return clamp(availableHeight / baseDisplayHeight, 0.05, 2.4);
   }, []);
 
   const resetCanvas = useCallback(async () => {
@@ -264,7 +126,8 @@ export function ImageRetouchDialog({
     setError(null);
     setImageSize(null);
     setZoom(1);
-    setTool("brush");
+    setTool("hand");
+    setBrushSettingsOpen(false);
     setToolbarPosition(null);
     resetHistory();
 
@@ -308,10 +171,13 @@ export function ImageRetouchDialog({
           );
         }
 
-        setImageSize({
+        const nextImageSize = {
           width: image.naturalWidth,
           height: image.naturalHeight,
-        });
+        };
+
+        setImageSize(nextImageSize);
+        setZoom(getFitToHeightZoom(nextImageSize));
         setLoading(false);
       };
 
@@ -332,7 +198,7 @@ export function ImageRetouchDialog({
           : "Impossible de charger cette image pour la retouche.",
       );
     }
-  }, [onPrepareSource, resetHistory, target]);
+  }, [getFitToHeightZoom, onPrepareSource, resetHistory, target]);
 
   useEffect(() => {
     if (!target) return;
@@ -378,21 +244,6 @@ export function ImageRetouchDialog({
     setBrushPreview((current) =>
       current.visible ? { ...current, visible: false } : current,
     );
-  }, []);
-
-  const commitBrushColor = useCallback((nextColor: string) => {
-    const normalized = normalizeHexInput(nextColor);
-    if (!isValidHexColor(normalized)) return;
-    setBrushColor(normalized);
-    setBrushColorInput(normalized);
-  }, []);
-
-  const updateBrushColorFromInput = useCallback((nextColor: string) => {
-    const normalized = normalizeHexInput(nextColor);
-    setBrushColorInput(normalized);
-    if (isValidHexColor(normalized)) {
-      setBrushColor(normalized);
-    }
   }, []);
 
   const pickColor = useCallback(
@@ -569,26 +420,6 @@ export function ImageRetouchDialog({
     lastPointRef.current = null;
   };
 
-  const undo = useCallback(() => {
-    const previous = undoStackRef.current.pop();
-    const current = captureSnapshot();
-    if (!current || !previous) return;
-
-    redoStackRef.current.push(current);
-    restoreSnapshot(previous);
-    syncHistoryState();
-  }, [captureSnapshot, restoreSnapshot, syncHistoryState]);
-
-  const redo = useCallback(() => {
-    const next = redoStackRef.current.pop();
-    const current = captureSnapshot();
-    if (!current || !next) return;
-
-    undoStackRef.current.push(current);
-    restoreSnapshot(next);
-    syncHistoryState();
-  }, [captureSnapshot, restoreSnapshot, syncHistoryState]);
-
   const save = async (mode: RetouchSaveMode) => {
     if (!target || !imageSize) return;
 
@@ -621,26 +452,6 @@ export function ImageRetouchDialog({
       setLocalSaving(false);
     }
   };
-
-  const resizeBrush = useCallback((delta: number) => {
-    setBrushSize((value) => clamp(value + delta, 4, 140));
-  }, []);
-
-  const resizeBrushOpacity = useCallback((delta: number) => {
-    setBrushOpacity((value) => clamp(value + delta, 10, 100));
-  }, []);
-
-  const updateBrushSizeFromInput = useCallback((value: string) => {
-    const parsed = parseControlNumber(value);
-    if (parsed === null) return;
-    setBrushSize(clamp(parsed, 4, 140));
-  }, []);
-
-  const updateBrushOpacityFromInput = useCallback((value: string) => {
-    const parsed = parseControlNumber(value);
-    if (parsed === null) return;
-    setBrushOpacity(clamp(parsed, 10, 100));
-  }, []);
 
   const updateZoom = useCallback((delta: number) => {
     setZoom((value) => clamp(value + delta, 0.35, 2.4));
@@ -740,129 +551,31 @@ export function ImageRetouchDialog({
       }`
     : "Aucune modification";
 
-  useEffect(() => {
-    if (!target) return;
+  const selectTool = useCallback((nextTool: Tool) => {
+    setTool(nextTool);
+    if (nextTool !== "brush") {
+      setBrushSettingsOpen(false);
+    }
+  }, []);
 
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || isEditableShortcutTarget(event.target)) {
-        return;
-      }
+  const toggleBrushSettings = useCallback(() => {
+    setTool("brush");
+    setBrushSettingsOpen((open) => !open);
+  }, []);
 
-      const key = event.key.toLowerCase();
-      const hasCommandModifier = event.metaKey || event.ctrlKey;
-
-      if (event.code === "Space") {
-        event.preventDefault();
-        if (!event.repeat && tool !== "hand") {
-          temporaryHandToolRef.current = tool;
-          setTool("hand");
-        }
-        return;
-      }
-
-      if (hasCommandModifier && key === "z") {
-        event.preventDefault();
-        if (event.shiftKey) {
-          if (historyState.canRedo) redo();
-        } else if (historyState.canUndo) {
-          undo();
-        }
-        return;
-      }
-
-      if (hasCommandModifier && key === "y") {
-        event.preventDefault();
-        if (historyState.canRedo) redo();
-        return;
-      }
-
-      if (hasCommandModifier && (event.key === "+" || event.key === "=")) {
-        event.preventDefault();
-        updateZoom(0.15);
-        return;
-      }
-
-      if (hasCommandModifier && event.key === "-") {
-        event.preventDefault();
-        updateZoom(-0.15);
-        return;
-      }
-
-      if (hasCommandModifier && event.key === "0") {
-        event.preventDefault();
-        setZoom(1);
-        return;
-      }
-
-      if (hasCommandModifier || event.altKey) return;
-
-      if (event.key === "[") {
-        event.preventDefault();
-        resizeBrush(event.shiftKey ? -10 : -4);
-        return;
-      }
-
-      if (event.key === "]") {
-        event.preventDefault();
-        resizeBrush(event.shiftKey ? 10 : 4);
-        return;
-      }
-
-      if (!event.shiftKey && key === "b") {
-        event.preventDefault();
-        setTool("brush");
-        return;
-      }
-
-      if (!event.shiftKey && key === "i") {
-        event.preventDefault();
-        setTool("picker");
-        return;
-      }
-
-      if (!event.shiftKey && key === "h") {
-        event.preventDefault();
-        setTool("hand");
-        return;
-      }
-
-      if (/^[0-9]$/.test(event.key)) {
-        event.preventDefault();
-        setBrushOpacity(event.key === "0" ? 100 : Number(event.key) * 10);
-      }
-    };
-
-    const handleKeyUp = (event: KeyboardEvent) => {
-      if (event.code !== "Space" || isEditableShortcutTarget(event.target)) {
-        return;
-      }
-
-      const previousTool = temporaryHandToolRef.current;
-      if (!previousTool) return;
-
-      event.preventDefault();
-      temporaryHandToolRef.current = null;
-      setTool(previousTool);
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("keyup", handleKeyUp);
-
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("keyup", handleKeyUp);
-      temporaryHandToolRef.current = null;
-    };
-  }, [
-    historyState.canRedo,
-    historyState.canUndo,
+  useRetouchKeyboard({
+    canRedo: historyState.canRedo,
+    canUndo: historyState.canUndo,
+    enabled: Boolean(target),
     redo,
     resizeBrush,
-    target,
+    setBrushOpacity,
+    setTool,
+    setZoom,
     tool,
     undo,
     updateZoom,
-  ]);
+  });
 
   const handleCanvasWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
     if (!imageSize || (!event.altKey && !event.metaKey && !event.ctrlKey)) {
@@ -873,157 +586,22 @@ export function ImageRetouchDialog({
     updateZoom(event.deltaY > 0 ? -0.15 : 0.15);
   };
 
-  const renderToolButton = (
-    nextTool: Tool,
-    label: string,
-    shortcut: string,
-    icon: React.ReactNode,
-  ) => (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          type="button"
-          variant={tool === nextTool ? "default" : "ghost"}
-          size="icon"
-          className={toolButtonClass}
-          aria-pressed={tool === nextTool}
-          aria-label={label}
-          onClick={() => setTool(nextTool)}
-        >
-          {icon}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent side="right">
-        {label} ({shortcut})
-      </TooltipContent>
-    </Tooltip>
-  );
-
   const brushSettingsContent = (
-    <>
-      <PopoverHeader className="gap-0">
-        <div className="flex items-center justify-between gap-3">
-          <PopoverTitle>Pinceau</PopoverTitle>
-        </div>
-      </PopoverHeader>
-      <Separator />
-
-      <FieldGroup className="gap-2">
-        <Field
-          orientation="horizontal"
-          className="items-center gap-3 justify-end"
-        >
-          <FieldLabel className="w-16 shrink-0 text-xs">Taille</FieldLabel>
-          <div className={stepperClass}>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon-sm"
-              className="rounded-md"
-              onClick={() => resizeBrush(-4)}
-              aria-label="Reduire la taille"
-            >
-              <Minus />
-            </Button>
-            <Input
-              id="retouch-size"
-              value={`${brushSize}px`}
-              inputMode="numeric"
-              className="h-7 rounded-md px-2 text-center tabular-nums"
-              aria-label="Taille du pinceau"
-              onFocus={(event) => event.currentTarget.select()}
-              onChange={(event) =>
-                updateBrushSizeFromInput(event.currentTarget.value)
-              }
-            />
-            <Button
-              type="button"
-              variant="outline"
-              size="icon-sm"
-              className="rounded-md"
-              onClick={() => resizeBrush(4)}
-              aria-label="Augmenter la taille"
-            >
-              <Plus />
-            </Button>
-          </div>
-        </Field>
-
-        <Field orientation="horizontal" className="items-center gap-3">
-          <FieldLabel className="w-16 shrink-0 text-xs">Opacite</FieldLabel>
-          <div className={stepperClass}>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon-sm"
-              className="rounded-md"
-              onClick={() => resizeBrushOpacity(-10)}
-              aria-label="Reduire l'opacite"
-            >
-              <Minus />
-            </Button>
-            <Input
-              id="retouch-opacity"
-              value={`${brushOpacity}%`}
-              inputMode="numeric"
-              className="h-7 rounded-md px-2 text-center tabular-nums"
-              aria-label="Opacite du pinceau"
-              onFocus={(event) => event.currentTarget.select()}
-              onChange={(event) =>
-                updateBrushOpacityFromInput(event.currentTarget.value)
-              }
-            />
-            <Button
-              type="button"
-              variant="outline"
-              size="icon-sm"
-              className="rounded-md"
-              onClick={() => resizeBrushOpacity(10)}
-              aria-label="Augmenter l'opacite"
-            >
-              <Plus />
-            </Button>
-          </div>
-        </Field>
-
-        <Field
-          orientation="horizontal"
-          className="items-center gap-3 justify-between"
-        >
-          <FieldLabel
-            htmlFor="retouch-color"
-            className="w-16 shrink-0 !flex-none text-xs"
-          >
-            Couleur
-          </FieldLabel>
-          <div className="grid w-[8.5rem] flex-none grid-cols-[1.75rem_minmax(0,1fr)] items-center gap-2">
-            <Input
-              id="retouch-color-picker"
-              type="color"
-              value={brushColor}
-              onChange={(event) => commitBrushColor(event.target.value)}
-              className="size-7 cursor-pointer rounded-md p-1"
-              aria-label="Choisir une couleur"
-            />
-            <Input
-              id="retouch-color"
-              value={brushColorInput}
-              className="h-7 w-full min-w-0 rounded-md px-2 font-mono uppercase tabular-nums"
-              aria-label="Couleur du pinceau"
-              onFocus={(event) => event.currentTarget.select()}
-              onBlur={() => {
-                if (!isValidHexColor(brushColorInput)) {
-                  setBrushColorInput(brushColor);
-                }
-              }}
-              onChange={(event) =>
-                updateBrushColorFromInput(event.currentTarget.value)
-              }
-            />
-          </div>
-        </Field>
-      </FieldGroup>
-    </>
+    <BrushSettings
+      brushColor={brushColor}
+      brushColorInput={brushColorInput}
+      brushOpacity={brushOpacity}
+      brushSize={brushSize}
+      busy={busy}
+      onBrushColorBlur={resetBrushColorInput}
+      onBrushColorInputChange={updateBrushColorFromInput}
+      onBrushOpacityInputChange={updateBrushOpacityFromInput}
+      onBrushSizeInputChange={updateBrushSizeFromInput}
+      onClose={() => setBrushSettingsOpen(false)}
+      onCommitBrushColor={commitBrushColor}
+      onResizeBrush={resizeBrush}
+      onResizeBrushOpacity={resizeBrushOpacity}
+    />
   );
 
   return (
@@ -1034,424 +612,74 @@ export function ImageRetouchDialog({
           showCloseButton={false}
         >
           <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] bg-background">
-            <DialogHeader className="m-0 grid min-h-14 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b bg-card/95 px-4 py-2 max-[760px]:min-h-0 max-[760px]:grid-cols-1 max-[760px]:gap-2 max-[760px]:px-3">
-              <div className="min-w-0">
-                <DialogTitle className="truncate text-base font-semibold">
-                  Retouche image
-                </DialogTitle>
-                <DialogDescription className="sr-only">
-                  Atelier de retouche locale avec pinceau, pipette, main,
-                  historique, zoom et transformations.
-                </DialogDescription>
-                <p className="truncate text-xs text-muted-foreground">
-                  {target?.label ?? "Image source"}
-                </p>
-              </div>
-
-              <div className="flex min-w-0 items-center justify-end gap-2 max-[760px]:justify-between">
-                {imageSize ? (
-                  <Badge
-                    variant="outline"
-                    className="min-h-8 flex-none tabular-nums max-[640px]:hidden"
-                  >
-                    {imageSize.width} x {imageSize.height}px
-                  </Badge>
-                ) : null}
-
-                <div
-                  className="inline-flex min-h-8 items-center gap-0.5 rounded-lg border bg-background/80 px-1 text-xs tabular-nums text-muted-foreground"
-                  aria-label="Zoom"
-                >
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    disabled={!imageSize}
-                    onClick={() => updateZoom(-0.15)}
-                    aria-label="Zoom arriere"
-                  >
-                    <ZoomOut />
-                  </Button>
-                  <span className="min-w-12 text-center max-[640px]:min-w-10">
-                    {zoomPercent}%
-                  </span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    disabled={!imageSize}
-                    onClick={() => updateZoom(0.15)}
-                    aria-label="Zoom avant"
-                  >
-                    <ZoomIn />
-                  </Button>
-                </div>
-
-                <div
-                  className="inline-flex min-h-8 items-center gap-0.5 rounded-lg border bg-background/80 px-1"
-                  aria-label="Historique"
-                >
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    disabled={!historyState.canUndo}
-                    onClick={undo}
-                    aria-label="Annuler"
-                  >
-                    <Undo2 />
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    disabled={!historyState.canRedo}
-                    onClick={redo}
-                    aria-label="Retablir"
-                  >
-                    <Redo2 />
-                  </Button>
-                </div>
-
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  disabled={busy}
-                  onClick={() => onOpenChange(false)}
-                  aria-label="Fermer"
-                >
-                  <X />
-                </Button>
-              </div>
-            </DialogHeader>
+            <RetouchDialogHeader
+              busy={busy}
+              canRedo={historyState.canRedo}
+              canUndo={historyState.canUndo}
+              imageSize={imageSize}
+              targetLabel={target?.label ?? "Image source"}
+              zoomPercent={zoomPercent}
+              onClose={() => onOpenChange(false)}
+              onRedo={redo}
+              onUndo={undo}
+              onZoomIn={() => updateZoom(0.15)}
+              onZoomOut={() => updateZoom(-0.15)}
+            />
 
             <div className="grid min-h-0 overflow-hidden min-[901px]:grid-cols-[3.25rem_minmax(0,1fr)] max-[900px]:grid-rows-[auto_minmax(0,1fr)]">
-              <aside
-                className="relative z-20 flex min-h-0 min-w-0 flex-col items-center gap-2 border-r bg-card/90 px-2 py-3 max-[900px]:flex-row max-[900px]:justify-center max-[900px]:border-b max-[900px]:border-r-0 max-[900px]:p-2"
-                aria-label="Outils"
-              >
-                <Popover open={tool === "brush"}>
-                  <PopoverAnchor asChild>
-                    <div>
-                      {renderToolButton(
-                        "brush",
-                        "Pinceau",
-                        "B",
-                        <Paintbrush />,
-                      )}
-                    </div>
-                  </PopoverAnchor>
-                  <PopoverContent
-                    side="right"
-                    align="start"
-                    sideOffset={8}
-                    className="w-64 gap-3 border bg-card p-3 shadow-md ring-0"
-                  >
-                    {brushSettingsContent}
-                  </PopoverContent>
-                </Popover>
-                {renderToolButton("picker", "Pipette", "I", <Pipette />)}
-                {renderToolButton("hand", "Main", "H", <Hand />)}
-              </aside>
+              <RetouchToolSidebar
+                brushSettings={brushSettingsContent}
+                brushSettingsOpen={brushSettingsOpen}
+                tool={tool}
+                onBrushSettingsOpenChange={setBrushSettingsOpen}
+                onBrushSettingsToggle={toggleBrushSettings}
+                onToolChange={selectTool}
+              />
 
-              <main
-                ref={stageRef}
-                className="relative grid min-h-0 min-w-0 grid-rows-[minmax(0,1fr)_auto] overflow-hidden bg-muted/40"
-              >
-                {loading ? (
-                  <div className="absolute inset-4 z-20 grid content-center place-items-center gap-2 rounded-xl border border-dashed bg-background/85 text-sm text-muted-foreground backdrop-blur">
-                    <Loader2 className="size-5 animate-spin" />
-                    Chargement de l'image
-                  </div>
-                ) : null}
-
-                <div
-                  ref={scrollRef}
-                  className="grid min-h-0 place-items-center overflow-auto p-5 max-[900px]:p-3"
-                  onWheel={handleCanvasWheel}
-                >
-                  <div className="relative w-fit leading-none">
-                    <canvas
-                      ref={canvasRef}
-                      className="block h-auto max-w-none touch-none rounded-md border bg-white shadow-[0_1px_2px_rgb(32_35_38/0.08),0_14px_38px_rgb(32_35_38/0.12)] data-[tool=brush]:cursor-none data-[tool=hand]:cursor-grab data-[tool=picker]:cursor-copy"
-                      style={{ width: displayWidth }}
-                      aria-label={`Retoucher ${target?.label ?? "image"}`}
-                      onPointerEnter={updateBrushPreview}
-                      onPointerDown={handlePointerDown}
-                      onPointerMove={handlePointerMove}
-                      onPointerUp={stopDrawing}
-                      onPointerCancel={stopDrawing}
-                      onPointerLeave={hideBrushPreview}
-                      data-tool={tool}
-                    />
-
-                    {showBrushPreview ? (
-                      <div
-                        className="pointer-events-none absolute left-0 top-0 z-20 rounded-full border-[1.5px] bg-primary/10 shadow-[0_0_0_1px_rgb(255_255_255/0.78),0_2px_8px_rgb(32_35_38/0.18)] will-change-transform"
-                        style={{
-                          width: brushPreview.size,
-                          height: brushPreview.size,
-                          borderColor: brushColor,
-                          transform: `translate(${
-                            brushPreview.x - brushPreview.size / 2
-                          }px, ${brushPreview.y - brushPreview.size / 2}px)`,
-                        }}
-                      />
-                    ) : null}
-                  </div>
-                </div>
-
-                <div
-                  ref={floatingToolbarRef}
-                  className={cn(
-                    "absolute z-30 flex max-w-[calc(100%-1.5rem)] items-center gap-1 overflow-x-auto rounded-2xl border bg-background/95 p-1.5 shadow-md backdrop-blur",
-                    toolbarPosition
-                      ? "translate-x-0"
-                      : "bottom-5 left-1/2 -translate-x-1/2",
-                  )}
-                  style={
-                    toolbarPosition
-                      ? { left: toolbarPosition.x, top: toolbarPosition.y }
-                      : undefined
-                  }
-                  aria-label="Barre flottante de retouche"
-                >
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        className="cursor-grab rounded-xl active:cursor-grabbing"
-                        aria-label="Deplacer la barre d'outils"
-                        onPointerDown={handleToolbarPointerDown}
-                        onPointerMove={handleToolbarPointerMove}
-                        onPointerUp={stopToolbarDrag}
-                        onPointerCancel={stopToolbarDrag}
-                      >
-                        <GripHorizontal />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="top">
-                      Deplacer la barre
-                    </TooltipContent>
-                  </Tooltip>
-
-                  <Separator orientation="vertical" className="h-6" />
-
-                  <div className="flex items-center gap-1" aria-label="Outils">
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          type="button"
-                          variant={tool === "brush" ? "default" : "ghost"}
-                          size="icon-sm"
-                          className="rounded-xl"
-                          aria-pressed={tool === "brush"}
-                          aria-label="Pinceau"
-                          onClick={() => setTool("brush")}
-                        >
-                          <Paintbrush />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="top">Pinceau (B)</TooltipContent>
-                    </Tooltip>
-
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          type="button"
-                          variant={tool === "picker" ? "default" : "ghost"}
-                          size="icon-sm"
-                          className="rounded-xl"
-                          aria-pressed={tool === "picker"}
-                          aria-label="Pipette"
-                          onClick={() => setTool("picker")}
-                        >
-                          <Pipette />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="top">Pipette (I)</TooltipContent>
-                    </Tooltip>
-
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          type="button"
-                          variant={tool === "hand" ? "default" : "ghost"}
-                          size="icon-sm"
-                          className="rounded-xl"
-                          aria-pressed={tool === "hand"}
-                          aria-label="Main"
-                          onClick={() => setTool("hand")}
-                        >
-                          <Hand />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="top">Main (H)</TooltipContent>
-                    </Tooltip>
-                  </div>
-
-                  <Separator orientation="vertical" className="h-6" />
-
-                  <div
-                    className="flex items-center gap-1 pl-0.5"
-                    aria-label="Transformer"
-                  >
-                    <span className="px-1 text-xs font-medium text-muted-foreground max-[640px]:sr-only">
-                      Transformer
-                    </span>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          className="rounded-xl"
-                          disabled={!canEdit}
-                          onClick={() =>
-                            applyCanvasTransform("rotateClockwise")
-                          }
-                          aria-label="Rotation"
-                        >
-                          <RotateCw />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="top">Rotation</TooltipContent>
-                    </Tooltip>
-
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          className="rounded-xl"
-                          disabled={!canEdit}
-                          onClick={() => applyCanvasTransform("flipHorizontal")}
-                          aria-label="Miroir horizontal"
-                        >
-                          <FlipHorizontal2 />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="top">
-                        Miroir horizontal
-                      </TooltipContent>
-                    </Tooltip>
-
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          className="rounded-xl"
-                          disabled={!canEdit}
-                          onClick={() => applyCanvasTransform("flipVertical")}
-                          aria-label="Miroir vertical"
-                        >
-                          <FlipVertical2 />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="top">
-                        Miroir vertical
-                      </TooltipContent>
-                    </Tooltip>
-
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          className="rounded-xl"
-                          disabled={!imageSize || loading}
-                          onClick={resetCanvas}
-                          aria-label="Recharger"
-                        >
-                          <RotateCcw />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="top">Recharger</TooltipContent>
-                    </Tooltip>
-                  </div>
-                </div>
-
-                <div
-                  className="relative z-10 flex min-h-10 items-center justify-between gap-3 border-t bg-background/90 px-3 text-xs tabular-nums text-muted-foreground backdrop-blur max-[640px]:hidden"
-                  aria-live="polite"
-                >
-                  <span className="truncate">{activeToolLabel}</span>
-                  <span className="truncate text-center">
-                    {zoomPercent}% · Cmd/Ctrl + molette
-                  </span>
-                  <span className="truncate text-right">{historyReadout}</span>
-                </div>
-              </main>
+              <RetouchCanvasStage
+                activeToolLabel={activeToolLabel}
+                brushColor={brushColor}
+                brushPreview={brushPreview}
+                canEdit={canEdit}
+                canReload={Boolean(imageSize && !loading)}
+                canvasRef={canvasRef}
+                displayWidth={displayWidth}
+                floatingToolbarRef={floatingToolbarRef}
+                historyReadout={historyReadout}
+                loading={loading}
+                scrollRef={scrollRef}
+                showBrushPreview={showBrushPreview}
+                stageRef={stageRef}
+                targetLabel={target?.label ?? "image"}
+                tool={tool}
+                toolbarPosition={toolbarPosition}
+                zoomPercent={zoomPercent}
+                onCanvasPointerCancel={stopDrawing}
+                onCanvasPointerDown={handlePointerDown}
+                onCanvasPointerEnter={updateBrushPreview}
+                onCanvasPointerLeave={hideBrushPreview}
+                onCanvasPointerMove={handlePointerMove}
+                onCanvasPointerUp={stopDrawing}
+                onCanvasWheel={handleCanvasWheel}
+                onReset={resetCanvas}
+                onToolChange={selectTool}
+                onToolbarPointerCancel={stopToolbarDrag}
+                onToolbarPointerDown={handleToolbarPointerDown}
+                onToolbarPointerMove={handleToolbarPointerMove}
+                onToolbarPointerUp={stopToolbarDrag}
+                onTransform={applyCanvasTransform}
+              />
             </div>
 
-            {error ? (
-              <div className="border-t bg-card/90 px-4 py-2">
-                <Alert variant="destructive">
-                  <AlertDescription>{error}</AlertDescription>
-                </Alert>
-              </div>
-            ) : null}
+            {error ? <RetouchErrorAlert error={error} /> : null}
 
-            <DialogFooter className="m-0 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 rounded-none border-t bg-card/95 px-4 py-3 max-[640px]:grid-cols-1 max-[640px]:gap-2 max-[640px]:px-3">
-              <div
-                className="flex min-w-0 gap-2 text-xs tabular-nums text-muted-foreground max-[640px]:hidden"
-                aria-live="polite"
-              >
-                <span className="block truncate">{activeToolLabel}</span>
-                <Separator orientation="vertical" />
-                <span className="block truncate">{historyReadout}</span>
-              </div>
-
-              <div className="flex items-center justify-end gap-2 max-[640px]:grid max-[640px]:w-full max-[640px]:grid-cols-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={busy}
-                  onClick={() => onOpenChange(false)}
-                >
-                  Fermer
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={!canEdit || busy}
-                  onClick={() => void save("version")}
-                >
-                  {busy ? (
-                    <Loader2
-                      data-icon="inline-start"
-                      className="animate-spin"
-                    />
-                  ) : (
-                    <Check data-icon="inline-start" />
-                  )}
-                  Enregistrer une version
-                </Button>
-                <Button
-                  type="button"
-                  disabled={!canEdit || busy}
-                  onClick={() => void save("overwrite")}
-                  className="max-[640px]:col-span-2"
-                >
-                  {busy ? (
-                    <Loader2
-                      data-icon="inline-start"
-                      className="animate-spin"
-                    />
-                  ) : (
-                    <Save data-icon="inline-start" />
-                  )}
-                  Remplacer l'image
-                </Button>
-              </div>
-            </DialogFooter>
+            <RetouchDialogFooter
+              activeToolLabel={activeToolLabel}
+              busy={busy}
+              canEdit={canEdit}
+              historyReadout={historyReadout}
+              onSave={(mode) => void save(mode)}
+            />
           </div>
         </DialogContent>
       </Dialog>

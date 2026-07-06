@@ -1,5 +1,46 @@
 import type { ProductSearch } from "@/lib/productFilters";
+import type {
+  GenerationStatus,
+  ProductGenerationState,
+  ProductPrimaryAction,
+  ProductPublishState,
+  ProductReviewState,
+} from "@/lib/status";
 import type { Doc } from "@/lib/convex";
+
+export type ProductListItem = {
+  _id: Doc<"products">["_id"];
+  _creationTime: Doc<"products">["_creationTime"];
+  shopifyProductId: string;
+  title: string;
+  handle: string;
+  vendor?: string | null;
+  productType?: string | null;
+  shopifyStatus?: string | null;
+  featuredImageUrl?: string | null;
+  shopifyImageCount: number;
+  generationStatus: GenerationStatus;
+  generationState: ProductGenerationState;
+  reviewState: ProductReviewState;
+  publishState: ProductPublishState;
+  primaryAction: ProductPrimaryAction;
+  generatedImageCount?: number;
+  failedImageCount?: number;
+  pendingReviewCount?: number;
+};
+
+export type ProductFacets = {
+  productTypes: string[];
+  shopifyStatuses: string[];
+  collections: Array<{ id: string; title: string; handle?: string }>;
+};
+
+export type ProductPageResult = {
+  page: ProductListItem[];
+  total: number;
+  hasPrevious: boolean;
+  hasNext: boolean;
+};
 
 export type ProductDetail = {
   product: Doc<"products">;
