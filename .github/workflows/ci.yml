@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main]
+    branches: [main, dev]
 
 jobs:
   verify:
@@ -36,7 +36,26 @@ jobs:
       - name: Build production image
         run: docker compose build web
 
-  deploy-convex:
+  deploy-convex-dev:
+    needs: verify
+    if: github.ref == 'refs/heads/dev' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm ci
+
+      - name: Deploy to Convex dev
+        run: npx convex deploy --preview-name dev
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEV_DEPLOY_KEY }}
+
+  deploy-convex-prod:
     needs: verify
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
@@ -49,7 +68,7 @@ jobs:
 
       - run: npm ci
 
-      - name: Deploy to Convex
+      - name: Deploy to Convex prod
         run: npx convex deploy
         env:
           CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}

@@ -30,8 +30,8 @@ export function ProductsTable({
   onGenerateOne: (product: ProductListItem) => void;
 }) {
   return (
-    <Card className="studio-card overflow-hidden rounded-lg">
-      <Table className="table-studio min-w-[980px]">
+    <Card className="overflow-hidden rounded-lg">
+      <Table className="[&_td]:h-16 [&_th]:text-[0.72rem] [&_th]:font-medium [&_th]:text-muted-foreground min-w-[980px]">
         <TableHeader>
           <TableRow className="hover:bg-transparent">
             <TableHead className="w-10">

@@ -11,7 +11,7 @@ export function SettingsPanel({
   children: ReactNode;
 }) {
   return (
-    <Card className="studio-card rounded-lg py-0">
+    <Card className="rounded-lg py-0">
       <CardContent className="grid gap-4 p-4">
         <div>
           <h2 className="text-base font-semibold">{title}</h2>

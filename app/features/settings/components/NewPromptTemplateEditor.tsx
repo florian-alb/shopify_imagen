@@ -43,8 +43,8 @@ export function NewPromptTemplateEditor({
   onUpdateDraft: (values: Partial<NewPromptDraft>) => void;
 }) {
   return (
-    <TabsContent value={newPromptTabValue}>
-      <Card className="studio-card rounded-lg">
+    <TabsContent value={newPromptTabValue} className="min-w-0">
+      <Card className="rounded-lg">
         <CardHeader className="flex flex-row items-start justify-between gap-2">
           <div>
             <CardTitle className="text-lg">Nouveau template</CardTitle>
@@ -121,7 +121,7 @@ export function NewPromptTemplateEditor({
             draft={newPromptDraft}
             onChange={onUpdateDraft}
           />
-          <div className="sticky bottom-0 -mx-4 mt-3 flex justify-end gap-2 border-t border-white/10 bg-card/95 px-4 py-3 backdrop-blur">
+          <div className="sticky bottom-0 -mx-4 mt-3 flex justify-end gap-2 border-t border-border bg-card/95 px-4 py-3 backdrop-blur">
             <Button
               variant="outline"
               onClick={onCancel}

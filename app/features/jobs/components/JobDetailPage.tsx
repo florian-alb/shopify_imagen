@@ -16,7 +16,7 @@ export function JobDetailPage({ jobId }: { jobId: string }) {
 
   if (page.data === undefined) {
     return (
-      <main className="page">
+      <main className="mx-auto w-full max-w-[96rem] p-4 md:p-5">
         <EmptyState
           loading
           title="Loading job"
@@ -28,7 +28,7 @@ export function JobDetailPage({ jobId }: { jobId: string }) {
 
   if (!page.job || !page.viewModel) {
     return (
-      <main className="page">
+      <main className="mx-auto w-full max-w-[96rem] p-4 md:p-5">
         <EmptyState
           title="Job not found"
           body="It may have been deleted or belongs to another shop."
@@ -38,7 +38,7 @@ export function JobDetailPage({ jobId }: { jobId: string }) {
   }
 
   return (
-    <main className="page">
+    <main className="mx-auto w-full max-w-[96rem] p-4 md:p-5">
       <JobDetailHeader
         job={page.job}
         jobState={page.viewModel.jobState}

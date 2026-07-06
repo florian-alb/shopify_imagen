@@ -31,8 +31,8 @@ export function SettingTable({
   onSave: (key: string) => void;
 }) {
   return (
-    <div className="overflow-hidden rounded-lg border border-white/10">
-      <Table className="table-studio">
+    <div className="overflow-hidden rounded-lg border border-border">
+      <Table className="[&_td]:h-16 [&_th]:text-[0.72rem] [&_th]:font-medium [&_th]:text-muted-foreground">
         <TableHeader>
           <TableRow className="hover:bg-transparent">
             <TableHead>Parametre</TableHead>

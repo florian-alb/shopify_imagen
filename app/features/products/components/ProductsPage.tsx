@@ -39,7 +39,7 @@ export function ProductsPage({ search }: { search: ProductSearch }) {
   } = useProductsListPage(search);
 
   return (
-    <main className="page">
+    <main className="mx-auto w-full max-w-[96rem] p-4 md:p-5">
       <PageHeader
         eyebrow={`${
           productPage?.hasNext ? `${pageSize}+` : products.length
@@ -110,7 +110,7 @@ export function ProductsPage({ search }: { search: ProductSearch }) {
         <div className="sticky-actions">
           <Card
             size="sm"
-            className="studio-card flex-row items-center justify-between gap-3 rounded-lg p-3 shadow-2xl"
+            className="flex-row items-center justify-between gap-3 rounded-lg p-3 shadow-2xl"
           >
             <div>
               <p className="text-sm font-medium">

@@ -20,7 +20,7 @@ export function SettingsPage() {
   const page = useSettingsPage();
 
   return (
-    <main className="page">
+    <main className="mx-auto w-full max-w-[96rem] p-4 md:p-5">
       <PageHeader
         title="Parametres"
         eyebrow="Configuration"
@@ -61,7 +61,7 @@ export function SettingsPage() {
         onValueChange={(value) => page.setTab(value as SettingsTab)}
       >
         <div className="mb-4 overflow-x-auto pb-1">
-          <TabsList className="w-max border border-white/10 bg-white/[0.03]">
+          <TabsList className="w-max border border-border bg-card">
             <TabsTrigger value="boutique">
               <Store className="size-4" />
               Boutique

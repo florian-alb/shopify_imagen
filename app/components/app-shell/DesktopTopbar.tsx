@@ -15,7 +15,7 @@ export function DesktopTopbar() {
         </Badge>
         <Badge
           variant="outline"
-          className="hidden border-white/10 bg-white/[0.03] tabular-nums lg:inline-flex"
+          className="hidden tabular-nums lg:inline-flex"
         >
           Cout suivi par job
         </Badge>

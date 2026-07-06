@@ -41,7 +41,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   if (auth.isLoading || !auth.isAuthenticated || access === undefined) {
     return (
       <main className="grid min-h-screen place-items-center bg-[var(--surface)] px-4">
-        <Card size="sm" className="rounded-lg border-white/10 bg-card/80">
+        <Card size="sm" className="rounded-lg border-border bg-card/80">
           <CardContent className="flex items-center gap-3 text-sm text-muted-foreground">
             <Loader2 className="size-4 animate-spin text-primary" />
             Verification de la session

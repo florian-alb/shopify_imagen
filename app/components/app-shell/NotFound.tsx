@@ -5,7 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 export function NotFound() {
   return (
     <main className="mx-auto grid min-h-screen max-w-3xl place-items-center px-4 py-8">
-      <Card className="w-full border-white/10 bg-card/80">
+      <Card className="w-full border-border bg-card/80">
         <CardContent className="p-6">
           <p className="text-sm text-muted-foreground">404</p>
           <h1 className="mt-2 text-2xl font-semibold">Page introuvable</h1>

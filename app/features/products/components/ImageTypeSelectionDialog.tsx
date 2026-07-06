@@ -40,7 +40,7 @@ export function ImageTypeSelectionDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="border-white/10 bg-card sm:max-w-xl">
+      <DialogContent className="border-border bg-card sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
@@ -49,7 +49,7 @@ export function ImageTypeSelectionDialog({
           {types.map((type) => (
             <Label
               key={type.imageType}
-              className="flex min-h-11 justify-between rounded-lg border border-white/10 bg-white/[0.03] px-3"
+              className="flex min-h-11 justify-between rounded-lg border border-border bg-card px-3"
             >
               <span>{type.label}</span>
               <Checkbox

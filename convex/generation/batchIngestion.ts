@@ -13,6 +13,7 @@ import {
 import { mapConcurrent } from "./concurrency";
 import { geminiBatchItem } from "./geminiBatch";
 import { deleteGeminiFile } from "./geminiBatchClient";
+import { cleanupOpenAiBatchReferencesForImage } from "./openAiBatch";
 import {
   consumeFirstInlineResponseArray,
   consumeJsonLines,
@@ -27,6 +28,14 @@ type BatchIngestOptions = {
   chunkSize?: number;
   onResultOffset?: (offset: number) => Promise<void>;
 };
+
+async function cleanupOpenAiBatchReferencesIfTerminal(
+  job: Doc<"generationJobs">,
+  image: Doc<"generatedImages">,
+) {
+  if (job.executionMode !== "batch" || job.imageProvider !== "openai") return;
+  await cleanupOpenAiBatchReferencesForImage(image);
+}
 
 export async function ingestBatchItem(
   ctx: ActionCtx,
@@ -48,6 +57,7 @@ export async function ingestBatchItem(
       providerRequestId: result?.providerRequestId,
       providerResponseId: result?.providerResponseId,
     });
+    await cleanupOpenAiBatchReferencesIfTerminal(job, image);
     return { ingested: 0, failed: changed ? 1 : 0 };
   }
 
@@ -83,6 +93,7 @@ export async function ingestBatchItem(
         costRateMultiplier,
       },
     );
+    await cleanupOpenAiBatchReferencesIfTerminal(job, image);
     log("batch", "staged", {
       jobId: job._id,
       type: image.imageType,
@@ -104,6 +115,7 @@ export async function ingestBatchItem(
       providerRequestId: result.providerRequestId,
       providerResponseId: result.providerResponseId,
     });
+    await cleanupOpenAiBatchReferencesIfTerminal(job, image);
     return { ingested: 0, failed: changed ? 1 : 0 };
   }
 }

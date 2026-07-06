@@ -17,7 +17,7 @@ export function GenerationSettingsTab({
       title="Generation"
       description="Reglages appliques aux nouveaux jobs de la boutique active."
     >
-      <div className="grid gap-0 overflow-hidden rounded-lg border border-white/10">
+      <div className="grid gap-0 overflow-hidden rounded-lg border border-border">
         <ChoiceSettingRow
           id="image-provider"
           label="Moteur image"

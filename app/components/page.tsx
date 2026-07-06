@@ -126,7 +126,7 @@ export function EmptyState({
   loading?: boolean;
 }) {
   return (
-    <Card className="studio-card min-h-56 justify-center rounded-lg">
+    <Card className="min-h-56 justify-center rounded-lg">
       <CardContent className="mx-auto max-w-md p-8 text-center">
         <div className="mx-auto mb-4 grid size-12 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-primary">
           {loading ? (

@@ -51,6 +51,13 @@ export function GeneratedImageTile({
   onDelete?: () => void;
   onRetry?: () => void;
 }) {
+  const retryActive = Boolean(image.activeRetryImageId);
+  const busy = retrying || regenerating || retryActive;
+  const displayStatus = retryActive ? "regenerating" : image.status;
+  const retryError =
+    !retryActive && image.retryError && image.retryError !== image.error
+      ? image.retryError
+      : null;
   const reviewable = isReviewable(image);
   const showReviewActions = reviewable && Boolean(onReview);
   const showRegenerateAction = reviewable && Boolean(onRegenerate);
@@ -68,7 +75,7 @@ export function GeneratedImageTile({
     <article className="group relative overflow-hidden rounded-lg border bg-background">
       <button
         type="button"
-        className="image-tile group relative block w-full cursor-zoom-in rounded-none"
+        className="group relative block aspect-square w-full cursor-zoom-in overflow-hidden rounded-none bg-muted [&>img]:size-full [&>img]:object-cover"
         disabled={!image.storageUrl || !onPreview}
         onClick={onPreview}
       >
@@ -83,10 +90,18 @@ export function GeneratedImageTile({
           </>
         ) : (
           <span className="grid size-full place-items-center text-xs text-muted-foreground">
-            {image.status}
+            {displayStatus}
           </span>
         )}
       </button>
+      {retryActive ? (
+        <div className="pointer-events-none absolute inset-0 grid place-items-center bg-background/60 backdrop-blur-[1px]">
+          <div className="inline-flex items-center gap-2 rounded-full border bg-background/90 px-2.5 py-1 text-xs text-muted-foreground shadow-sm">
+            <Loader2 className="size-3.5 animate-spin" />
+            Regenerating
+          </div>
+        </div>
+      ) : null}
       {retouchPlacement === "overlay" && onRetouch ? (
         <Button
           variant="outline"
@@ -121,8 +136,13 @@ export function GeneratedImageTile({
             Retouche
           </Badge>
         ) : null}
-        {image.error ? (
+        {image.error && !retryActive ? (
           <p className="line-clamp-2 text-xs text-destructive">{image.error}</p>
+        ) : null}
+        {retryError ? (
+          <p className="line-clamp-2 text-xs text-destructive">
+            Retry failed: {retryError}
+          </p>
         ) : null}
         {image.status === "failed" && onRetry ? (
           <Tooltip>
@@ -131,10 +151,10 @@ export function GeneratedImageTile({
                 aria-label={`Retry ${image.imageType}`}
                 variant="outline"
                 size="icon-sm"
-                disabled={retrying || regenerating}
+                disabled={busy}
                 onClick={onRetry}
               >
-                {retrying || regenerating ? (
+                {busy ? (
                   <Loader2 className="animate-spin" />
                 ) : (
                   <RefreshCw />
@@ -238,10 +258,10 @@ export function PendingGeneratedImageTile({
 }) {
   return (
     <figure className="relative overflow-hidden rounded-lg bg-muted/30 ring-1 ring-border">
-      <div className="image-tile generated-wave-tile w-full rounded-none">
-        <div className="generated-wave generated-wave-a" />
-        <div className="generated-wave generated-wave-b" />
-        <div className="generated-wave generated-wave-c" />
+      <div className="relative aspect-square w-full overflow-hidden rounded-none bg-[radial-gradient(circle_at_32%_18%,color-mix(in_oklch,var(--primary)_16%,transparent),transparent_34%),linear-gradient(135deg,color-mix(in_oklch,var(--muted)_88%,var(--background)_12%),color-mix(in_oklch,var(--primary)_10%,var(--background)_90%))]">
+        <div className="absolute inset-x-[-18%] bottom-[-36%] h-[38%] animate-pulse rounded-full bg-primary/20 blur-[18px]" />
+        <div className="absolute inset-x-[-18%] bottom-[-36%] h-[38%] animate-pulse rounded-full bg-primary/15 blur-[18px] [animation-delay:200ms]" />
+        <div className="absolute inset-x-[-18%] bottom-[-36%] h-[38%] animate-pulse rounded-full bg-primary/10 blur-[18px] [animation-delay:400ms]" />
       </div>
       <figcaption className="grid gap-1.5 px-2 py-2">
         {caption ? (

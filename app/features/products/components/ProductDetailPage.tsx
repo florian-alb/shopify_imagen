@@ -50,7 +50,7 @@ export function ProductDetailPage({
 
   if (detail.data === undefined) {
     return (
-      <main className="page">
+      <main className="mx-auto w-full max-w-[96rem] p-4 md:p-5">
         <EmptyState
           loading
           title="Loading product"
@@ -62,7 +62,7 @@ export function ProductDetailPage({
 
   if (!detail.product) {
     return (
-      <main className="page">
+      <main className="mx-auto w-full max-w-[96rem] p-4 md:p-5">
         <EmptyState
           title="Product not found"
           body="The product may not be synced into Convex yet."
@@ -82,7 +82,7 @@ export function ProductDetailPage({
     : undefined;
 
   return (
-    <main className="page">
+    <main className="mx-auto w-full max-w-[96rem] p-4 md:p-5">
       <ProductHeader
         productId={productId}
         product={detail.product}

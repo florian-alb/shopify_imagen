@@ -31,14 +31,14 @@ export function ShopSwitcher({
   const activeShop = shops?.find((shop) => shop.isActive) ?? shops?.[0];
 
   if (shops === undefined) {
-    return <div className="h-24 animate-pulse rounded-lg bg-white/5" />;
+    return <div className="h-24 animate-pulse rounded-lg bg-muted" />;
   }
 
   if (!shops.length || !activeShop) {
     return (
       <Button
         variant="outline"
-        className="h-auto w-full justify-start gap-3 rounded-lg border-white/10 bg-white/[0.03] p-3"
+        className="h-auto w-full justify-start gap-3 rounded-lg border-border bg-background p-3"
         asChild
       >
         <Link to="/settings" onClick={onNavigate}>
@@ -85,8 +85,8 @@ export function ShopSwitcher({
     <div
       className={
         compact
-          ? "rounded-lg border border-white/10 bg-white/[0.03] p-3"
-          : "rounded-lg border border-white/10 bg-white/[0.035] p-3 shadow-[0_18px_60px_rgba(0,0,0,0.18)]"
+          ? "rounded-lg border bg-card p-3"
+          : "rounded-lg border bg-card p-3"
       }
     >
       <div className="mb-3 flex items-center justify-between gap-2">
@@ -122,7 +122,7 @@ export function ShopSwitcher({
           <Button
             variant="outline"
             size="sm"
-            className="w-full justify-between border-white/10 bg-black/20"
+            className="w-full justify-between"
           >
             {switching ? "Changement..." : "Changer"}
             <ChevronDown className="size-4" />
