@@ -3,7 +3,7 @@
 Application **mobile-first** pour générer automatiquement des visuels produits Shopify (rideaux & voilages) avec **OpenAI Images** ou **Google Nano Banana Pro (Gemini)**, les optimiser en **WebP**, les stocker sur **Cloudflare R2**, les relire, puis les pousser dans Shopify — manuellement et en toute sécurité.
 
 > Stack : **TanStack Start + React 19** (front) · **Convex** (backend temps réel, jobs, crons) · **Tailwind v4 + shadcn/ui** · **sharp** (traitement image) · **Shopify Admin GraphQL** · **Cloudflare R2**.
-
+  
 ---
 
 ## ✨ Fonctionnalités
