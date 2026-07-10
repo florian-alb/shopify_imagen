@@ -2,18 +2,12 @@ name: CI
 
 on:
   pull_request:
-    branches: [main]
-  push:
     branches: [main, dev]
 
 jobs:
   verify:
     runs-on: ubuntu-latest
     env:
-      # Docker Compose interpolates every service in the file before running
-      # any command, so this must be set even for steps that only touch
-      # "app" -- "web" requires it too. Smoke-test value only: this build
-      # isn't run or deployed, so any syntactically valid URL works.
       VITE_CONVEX_URL: https://ci-build-placeholder.convex.cloud
     steps:
       - uses: actions/checkout@v4
@@ -38,7 +32,7 @@ jobs:
 
   deploy-convex-dev:
     needs: verify
-    if: github.ref == 'refs/heads/dev' && github.event_name == 'push'
+    if: github.base_ref == 'dev' && github.event_name == 'pull_request'
     runs-on: ubuntu-latest
 
     steps:
