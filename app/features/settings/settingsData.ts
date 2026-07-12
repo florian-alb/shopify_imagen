@@ -2,7 +2,7 @@ import type { SettingDefinition } from "./types";
 
 export const APP_NAME = "Shopify Image Studio";
 export const DEFAULT_PRODUCT_QUERY = "status:active,draft,archived";
-export const ADMIN_SCOPES = "read_products,write_products";
+export const ADMIN_SCOPES = "read_products,write_products,write_files";
 
 export const modelSettings: SettingDefinition[] = [
   {

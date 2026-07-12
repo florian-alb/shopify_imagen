@@ -9,7 +9,13 @@ import {
   type ProductSearch,
 } from "@/lib/productFilters";
 
-import type { ProductFacets, ProductListItem, ProductPageResult } from "../types";
+import type {
+  BulkProductLock,
+  ProductFacets,
+  ProductListItem,
+  ProductPageResult,
+} from "../types";
+import { useBulkImageTransform } from "./useBulkImageTransform";
 import { useImageTypeSelection } from "./useImageTypeSelection";
 
 export function useProductsListPage(search: ProductSearch) {
@@ -54,14 +60,34 @@ export function useProductsListPage(search: ProductSearch) {
     offset,
     limit: pageSize,
   }) as ProductPageResult | undefined;
+  const products = useMemo(() => productPage?.page ?? [], [productPage?.page]);
+  const visibleProductIds = useMemo(
+    () => products.map((product) => product._id),
+    [products],
+  );
+  const bulkProductLocks = useQuery(
+    api.bulkTransforms.productLocks,
+    visibleProductIds.length ? { productIds: visibleProductIds } : "skip",
+  ) as BulkProductLock[] | undefined;
+  const bulkLocksByProductId = useMemo(
+    () =>
+      new Map(
+        (bulkProductLocks ?? []).map((lock) => [lock.productId, lock] as const),
+      ),
+    [bulkProductLocks],
+  );
   const facets = useQuery(api.products.facets) as ProductFacets | undefined;
   const prompts = useQuery(api.prompts.list) as
     | Doc<"promptTemplates">[]
     | undefined;
   const syncProducts = useAction(api.shopify.syncProducts);
   const createJob = useMutation(api.jobs.create);
+  const selectedProductIds = useMemo(() => Array.from(selected), [selected]);
+  const bulkTransform = useBulkImageTransform({
+    onStarted: () => setSelected(new Set()),
+    selectedProductIds,
+  });
 
-  const products = useMemo(() => productPage?.page ?? [], [productPage?.page]);
   const imageTypes = useMemo(
     () => (prompts ?? []).filter((prompt) => prompt.isActive),
     [prompts],
@@ -71,10 +97,6 @@ export function useProductsListPage(search: ProductSearch) {
   const allVisibleSelected = products.length
     ? products.every((product) => selected.has(product._id))
     : false;
-  const selectedProducts = useMemo(
-    () => products.filter((product) => selected.has(product._id)),
-    [products, selected],
-  );
 
   function updateSearch(patch: Partial<ProductSearch>) {
     void navigate({
@@ -181,6 +203,7 @@ export function useProductsListPage(search: ProductSearch) {
 
   return {
     allVisibleSelected,
+    bulkLocksByProductId,
     chooserOpen,
     creatingJob,
     facets,
@@ -191,8 +214,8 @@ export function useProductsListPage(search: ProductSearch) {
     pageSize,
     productPage,
     products,
+    bulkTransform,
     selected,
-    selectedProducts,
     syncing,
     generate,
     openChooser,

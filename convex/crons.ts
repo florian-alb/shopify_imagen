@@ -24,5 +24,17 @@ crons.interval(
   internal.generation.cleanupStaleOpenAiBatchReferences,
   {},
 );
+crons.interval(
+  "resume stale bulk image transforms",
+  { minutes: 5 },
+  internal.bulkTransforms.resumeStaleJobs,
+  {},
+);
+crons.interval(
+  "cleanup expired bulk image assets",
+  { hours: 1 },
+  internal.bulkTransformsNode.cleanupExpiredAssets,
+  {},
+);
 
 export default crons;
