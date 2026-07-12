@@ -11,6 +11,10 @@
 import type * as auth from "../auth.js";
 import type * as authz from "../authz.js";
 import type * as background from "../background.js";
+import type * as bulkTransforms from "../bulkTransforms.js";
+import type * as bulkTransforms_image from "../bulkTransforms/image.js";
+import type * as bulkTransforms_model from "../bulkTransforms/model.js";
+import type * as bulkTransformsNode from "../bulkTransformsNode.js";
 import type * as crons from "../crons.js";
 import type * as generation from "../generation.js";
 import type * as generation_backgroundPostProcessing from "../generation/backgroundPostProcessing.js";
@@ -39,7 +43,6 @@ import type * as jobs from "../jobs.js";
 import type * as jobs_engine from "../jobs/engine.js";
 import type * as jobs_lifecycle from "../jobs/lifecycle.js";
 import type * as jobs_planning from "../jobs/planning.js";
-import type * as jobs_studioPromptContract from "../jobs/studioPromptContract.js";
 import type * as jobs_summaries from "../jobs/summaries.js";
 import type * as jobs_validators from "../jobs/validators.js";
 import type * as lib from "../lib.js";
@@ -75,6 +78,10 @@ declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   authz: typeof authz;
   background: typeof background;
+  bulkTransforms: typeof bulkTransforms;
+  "bulkTransforms/image": typeof bulkTransforms_image;
+  "bulkTransforms/model": typeof bulkTransforms_model;
+  bulkTransformsNode: typeof bulkTransformsNode;
   crons: typeof crons;
   generation: typeof generation;
   "generation/backgroundPostProcessing": typeof generation_backgroundPostProcessing;
@@ -103,7 +110,6 @@ declare const fullApi: ApiFromModules<{
   "jobs/engine": typeof jobs_engine;
   "jobs/lifecycle": typeof jobs_lifecycle;
   "jobs/planning": typeof jobs_planning;
-  "jobs/studioPromptContract": typeof jobs_studioPromptContract;
   "jobs/summaries": typeof jobs_summaries;
   "jobs/validators": typeof jobs_validators;
   lib: typeof lib;

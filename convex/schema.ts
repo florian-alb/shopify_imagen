@@ -76,6 +76,33 @@ const reviewStatus = v.union(
   v.literal("approved"),
   v.literal("rejected"),
 );
+const bulkTransformOperation = v.literal("flip_horizontal");
+const bulkTransformRetryPhase = v.union(
+  v.literal("transform"),
+  v.literal("publish"),
+  v.literal("conflict"),
+);
+const bulkTransformJobStatus = v.union(
+  v.literal("queued"),
+  v.literal("transforming"),
+  v.literal("ready"),
+  v.literal("publishing"),
+  v.literal("completed"),
+  v.literal("partial"),
+  v.literal("failed"),
+  v.literal("cancelled"),
+);
+const bulkTransformItemStatus = v.union(
+  v.literal("queued"),
+  v.literal("transforming"),
+  v.literal("ready"),
+  v.literal("publishing"),
+  v.literal("published"),
+  v.literal("skipped"),
+  v.literal("transform_failed"),
+  v.literal("publish_failed"),
+  v.literal("conflict"),
+);
 const backgroundMode = v.union(v.literal("solid"), v.literal("transparent"));
 const backgroundRemovalProvider = v.union(v.literal("fal_ideogram"), v.null());
 const promptKind = v.union(
@@ -394,6 +421,159 @@ export default defineSchema({
     .index("by_shop_and_product", ["shopId", "productId"])
     .index("by_shop_and_job", ["shopId", "jobId"])
     .index("by_shop_and_status", ["shopId", "status"]),
+  bulkTransformJobs: defineTable({
+    shopId: v.optional(v.id("shops")),
+    createdByUserId: v.id("users"),
+    operation: bulkTransformOperation,
+    status: bulkTransformJobStatus,
+    productIds: v.array(v.id("products")),
+    selectedImagePositions: v.optional(v.array(v.number())),
+    selectionProductHashes: v.optional(v.array(v.string())),
+    productLocksInitializedAt: v.optional(v.number()),
+    seededProductCount: v.number(),
+    seedAttempts: v.number(),
+    seedFailedProducts: v.number(),
+    seededItems: v.number(),
+    totalItems: v.number(),
+    transformedItems: v.number(),
+    transformFailedItems: v.number(),
+    publishedItems: v.number(),
+    publishFailedItems: v.number(),
+    conflictItems: v.number(),
+    skippedItems: v.number(),
+    unsupportedItems: v.number(),
+    retryPhase: v.optional(bulkTransformRetryPhase),
+    error: v.optional(v.union(v.string(), v.null())),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    startedAt: v.optional(v.number()),
+    readyAt: v.optional(v.number()),
+    publishStartedAt: v.optional(v.number()),
+    completedAt: v.optional(v.number()),
+    dismissedAt: v.optional(v.number()),
+    assetsCleanupStartedAt: v.optional(v.number()),
+    assetsCleanedAt: v.optional(v.number()),
+  })
+    .index("by_shop_and_status", ["shopId", "status"])
+    .index("by_shop_and_status_and_product_locks_initialized_at", [
+      "shopId",
+      "status",
+      "productLocksInitializedAt",
+    ])
+    .index("by_shop_and_created_at", ["shopId", "createdAt"])
+    .index("by_status_and_updated_at", ["status", "updatedAt"])
+    .index("by_status_and_assets_cleaned_at_and_completed_at", [
+      "status",
+      "assetsCleanedAt",
+      "completedAt",
+    ])
+    .index("by_assets_cleaned_at_and_dismissed_at", [
+      "assetsCleanedAt",
+      "dismissedAt",
+    ])
+    .index("by_shop_and_dismissed_at", ["shopId", "dismissedAt"])
+    .index("by_created_by_user_and_dismissed_at", [
+      "createdByUserId",
+      "dismissedAt",
+    ]),
+  bulkTransformProductLocks: defineTable({
+    shopId: v.optional(v.id("shops")),
+    productId: v.id("products"),
+    jobId: v.id("bulkTransformJobs"),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_product", ["productId"])
+    .index("by_job", ["jobId"]),
+  bulkTransformMediaLeases: defineTable({
+    shopDomain: v.string(),
+    sourceMediaId: v.string(),
+    jobId: v.id("bulkTransformJobs"),
+    itemId: v.id("bulkTransformItems"),
+    leaseToken: v.string(),
+    expiresAt: v.number(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_shop_domain_and_source_media_id", [
+      "shopDomain",
+      "sourceMediaId",
+    ])
+    .index("by_job", ["jobId"])
+    .index("by_item", ["itemId"]),
+  bulkTransformMediaPublicationHeads: defineTable({
+    shopDomain: v.string(),
+    sourceMediaId: v.string(),
+    jobId: v.id("bulkTransformJobs"),
+    itemId: v.id("bulkTransformItems"),
+    publishedAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_shop_domain_and_source_media_id", [
+      "shopDomain",
+      "sourceMediaId",
+    ])
+    .index("by_item", ["itemId"]),
+  bulkTransformMediaProductReferences: defineTable({
+    shopDomain: v.string(),
+    sourceMediaId: v.string(),
+    productId: v.id("products"),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_shop_domain_and_source_media_id", [
+      "shopDomain",
+      "sourceMediaId",
+    ])
+    .index("by_shop_domain_and_source_media_id_and_product_id", [
+      "shopDomain",
+      "sourceMediaId",
+      "productId",
+    ])
+    .index("by_product", ["productId"]),
+  bulkTransformItems: defineTable({
+    shopId: v.optional(v.id("shops")),
+    jobId: v.id("bulkTransformJobs"),
+    productId: v.id("products"),
+    referencedProductIds: v.array(v.id("products")),
+    operation: bulkTransformOperation,
+    sourceMediaId: v.string(),
+    sourceUrl: v.string(),
+    sourceAlt: v.optional(v.union(v.string(), v.null())),
+    sourcePosition: v.number(),
+    sourceSha256: v.optional(v.union(v.string(), v.null())),
+    transformedSha256: v.optional(v.union(v.string(), v.null())),
+    sourceBackupUrl: v.optional(v.union(v.string(), v.null())),
+    outputUrl: v.optional(v.union(v.string(), v.null())),
+    publishedUrl: v.optional(v.union(v.string(), v.null())),
+    status: bulkTransformItemStatus,
+    error: v.optional(v.union(v.string(), v.null())),
+    attempts: v.number(),
+    publishAttempts: v.number(),
+    publishLeaseToken: v.optional(v.string()),
+    publishRecoveryPending: v.optional(v.boolean()),
+    publishAmbiguousSince: v.optional(v.number()),
+    fileUpdateAcceptedAt: v.optional(v.number()),
+    processingStartedAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_job", ["jobId"])
+    .index("by_job_and_status", ["jobId", "status"])
+    .index("by_job_and_source_media_id", ["jobId", "sourceMediaId"])
+    .index("by_product_and_source_media_id", ["productId", "sourceMediaId"])
+    .index("by_status_and_updated_at", ["status", "updatedAt"]),
+  bulkTransformSeedFailures: defineTable({
+    shopId: v.optional(v.id("shops")),
+    jobId: v.id("bulkTransformJobs"),
+    productId: v.id("products"),
+    error: v.string(),
+    attempts: v.number(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_job", ["jobId"])
+    .index("by_job_and_product", ["jobId", "productId"]),
   appSettings: defineTable({
     shopId: v.optional(v.id("shops")),
     key: v.string(),

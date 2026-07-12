@@ -9,13 +9,14 @@ import {
 } from "@/components/ui/table";
 import type { ProductSearch } from "@/lib/productFilters";
 
-import type { ProductListItem } from "../types";
+import type { BulkProductLock, ProductListItem } from "../types";
 import { ProductTableRow } from "./ProductTableRow";
 
 export function ProductsTable({
   products,
   search,
   selected,
+  bulkLocksByProductId,
   allVisibleSelected,
   onToggleProduct,
   onToggleVisible,
@@ -24,6 +25,7 @@ export function ProductsTable({
   products: ProductListItem[];
   search: ProductSearch;
   selected: Set<ProductListItem["_id"]>;
+  bulkLocksByProductId: ReadonlyMap<ProductListItem["_id"], BulkProductLock>;
   allVisibleSelected: boolean;
   onToggleProduct: (productId: ProductListItem["_id"]) => void;
   onToggleVisible: () => void;
@@ -58,6 +60,7 @@ export function ProductsTable({
               product={product}
               search={search}
               selected={selected.has(product._id)}
+              bulkLock={bulkLocksByProductId.get(product._id)}
               onToggle={() => onToggleProduct(product._id)}
               onGenerateOne={() => onGenerateOne(product)}
             />

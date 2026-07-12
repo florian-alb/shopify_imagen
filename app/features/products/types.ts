@@ -18,6 +18,7 @@ export type ProductListItem = {
   productType?: string | null;
   shopifyStatus?: string | null;
   featuredImageUrl?: string | null;
+  featuredImageDisplayUrl?: string | null;
   shopifyImageCount: number;
   generationStatus: GenerationStatus;
   generationState: ProductGenerationState;
@@ -27,6 +28,12 @@ export type ProductListItem = {
   generatedImageCount?: number;
   failedImageCount?: number;
   pendingReviewCount?: number;
+};
+
+export type BulkProductLock = {
+  productId: Doc<"products">["_id"];
+  jobId: Doc<"bulkTransformJobs">["_id"];
+  status: Doc<"bulkTransformJobs">["status"];
 };
 
 export type ProductFacets = {
@@ -63,6 +70,7 @@ export type ShopifyGalleryImage = {
   id?: string | null;
   mediaId?: string | null;
   url: string;
+  displayUrl?: string | null;
   altText?: string | null;
 };
 

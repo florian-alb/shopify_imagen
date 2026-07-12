@@ -2,6 +2,7 @@
 
 import {
   DeleteObjectCommand,
+  DeleteObjectsCommand,
   ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
@@ -84,13 +85,14 @@ export async function deleteR2ObjectsWithPrefix(args: {
   limit?: number;
 }) {
   const config = r2Config();
-  if (!config) return { deleted: 0 };
+  if (!config) return { deleted: 0, hasMore: false, configured: false };
   const client = r2Client(config);
   const cutoff = args.olderThanMs
     ? new Date(Date.now() - args.olderThanMs)
     : null;
   const limit = Math.max(1, args.limit ?? 500);
   let deleted = 0;
+  let hasMore = false;
   let continuationToken: string | undefined;
   do {
     const remaining = limit - deleted;
@@ -102,26 +104,37 @@ export async function deleteR2ObjectsWithPrefix(args: {
         MaxKeys: Math.min(remaining, 1000),
       }),
     );
-    for (const object of result.Contents ?? []) {
-      if (!object.Key) continue;
-      if (
-        cutoff &&
-        (!object.LastModified || object.LastModified > cutoff)
-      ) {
-        continue;
+    const keys = (result.Contents ?? []).flatMap((object) => {
+      if (!object.Key) return [];
+      if (cutoff && (!object.LastModified || object.LastModified > cutoff)) {
+        return [];
       }
-      await client.send(
-        new DeleteObjectCommand({ Bucket: config.bucket, Key: object.Key }),
+      return [{ Key: object.Key }];
+    });
+    if (keys.length) {
+      const deletion = await client.send(
+        new DeleteObjectsCommand({
+          Bucket: config.bucket,
+          Delete: { Objects: keys, Quiet: true },
+        }),
       );
-      deleted += 1;
-      if (deleted >= limit) break;
+      if (deletion.Errors?.length) {
+        throw new Error(
+          `R2 bulk deletion failed for ${deletion.Errors.length} object(s).`,
+        );
+      }
+      deleted += keys.length;
     }
-    continuationToken =
-      result.IsTruncated && deleted < limit
+    if (deleted >= limit) {
+      hasMore = Boolean(result.IsTruncated);
+      continuationToken = undefined;
+    } else {
+      continuationToken = result.IsTruncated
         ? result.NextContinuationToken
         : undefined;
+    }
   } while (continuationToken);
-  return { deleted };
+  return { deleted, hasMore, configured: true };
 }
 
 export async function deleteFromR2(storageUrl: string) {
