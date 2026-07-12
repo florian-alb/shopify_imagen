@@ -15,6 +15,7 @@ import { requireUserId } from "./authz";
 import {
   BULK_TRANSFORM_ASSET_RETENTION_MS,
   BULK_TRANSFORM_OPERATION,
+  BULK_TRANSFORM_PUBLISH_AMBIGUITY_SETTLE_MS,
   MAX_BULK_TRANSFORM_IMAGE_POSITIONS,
   bulkTransformImagePositionIsSelected,
   bulkTransformJobIsTerminal,
@@ -29,7 +30,9 @@ import {
 } from "./bulkTransforms/model";
 import {
   ensureActiveShop,
+  envShopDomain,
   getActiveShopScope,
+  normalizeShopDomain,
   shopMatchesScope,
   type ShopScope,
   type ShopifyCredentials,
@@ -47,6 +50,17 @@ const STALE_PROCESSING_MS = 10 * 60 * 1000;
 const ASSET_CLEANUP_LEASE_MS = 30 * 60 * 1000;
 const BULK_HISTORY_MAX_PAGE_SIZE = 100;
 const SELECTION_PREVIEW_SIZE = 3;
+const PRODUCT_LOCK_QUERY_MAX_SIZE = 100;
+// Convex actions have a shorter maximum runtime than this lease. Keeping the
+// lease longer than every Shopify request + polling window prevents a stale
+// resume from fencing out an action that can still mutate the source file.
+const PUBLISH_MEDIA_LEASE_MS =
+  BULK_TRANSFORM_PUBLISH_AMBIGUITY_SETTLE_MS;
+const PUBLISH_MEDIA_LEASE_RETRY_MS = 5_000;
+const PUBLISH_MEDIA_RECOVERY_RETRY_MS = 30_000;
+// A stale-job recovery is one Convex transaction. Bound the one-time legacy
+// migration so a fleet of 250-product jobs cannot exceed mutation write limits.
+const LEGACY_PRODUCT_LOCK_RESUME_BUDGET = 500;
 const ACTIVE_JOB_STATUSES = [
   "queued",
   "transforming",
@@ -90,26 +104,275 @@ async function jobForUser(
   return job;
 }
 
-async function assertNoOtherActiveJob(
-  ctx: MutationCtx,
+function jobRequiresProductLocks(status: Doc<"bulkTransformJobs">["status"]) {
+  return (ACTIVE_JOB_STATUSES as readonly string[]).includes(status);
+}
+
+async function legacyActiveJobsWithoutProductLocks(
+  ctx: JobReadCtx,
   scope: ShopScope,
-  excludedJobId?: Id<"bulkTransformJobs">,
 ) {
+  const jobs = new Map<Id<"bulkTransformJobs">, Doc<"bulkTransformJobs">>();
   for (const shopId of shopIdsForScope(scope)) {
     for (const status of ACTIVE_JOB_STATUSES) {
-      const active = await ctx.db
+      const legacy = await ctx.db
         .query("bulkTransformJobs")
-        .withIndex("by_shop_and_status", (q) =>
-          q.eq("shopId", shopId).eq("status", status),
+        .withIndex("by_shop_and_status_and_product_locks_initialized_at", (q) =>
+          q
+            .eq("shopId", shopId)
+            .eq("status", status)
+            .eq("productLocksInitializedAt", undefined),
         )
         .take(2);
-      if (active.some((job) => job._id !== excludedJobId)) {
-        throw new Error(
-          "Another bulk image operation is already active for this shop.",
-        );
-      }
+      for (const job of legacy) jobs.set(job._id, job);
     }
   }
+  return Array.from(jobs.values());
+}
+
+type ActiveProductLock = {
+  productId: Id<"products">;
+  jobId: Id<"bulkTransformJobs">;
+  status: Doc<"bulkTransformJobs">["status"];
+};
+
+async function activeProductLocksForIds(
+  ctx: JobReadCtx,
+  scope: ShopScope,
+  productIds: Id<"products">[],
+) {
+  const uniqueProductIds = Array.from(new Set(productIds));
+  const lockRows = await Promise.all(
+    uniqueProductIds.map((productId) =>
+      ctx.db
+        .query("bulkTransformProductLocks")
+        .withIndex("by_product", (q) => q.eq("productId", productId))
+        .unique(),
+    ),
+  );
+  const jobIds = Array.from(
+    new Set(lockRows.flatMap((lock) => (lock ? [lock.jobId] : []))),
+  );
+  const jobs = await Promise.all(jobIds.map((jobId) => ctx.db.get(jobId)));
+  const jobsById = new Map(
+    jobs
+      .filter((job): job is Doc<"bulkTransformJobs"> => Boolean(job))
+      .map((job) => [job._id, job]),
+  );
+  const active = new Map<Id<"products">, ActiveProductLock>();
+  for (const lock of lockRows) {
+    if (!lock) continue;
+    const job = jobsById.get(lock.jobId);
+    if (
+      !job ||
+      !jobRequiresProductLocks(job.status) ||
+      !shopMatchesScope(job, scope)
+    ) {
+      continue;
+    }
+    active.set(lock.productId, {
+      productId: lock.productId,
+      jobId: job._id,
+      status: job.status,
+    });
+  }
+
+  const requested = new Set(uniqueProductIds);
+  const legacyJobs = await legacyActiveJobsWithoutProductLocks(ctx, scope);
+  for (const job of legacyJobs) {
+    for (const productId of job.productIds) {
+      if (!requested.has(productId) || active.has(productId)) continue;
+      active.set(productId, {
+        productId,
+        jobId: job._id,
+        status: job.status,
+      });
+    }
+  }
+  return active;
+}
+
+async function acquireProductLocks(
+  ctx: MutationCtx,
+  job: Doc<"bulkTransformJobs">,
+) {
+  const productIds = Array.from(new Set(job.productIds));
+  const existingLocks = await Promise.all(
+    productIds.map((productId) =>
+      ctx.db
+        .query("bulkTransformProductLocks")
+        .withIndex("by_product", (q) => q.eq("productId", productId))
+        .unique(),
+    ),
+  );
+  const ownerIds = Array.from(
+    new Set(
+      existingLocks.flatMap((lock) =>
+        lock && lock.jobId !== job._id ? [lock.jobId] : [],
+      ),
+    ),
+  );
+  const owners = await Promise.all(ownerIds.map((jobId) => ctx.db.get(jobId)));
+  const activeOwnerIds = new Set(
+    owners
+      .filter((owner): owner is Doc<"bulkTransformJobs"> =>
+        Boolean(owner && jobRequiresProductLocks(owner.status)),
+      )
+      .map((owner) => owner._id),
+  );
+  const conflicts = existingLocks.filter(
+    (lock) => lock && lock.jobId !== job._id && activeOwnerIds.has(lock.jobId),
+  );
+  if (conflicts.length) {
+    throw new Error(
+      `${conflicts.length} selected product${conflicts.length === 1 ? " is" : "s are"} already locked by another unfinished bulk operation.`,
+    );
+  }
+
+  const now = Date.now();
+  const alreadyOwned = new Set<Id<"products">>();
+  for (const lock of existingLocks) {
+    if (!lock) continue;
+    if (lock.jobId === job._id) {
+      alreadyOwned.add(lock.productId);
+    } else {
+      await ctx.db.delete(lock._id);
+    }
+  }
+  for (const productId of productIds) {
+    if (alreadyOwned.has(productId)) continue;
+    await ctx.db.insert("bulkTransformProductLocks", {
+      ...(job.shopId ? { shopId: job.shopId } : {}),
+      productId,
+      jobId: job._id,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+  await ctx.db.patch(job._id, {
+    productLocksInitializedAt: job.productLocksInitializedAt ?? now,
+    updatedAt: now,
+  });
+  return productIds.length;
+}
+
+async function releaseProductLocks(
+  ctx: MutationCtx,
+  jobId: Id<"bulkTransformJobs">,
+) {
+  const locks = await ctx.db
+    .query("bulkTransformProductLocks")
+    .withIndex("by_job", (q) => q.eq("jobId", jobId))
+    .take(MAX_PRODUCTS_PER_JOB + 1);
+  if (locks.length > MAX_PRODUCTS_PER_JOB) {
+    throw new Error("Bulk product lock count exceeds the job limit.");
+  }
+  for (const lock of locks) await ctx.db.delete(lock._id);
+  return locks.length;
+}
+
+async function initializeLegacyActiveProductLocks(
+  ctx: MutationCtx,
+  scope: ShopScope,
+) {
+  const legacyJobs = await legacyActiveJobsWithoutProductLocks(ctx, scope);
+  for (const job of legacyJobs) await acquireProductLocks(ctx, job);
+  return legacyJobs.length;
+}
+
+async function mediaLeaseShopDomain(
+  ctx: JobReadCtx,
+  job: Doc<"bulkTransformJobs">,
+) {
+  if (!job.shopId) {
+    const legacyDomain = envShopDomain();
+    if (!legacyDomain) {
+      throw new Error(
+        "The legacy Shopify shop domain is unavailable for media publication.",
+      );
+    }
+    return legacyDomain;
+  }
+  const shop = await ctx.db.get(job.shopId);
+  if (!shop) {
+    throw new Error("The Shopify shop for this bulk operation no longer exists.");
+  }
+  return normalizeShopDomain(shop.domain);
+}
+
+async function mediaLeaseForItem(
+  ctx: JobReadCtx,
+  job: Doc<"bulkTransformJobs">,
+  item: Doc<"bulkTransformItems">,
+) {
+  const shopDomain = await mediaLeaseShopDomain(ctx, job);
+  const lease = await ctx.db
+    .query("bulkTransformMediaLeases")
+    .withIndex("by_shop_domain_and_source_media_id", (q) =>
+      q
+        .eq("shopDomain", shopDomain)
+        .eq("sourceMediaId", item.sourceMediaId),
+    )
+    .unique();
+  return { lease, shopDomain };
+}
+
+async function ensureMediaProductReference(
+  ctx: MutationCtx,
+  args: {
+    shopDomain: string;
+    sourceMediaId: string;
+    productId: Id<"products">;
+    now: number;
+  },
+) {
+  const existing = await ctx.db
+    .query("bulkTransformMediaProductReferences")
+    .withIndex(
+      "by_shop_domain_and_source_media_id_and_product_id",
+      (q) =>
+        q
+          .eq("shopDomain", args.shopDomain)
+          .eq("sourceMediaId", args.sourceMediaId)
+          .eq("productId", args.productId),
+    )
+    .unique();
+  if (existing) {
+    await ctx.db.patch(existing._id, { updatedAt: args.now });
+    return existing._id;
+  }
+  return await ctx.db.insert("bulkTransformMediaProductReferences", {
+    shopDomain: args.shopDomain,
+    sourceMediaId: args.sourceMediaId,
+    productId: args.productId,
+    createdAt: args.now,
+    updatedAt: args.now,
+  });
+}
+
+async function ownedMediaLease(
+  ctx: JobReadCtx,
+  job: Doc<"bulkTransformJobs">,
+  item: Doc<"bulkTransformItems">,
+  leaseToken: string,
+) {
+  if (
+    item.status !== "publishing" ||
+    item.publishLeaseToken !== leaseToken ||
+    job.status !== "publishing"
+  ) {
+    return null;
+  }
+  const { lease } = await mediaLeaseForItem(ctx, job, item);
+  if (
+    !lease ||
+    lease.jobId !== job._id ||
+    lease.itemId !== item._id ||
+    lease.leaseToken !== leaseToken
+  ) {
+    return null;
+  }
+  return lease;
 }
 
 async function latestActiveJobForShop(
@@ -190,6 +453,7 @@ export const publish = action({
     await requireWriteFilesScope(credentials);
     await ctx.runMutation(internal.bulkTransforms.startPublishing, {
       jobId: job._id,
+      userId,
     });
     return job._id;
   },
@@ -233,6 +497,25 @@ export const latestUndismissed = query({
   },
 });
 
+export const productLocks = query({
+  args: { productIds: v.array(v.id("products")) },
+  handler: async (ctx, args) => {
+    const userId = await requireUserId(ctx);
+    const productIds = Array.from(new Set(args.productIds));
+    if (productIds.length > PRODUCT_LOCK_QUERY_MAX_SIZE) {
+      throw new Error(
+        `Product lock status can be requested for at most ${PRODUCT_LOCK_QUERY_MAX_SIZE} products.`,
+      );
+    }
+    const scope = await getActiveShopScope(ctx, userId);
+    const locks = await activeProductLocksForIds(ctx, scope, productIds);
+    return productIds.flatMap((productId) => {
+      const lock = locks.get(productId);
+      return lock ? [lock] : [];
+    });
+  },
+});
+
 export const selectionOptions = query({
   args: { productIds: v.array(v.id("products")) },
   handler: async (ctx, args) => {
@@ -247,6 +530,7 @@ export const selectionOptions = query({
       return {
         productCount: 0,
         unavailableProductCount: 0,
+        lockedProducts: [],
         positions: [],
       };
     }
@@ -256,6 +540,24 @@ export const selectionOptions = query({
       (product): product is Doc<"products"> =>
         Boolean(product && shopMatchesScope(product, scope)),
     );
+    const productLocks = await activeProductLocksForIds(
+      ctx,
+      scope,
+      availableProducts.map((product) => product._id),
+    );
+    const lockedProducts = availableProducts.flatMap((product) => {
+      const lock = productLocks.get(product._id);
+      return lock
+        ? [
+            {
+              productId: product._id,
+              productTitle: product.title,
+              jobId: lock.jobId,
+              status: lock.status,
+            },
+          ]
+        : [];
+    });
     const positions = new Map<
       number,
       {
@@ -291,6 +593,7 @@ export const selectionOptions = query({
     return {
       productCount: productIds.length,
       unavailableProductCount: productIds.length - availableProducts.length,
+      lockedProducts,
       snapshotToken: bulkTransformSelectionSnapshot(availableProducts),
       positions: Array.from(positions.values()).sort(
         (a, b) => a.position - b.position,
@@ -584,7 +887,8 @@ export const prepareRetry = internalMutation({
       throw new Error("The bulk retry state changed. Reload and try again.");
     }
     const scope = await getActiveShopScope(ctx, args.userId);
-    await assertNoOtherActiveJob(ctx, scope, job._id);
+    await initializeLegacyActiveProductLocks(ctx, scope);
+    await acquireProductLocks(ctx, job);
     const now = Date.now();
     await ctx.db.patch(job._id, {
       status: phase === "publish" ? "publishing" : "transforming",
@@ -638,6 +942,7 @@ export const cancel = mutation({
       error: null,
       updatedAt: now,
     });
+    await releaseProductLocks(ctx, job._id);
     return job._id;
   },
 });
@@ -679,7 +984,6 @@ export const createJob = internalMutation({
 
     const shop = await ensureActiveShop(ctx, args.userId);
     const scope = await getActiveShopScope(ctx, args.userId);
-    await assertNoOtherActiveJob(ctx, scope);
 
     const products = await Promise.all(productIds.map((id) => ctx.db.get(id)));
     if (products.some((product) => !product)) {
@@ -728,6 +1032,7 @@ export const createJob = internalMutation({
       ),
     );
     const now = Date.now();
+    await initializeLegacyActiveProductLocks(ctx, scope);
     const jobId = await ctx.db.insert("bulkTransformJobs", {
       shopId: shop._id,
       createdByUserId: args.userId,
@@ -752,6 +1057,9 @@ export const createJob = internalMutation({
       createdAt: now,
       updatedAt: now,
     });
+    const job = await ctx.db.get(jobId);
+    if (!job) throw new Error("Bulk transform job could not be created.");
+    await acquireProductLocks(ctx, job);
     await ctx.scheduler.runAfter(
       0,
       internal.bulkTransformsNode.seedNextProduct,
@@ -815,6 +1123,9 @@ async function advanceSeedCursor(
       : {}),
     updatedAt: now,
   });
+  if (finishedSeeding && seededItems === 0) {
+    await releaseProductLocks(ctx, job._id);
+  }
   if (!finishedSeeding) {
     await ctx.scheduler.runAfter(
       0,
@@ -855,7 +1166,18 @@ export const storeSeededProduct = internalMutation({
     if (!productId) return null;
     let inserted = 0;
     const now = Date.now();
+    const shopDomain = job.shopId
+      ? await mediaLeaseShopDomain(ctx, job)
+      : envShopDomain();
     for (const image of args.images) {
+      if (shopDomain) {
+        await ensureMediaProductReference(ctx, {
+          shopDomain,
+          sourceMediaId: image.mediaId,
+          productId,
+          now,
+        });
+      }
       const existing = await ctx.db
         .query("bulkTransformItems")
         .withIndex("by_job_and_source_media_id", (q) =>
@@ -1060,6 +1382,9 @@ async function finishTransform(
       : {}),
     updatedAt: now,
   });
+  if (done && transformedItems === 0) {
+    await releaseProductLocks(ctx, job._id);
+  }
   if (!done) {
     await ctx.scheduler.runAfter(0, internal.bulkTransformsNode.transformNext, {
       jobId: job._id,
@@ -1092,9 +1417,12 @@ export const markTransformSkipped = internalMutation({
 });
 
 export const startPublishing = internalMutation({
-  args: { jobId: v.id("bulkTransformJobs") },
+  args: {
+    jobId: v.id("bulkTransformJobs"),
+    userId: v.id("users"),
+  },
   handler: async (ctx, args) => {
-    const job = await ctx.db.get(args.jobId);
+    const job = await jobForUser(ctx, args.jobId, args.userId);
     if (!job) throw new Error("Bulk transform job not found.");
     if (job.status !== "ready" && job.status !== "partial") {
       throw new Error("This bulk operation is not ready to publish.");
@@ -1106,6 +1434,9 @@ export const startPublishing = internalMutation({
       )
       .first();
     if (!next) throw new Error("No transformed images are ready to publish.");
+    const scope = await getActiveShopScope(ctx, args.userId);
+    await initializeLegacyActiveProductLocks(ctx, scope);
+    await acquireProductLocks(ctx, job);
     const now = Date.now();
     await ctx.db.patch(job._id, {
       status: "publishing",
@@ -1135,12 +1466,48 @@ export const claimNextPublish = internalMutation({
       .first();
     if (!item) return null;
     const now = Date.now();
+    const { lease: existingLease, shopDomain } = await mediaLeaseForItem(
+      ctx,
+      job,
+      item,
+    );
+    const resumingOwnedLease = Boolean(
+      existingLease &&
+        existingLease.jobId === job._id &&
+        existingLease.itemId === item._id,
+    );
+    if (
+      existingLease &&
+      !resumingOwnedLease &&
+      existingLease.expiresAt > now
+    ) {
+      await ctx.db.patch(job._id, { updatedAt: now });
+      await ctx.scheduler.runAfter(
+        PUBLISH_MEDIA_LEASE_RETRY_MS,
+        internal.bulkTransformsNode.publishNext,
+        { jobId: job._id },
+      );
+      return null;
+    }
+    if (existingLease) await ctx.db.delete(existingLease._id);
     const publishAttempts = item.publishAttempts + 1;
+    const publishLeaseToken = `${item._id}:${publishAttempts}:${now}`;
+    await ctx.db.insert("bulkTransformMediaLeases", {
+      shopDomain,
+      sourceMediaId: item.sourceMediaId,
+      jobId: job._id,
+      itemId: item._id,
+      leaseToken: publishLeaseToken,
+      expiresAt: now + PUBLISH_MEDIA_LEASE_MS,
+      createdAt: now,
+      updatedAt: now,
+    });
     await ctx.db.patch(item._id, {
       status: "publishing",
       processingStartedAt: now,
       attempts: item.attempts + 1,
       publishAttempts,
+      publishLeaseToken,
       error: null,
       updatedAt: now,
     });
@@ -1150,6 +1517,7 @@ export const claimNextPublish = internalMutation({
       status: "publishing" as const,
       attempts: item.attempts + 1,
       publishAttempts,
+      publishLeaseToken,
     };
   },
 });
@@ -1166,31 +1534,75 @@ export const getProcessingContext = internalQuery({
 });
 
 export const markFileUpdateAccepted = internalMutation({
-  args: { itemId: v.id("bulkTransformItems") },
+  args: {
+    itemId: v.id("bulkTransformItems"),
+    leaseToken: v.string(),
+  },
   handler: async (ctx, args) => {
     const item = await ctx.db.get(args.itemId);
-    if (!item || item.status !== "publishing") return null;
+    if (!item) return null;
     const job = await ctx.db.get(item.jobId);
-    if (!job || job.status !== "publishing") return null;
+    if (!job) return null;
+    const lease = await ownedMediaLease(ctx, job, item, args.leaseToken);
+    if (!lease) return null;
     const now = Date.now();
     await ctx.db.patch(item._id, {
       fileUpdateAcceptedAt: now,
       updatedAt: now,
     });
+    await ctx.db.patch(lease._id, {
+      expiresAt: now + PUBLISH_MEDIA_LEASE_MS,
+      updatedAt: now,
+    });
+    await ctx.db.patch(job._id, { updatedAt: now });
     return now;
   },
 });
 
 export const clearFileUpdateAccepted = internalMutation({
-  args: { itemId: v.id("bulkTransformItems") },
+  args: {
+    itemId: v.id("bulkTransformItems"),
+    leaseToken: v.string(),
+  },
   handler: async (ctx, args) => {
     const item = await ctx.db.get(args.itemId);
     if (!item || !item.fileUpdateAcceptedAt) return null;
+    const job = await ctx.db.get(item.jobId);
+    if (!job) return null;
+    const lease = await ownedMediaLease(ctx, job, item, args.leaseToken);
+    if (!lease) return null;
+    const now = Date.now();
     await ctx.db.patch(item._id, {
       fileUpdateAcceptedAt: undefined,
-      updatedAt: Date.now(),
+      updatedAt: now,
     });
+    await ctx.db.patch(lease._id, {
+      expiresAt: now + PUBLISH_MEDIA_LEASE_MS,
+      updatedAt: now,
+    });
+    await ctx.db.patch(job._id, { updatedAt: now });
     return item._id;
+  },
+});
+
+export const renewPublishMediaLease = internalMutation({
+  args: {
+    itemId: v.id("bulkTransformItems"),
+    leaseToken: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const item = await ctx.db.get(args.itemId);
+    if (!item) return null;
+    const job = await ctx.db.get(item.jobId);
+    if (!job) return null;
+    const lease = await ownedMediaLease(ctx, job, item, args.leaseToken);
+    if (!lease) return null;
+    const now = Date.now();
+    const expiresAt = now + PUBLISH_MEDIA_LEASE_MS;
+    await ctx.db.patch(lease._id, { expiresAt, updatedAt: now });
+    await ctx.db.patch(item._id, { updatedAt: now });
+    await ctx.db.patch(job._id, { updatedAt: now });
+    return expiresAt;
   },
 });
 
@@ -1198,35 +1610,108 @@ async function finishPublish(
   ctx: MutationCtx,
   args: {
     itemId: Id<"bulkTransformItems">;
+    leaseToken: string;
     publishedUrl?: string;
     error?: string;
     conflict?: boolean;
+    safeToRelease?: boolean;
+    resetAmbiguityWindow?: boolean;
   },
 ) {
   const item = await ctx.db.get(args.itemId);
-  if (!item || item.status !== "publishing") return null;
+  if (!item) return null;
   const job = await ctx.db.get(item.jobId);
-  if (!job || job.status !== "publishing") return null;
+  if (!job) return null;
+  const lease = await ownedMediaLease(ctx, job, item, args.leaseToken);
+  if (!lease) return null;
   const succeeded = Boolean(args.publishedUrl);
   const conflict = !succeeded && args.conflict === true;
+  const safeToRelease = succeeded || args.safeToRelease !== false;
+  const now = Date.now();
+  if (!safeToRelease) {
+    await ctx.db.patch(item._id, {
+      status: "ready",
+      publishLeaseToken: undefined,
+      publishRecoveryPending: true,
+      publishAmbiguousSince: args.resetAmbiguityWindow
+        ? now
+        : item.publishAmbiguousSince ?? now,
+      processingStartedAt: undefined,
+      error: args.error ?? null,
+      updatedAt: now,
+    });
+    await ctx.db.patch(lease._id, {
+      expiresAt: now + PUBLISH_MEDIA_LEASE_MS,
+      updatedAt: now,
+    });
+    await ctx.db.patch(job._id, {
+      error:
+        args.error ??
+        "Shopify is still resolving an earlier file update; publication recovery will retry.",
+      updatedAt: now,
+    });
+    await ctx.scheduler.runAfter(
+      PUBLISH_MEDIA_RECOVERY_RETRY_MS,
+      internal.bulkTransformsNode.publishNext,
+      { jobId: job._id },
+    );
+    return { done: false, recovering: true };
+  }
   const publishedItems = job.publishedItems + (succeeded ? 1 : 0);
   const publishFailedItems =
     job.publishFailedItems + (!succeeded && !conflict ? 1 : 0);
   const conflictItems = job.conflictItems + (conflict ? 1 : 0);
   const processed = publishedItems + publishFailedItems + conflictItems;
   const done = processed >= job.transformedItems;
-  const now = Date.now();
   await ctx.db.patch(item._id, {
     status: succeeded ? "published" : conflict ? "conflict" : "publish_failed",
     publishedUrl: args.publishedUrl ?? item.publishedUrl ?? null,
-    fileUpdateAcceptedAt:
-      succeeded || conflict ? undefined : item.fileUpdateAcceptedAt,
+    // Reaching a terminal item state means Shopify was proven stable. Any
+    // prior acceptance marker must be cleared so a later retry cannot
+    // acknowledge an update that this attempt no longer owns.
+    fileUpdateAcceptedAt: undefined,
+    publishLeaseToken: undefined,
+    publishRecoveryPending: undefined,
+    publishAmbiguousSince: undefined,
     processingStartedAt: undefined,
     error: args.error ?? null,
     updatedAt: now,
   });
 
   if (succeeded && args.publishedUrl) {
+    for (const productId of item.referencedProductIds) {
+      await ensureMediaProductReference(ctx, {
+        shopDomain: lease.shopDomain,
+        sourceMediaId: item.sourceMediaId,
+        productId,
+        now,
+      });
+    }
+    const publicationHead = await ctx.db
+      .query("bulkTransformMediaPublicationHeads")
+      .withIndex("by_shop_domain_and_source_media_id", (q) =>
+        q
+          .eq("shopDomain", lease.shopDomain)
+          .eq("sourceMediaId", item.sourceMediaId),
+      )
+      .unique();
+    if (publicationHead) {
+      await ctx.db.patch(publicationHead._id, {
+        jobId: job._id,
+        itemId: item._id,
+        publishedAt: now,
+        updatedAt: now,
+      });
+    } else {
+      await ctx.db.insert("bulkTransformMediaPublicationHeads", {
+        shopDomain: lease.shopDomain,
+        sourceMediaId: item.sourceMediaId,
+        jobId: job._id,
+        itemId: item._id,
+        publishedAt: now,
+        updatedAt: now,
+      });
+    }
     await ctx.scheduler.runAfter(
       0,
       internal.bulkTransforms.refreshPublishedProductCaches,
@@ -1257,6 +1742,8 @@ async function finishPublish(
       : {}),
     updatedAt: now,
   });
+  await ctx.db.delete(lease._id);
+  if (done) await releaseProductLocks(ctx, job._id);
   if (!done) {
     await ctx.scheduler.runAfter(0, internal.bulkTransformsNode.publishNext, {
       jobId: job._id,
@@ -1266,7 +1753,11 @@ async function finishPublish(
 }
 
 export const markPublished = internalMutation({
-  args: { itemId: v.id("bulkTransformItems"), publishedUrl: v.string() },
+  args: {
+    itemId: v.id("bulkTransformItems"),
+    leaseToken: v.string(),
+    publishedUrl: v.string(),
+  },
   handler: async (ctx, args) => await finishPublish(ctx, args),
 });
 
@@ -1274,6 +1765,7 @@ export const refreshPublishedProductCaches = internalMutation({
   args: {
     itemId: v.id("bulkTransformItems"),
     nextProductIndex: v.number(),
+    referenceCursor: v.optional(v.union(v.string(), v.null())),
   },
   handler: async (ctx, args) => {
     if (!Number.isInteger(args.nextProductIndex) || args.nextProductIndex < 0) {
@@ -1283,14 +1775,43 @@ export const refreshPublishedProductCaches = internalMutation({
     if (!item || item.status !== "published" || !item.publishedUrl) {
       return null;
     }
-    const endIndex = Math.min(
+    const job = await ctx.db.get(item.jobId);
+    if (!job) return null;
+    const shopDomain = await mediaLeaseShopDomain(ctx, job);
+    const publicationHead = await ctx.db
+      .query("bulkTransformMediaPublicationHeads")
+      .withIndex("by_shop_domain_and_source_media_id", (q) =>
+        q
+          .eq("shopDomain", shopDomain)
+          .eq("sourceMediaId", item.sourceMediaId),
+      )
+      .unique();
+    if (!publicationHead || publicationHead.itemId !== item._id) {
+      return { updatedProducts: 0, done: true, nextProductIndex: null };
+    }
+    const referencePage = await ctx.db
+      .query("bulkTransformMediaProductReferences")
+      .withIndex("by_shop_domain_and_source_media_id", (q) =>
+        q
+          .eq("shopDomain", shopDomain)
+          .eq("sourceMediaId", item.sourceMediaId),
+      )
+      .paginate({
+        cursor: args.referenceCursor ?? null,
+        numItems: PUBLISHED_CACHE_UPDATE_BATCH_SIZE,
+      });
+    const useReferenceIndex =
+      args.referenceCursor !== undefined || referencePage.page.length > 0;
+    const legacyEndIndex = Math.min(
       item.referencedProductIds.length,
       args.nextProductIndex + PUBLISHED_CACHE_UPDATE_BATCH_SIZE,
     );
-    const productIds = item.referencedProductIds.slice(
-      args.nextProductIndex,
-      endIndex,
-    );
+    const productIds = useReferenceIndex
+      ? referencePage.page.map((reference) => reference.productId)
+      : item.referencedProductIds.slice(
+          args.nextProductIndex,
+          legacyEndIndex,
+        );
     const products = await Promise.all(
       productIds.map((productId) => ctx.db.get(productId)),
     );
@@ -1318,18 +1839,29 @@ export const refreshPublishedProductCaches = internalMutation({
       });
       updatedProducts += 1;
     }
-    const done = endIndex >= item.referencedProductIds.length;
+    const done = useReferenceIndex
+      ? referencePage.isDone
+      : legacyEndIndex >= item.referencedProductIds.length;
+    const nextProductIndex = done
+      ? null
+      : args.nextProductIndex + productIds.length;
     if (!done) {
       await ctx.scheduler.runAfter(
         0,
         internal.bulkTransforms.refreshPublishedProductCaches,
-        { itemId: item._id, nextProductIndex: endIndex },
+        {
+          itemId: item._id,
+          nextProductIndex: nextProductIndex!,
+          ...(useReferenceIndex
+            ? { referenceCursor: referencePage.continueCursor }
+            : {}),
+        },
       );
     }
     return {
       updatedProducts,
       done,
-      nextProductIndex: done ? null : endIndex,
+      nextProductIndex,
     };
   },
 });
@@ -1337,8 +1869,11 @@ export const refreshPublishedProductCaches = internalMutation({
 export const markPublishFailed = internalMutation({
   args: {
     itemId: v.id("bulkTransformItems"),
+    leaseToken: v.string(),
     error: v.string(),
     conflict: v.optional(v.boolean()),
+    safeToRelease: v.boolean(),
+    resetAmbiguityWindow: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => await finishPublish(ctx, args),
 });
@@ -1436,7 +1971,8 @@ export const resetFailures = internalMutation({
 export const resumeStaleJobs = internalMutation({
   args: {},
   handler: async (ctx) => {
-    const cutoff = Date.now() - STALE_PROCESSING_MS;
+    const now = Date.now();
+    const cutoff = now - STALE_PROCESSING_MS;
     const staleQueuedJobs = await ctx.db
       .query("bulkTransformJobs")
       .withIndex("by_status_and_updated_at", (q) =>
@@ -1472,6 +2008,7 @@ export const resumeStaleJobs = internalMutation({
       ...staleTransformJobs.map((job) => job._id),
       ...stalePublishJobs.map((job) => job._id),
     ]);
+    const protectedPublishJobIds = new Set<Id<"bulkTransformJobs">>();
     for (const item of staleTransforms) {
       await ctx.db.patch(item._id, {
         status: "queued",
@@ -1481,23 +2018,51 @@ export const resumeStaleJobs = internalMutation({
       resumeJobIds.add(item.jobId);
     }
     for (const item of stalePublishes) {
+      const job = await ctx.db.get(item.jobId);
+      if (job && item.publishLeaseToken) {
+        const { lease } = await mediaLeaseForItem(ctx, job, item);
+        const ownsLease = Boolean(
+          lease &&
+            lease.jobId === job._id &&
+            lease.itemId === item._id &&
+            lease.leaseToken === item.publishLeaseToken,
+        );
+        if (ownsLease && lease!.expiresAt > now) {
+          protectedPublishJobIds.add(job._id);
+          continue;
+        }
+        if (ownsLease) await ctx.db.delete(lease!._id);
+      }
       await ctx.db.patch(item._id, {
         status: "ready",
+        publishLeaseToken: undefined,
         processingStartedAt: undefined,
-        updatedAt: Date.now(),
+        updatedAt: now,
       });
       resumeJobIds.add(item.jobId);
     }
-    const now = Date.now();
+    for (const jobId of protectedPublishJobIds) resumeJobIds.delete(jobId);
     let resumedSeeding = 0;
     let resumedTransforms = 0;
     let resumedPublishes = 0;
     let resumedResets = 0;
+    let deferredLegacyProductLocks = 0;
+    let remainingLegacyProductLockBudget =
+      LEGACY_PRODUCT_LOCK_RESUME_BUDGET;
     for (const jobId of resumeJobIds) {
       const job = await ctx.db.get(jobId);
       if (!job) continue;
       const task = bulkTransformResumeTask(job);
       if (!task) continue;
+      if (!job.productLocksInitializedAt) {
+        const requiredLocks = new Set(job.productIds).size;
+        if (requiredLocks > remainingLegacyProductLockBudget) {
+          deferredLegacyProductLocks += 1;
+          continue;
+        }
+        await acquireProductLocks(ctx, job);
+        remainingLegacyProductLockBudget -= requiredLocks;
+      }
       await ctx.db.patch(job._id, { updatedAt: now });
       if (task.kind === "reset") {
         resumedResets += 1;
@@ -1533,6 +2098,7 @@ export const resumeStaleJobs = internalMutation({
       resumedTransforms,
       resumedPublishes,
       resumedResets,
+      deferredLegacyProductLocks,
     };
   },
 });

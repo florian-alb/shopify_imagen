@@ -36,6 +36,12 @@ export type BulkTransformDetails = {
 export type BulkTransformSelectionOptions = {
   productCount: number;
   unavailableProductCount: number;
+  lockedProducts: Array<{
+    productId: Id<"products">;
+    productTitle: string;
+    jobId: Id<"bulkTransformJobs">;
+    status: Doc<"bulkTransformJobs">["status"];
+  }>;
   snapshotToken?: string;
   positions: Array<{
     position: number;
@@ -104,9 +110,6 @@ export function useBulkImageTransform({
     availableImagePositions,
     imagePositionSelection,
   );
-  const hasActiveJob = Boolean(
-    latest && !bulkTransformIsTerminal(latest.status),
-  );
   const busy = starting || publishing || retrying || dismissing || cancelling;
 
   function acquireCommand() {
@@ -120,24 +123,11 @@ export function useBulkImageTransform({
   }
 
   function openNew() {
-    if (commandLockRef.current || latest === undefined) return;
+    if (commandLockRef.current) return;
     setCommandError(null);
     setImagePositionSelection(null);
-    if (hasActiveJob) {
-      setNewFlow(false);
-      setJobId(latest?._id ?? null);
-    } else {
-      setNewFlow(true);
-      setJobId(null);
-    }
-    setOpen(true);
-  }
-
-  function openLatest() {
-    if (!latest || commandLockRef.current) return;
-    setCommandError(null);
-    setNewFlow(false);
-    setJobId(latest._id);
+    setNewFlow(true);
+    setJobId(null);
     setOpen(true);
   }
 
@@ -171,9 +161,9 @@ export function useBulkImageTransform({
   async function start() {
     if (
       !selectedProductIds.length ||
-      latest === undefined ||
       selectionOptions === undefined ||
       selectionOptions.unavailableProductCount > 0 ||
+      selectionOptions.lockedProducts.length > 0 ||
       !selectionOptions.snapshotToken ||
       !selectedImagePositions.length ||
       !acquireCommand()
@@ -414,9 +404,7 @@ export function useBulkImageTransform({
     busy,
     dismissing,
     dismissConfirmOpen,
-    hasActiveJob,
     hasTrackedJob: Boolean(latest),
-    latestLoading: latest === undefined,
     selectedProductCount: selectedProductIds.length,
     isNewFlow: newFlow,
     open,
@@ -427,7 +415,6 @@ export function useBulkImageTransform({
     cancel,
     close,
     dismiss,
-    openLatest,
     openJob,
     openNew,
     publish,

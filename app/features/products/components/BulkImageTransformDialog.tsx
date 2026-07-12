@@ -162,6 +162,26 @@ export function BulkImageTransformDialog({
                     </AlertDescription>
                   </Alert>
                 ) : null}
+                {selectionOptions?.lockedProducts.length ? (
+                  <Alert variant="destructive">
+                    <AlertTriangle />
+                    <AlertTitle>Produits déjà engagés dans un bulk</AlertTitle>
+                    <AlertDescription>
+                      {selectionOptions.lockedProducts.length} produit
+                      {selectionOptions.lockedProducts.length === 1
+                        ? " est déjà réservé"
+                        : "s sont déjà réservés"}{" "}
+                      par un bulk non terminé :{" "}
+                      {selectionOptions.lockedProducts
+                        .slice(0, 3)
+                        .map((product) => product.productTitle)
+                        .join(", ")}
+                      {selectionOptions.lockedProducts.length > 3 ? "…" : ""}.
+                      Termine ou abandonne ces bulks, ou retire ces produits de
+                      la sélection.
+                    </AlertDescription>
+                  </Alert>
+                ) : null}
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <h3 id="bulk-image-positions" className="font-medium">
@@ -497,6 +517,7 @@ export function BulkImageTransformDialog({
                 selectionTooLarge ||
                 selectionOptionsLoading ||
                 Boolean(selectionOptions?.unavailableProductCount) ||
+                Boolean(selectionOptions?.lockedProducts.length) ||
                 !selectedImagePositions.length ||
                 busy
               }

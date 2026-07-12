@@ -30,6 +30,12 @@ export type ProductListItem = {
   pendingReviewCount?: number;
 };
 
+export type BulkProductLock = {
+  productId: Doc<"products">["_id"];
+  jobId: Doc<"bulkTransformJobs">["_id"];
+  status: Doc<"bulkTransformJobs">["status"];
+};
+
 export type ProductFacets = {
   productTypes: string[];
   shopifyStatuses: string[];

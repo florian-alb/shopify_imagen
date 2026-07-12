@@ -429,6 +429,7 @@ export default defineSchema({
     productIds: v.array(v.id("products")),
     selectedImagePositions: v.optional(v.array(v.number())),
     selectionProductHashes: v.optional(v.array(v.string())),
+    productLocksInitializedAt: v.optional(v.number()),
     seededProductCount: v.number(),
     seedAttempts: v.number(),
     seedFailedProducts: v.number(),
@@ -454,6 +455,11 @@ export default defineSchema({
     assetsCleanedAt: v.optional(v.number()),
   })
     .index("by_shop_and_status", ["shopId", "status"])
+    .index("by_shop_and_status_and_product_locks_initialized_at", [
+      "shopId",
+      "status",
+      "productLocksInitializedAt",
+    ])
     .index("by_shop_and_created_at", ["shopId", "createdAt"])
     .index("by_status_and_updated_at", ["status", "updatedAt"])
     .index("by_status_and_assets_cleaned_at_and_completed_at", [
@@ -470,6 +476,61 @@ export default defineSchema({
       "createdByUserId",
       "dismissedAt",
     ]),
+  bulkTransformProductLocks: defineTable({
+    shopId: v.optional(v.id("shops")),
+    productId: v.id("products"),
+    jobId: v.id("bulkTransformJobs"),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_product", ["productId"])
+    .index("by_job", ["jobId"]),
+  bulkTransformMediaLeases: defineTable({
+    shopDomain: v.string(),
+    sourceMediaId: v.string(),
+    jobId: v.id("bulkTransformJobs"),
+    itemId: v.id("bulkTransformItems"),
+    leaseToken: v.string(),
+    expiresAt: v.number(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_shop_domain_and_source_media_id", [
+      "shopDomain",
+      "sourceMediaId",
+    ])
+    .index("by_job", ["jobId"])
+    .index("by_item", ["itemId"]),
+  bulkTransformMediaPublicationHeads: defineTable({
+    shopDomain: v.string(),
+    sourceMediaId: v.string(),
+    jobId: v.id("bulkTransformJobs"),
+    itemId: v.id("bulkTransformItems"),
+    publishedAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_shop_domain_and_source_media_id", [
+      "shopDomain",
+      "sourceMediaId",
+    ])
+    .index("by_item", ["itemId"]),
+  bulkTransformMediaProductReferences: defineTable({
+    shopDomain: v.string(),
+    sourceMediaId: v.string(),
+    productId: v.id("products"),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_shop_domain_and_source_media_id", [
+      "shopDomain",
+      "sourceMediaId",
+    ])
+    .index("by_shop_domain_and_source_media_id_and_product_id", [
+      "shopDomain",
+      "sourceMediaId",
+      "productId",
+    ])
+    .index("by_product", ["productId"]),
   bulkTransformItems: defineTable({
     shopId: v.optional(v.id("shops")),
     jobId: v.id("bulkTransformJobs"),
@@ -489,6 +550,9 @@ export default defineSchema({
     error: v.optional(v.union(v.string(), v.null())),
     attempts: v.number(),
     publishAttempts: v.number(),
+    publishLeaseToken: v.optional(v.string()),
+    publishRecoveryPending: v.optional(v.boolean()),
+    publishAmbiguousSince: v.optional(v.number()),
     fileUpdateAcceptedAt: v.optional(v.number()),
     processingStartedAt: v.optional(v.number()),
     createdAt: v.number(),

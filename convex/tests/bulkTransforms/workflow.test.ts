@@ -11,9 +11,16 @@ const modules = import.meta.glob("../../**/*.ts");
 describe("bulk transform workflow counters", () => {
   test("finishes a publish conflict exactly once", async () => {
     const t = convexTest(schema, modules);
-    const { itemId, jobId } = await t.run(async (ctx) => {
+    const { itemId, jobId, leaseToken } = await t.run(async (ctx) => {
       const userId = await ctx.db.insert("users", {});
+      const shopId = await ctx.db.insert("shops", {
+        domain: "publish-conflict.myshopify.com",
+        createdByUserId: userId,
+        createdAt: 1,
+        updatedAt: 1,
+      });
       const productId = await ctx.db.insert("products", {
+        shopId,
         shopifyProductId: "gid://shopify/Product/1",
         title: "Produit",
         handle: "produit",
@@ -28,6 +35,7 @@ describe("bulk transform workflow counters", () => {
         updatedAt: 1,
       });
       const jobId = await ctx.db.insert("bulkTransformJobs", {
+        shopId,
         createdByUserId: userId,
         operation: "flip_horizontal",
         status: "publishing",
@@ -48,6 +56,7 @@ describe("bulk transform workflow counters", () => {
         updatedAt: 1,
       });
       const itemId = await ctx.db.insert("bulkTransformItems", {
+        shopId,
         jobId,
         productId,
         referencedProductIds: [productId],
@@ -58,16 +67,37 @@ describe("bulk transform workflow counters", () => {
         status: "publishing",
         attempts: 2,
         publishAttempts: 1,
+        publishLeaseToken: "lease-conflict-1",
         createdAt: 1,
         updatedAt: 1,
       });
-      return { itemId, jobId };
+      await ctx.db.insert("bulkTransformProductLocks", {
+        shopId,
+        productId,
+        jobId,
+        createdAt: 1,
+        updatedAt: 1,
+      });
+      const leaseToken = "lease-conflict-1";
+      await ctx.db.insert("bulkTransformMediaLeases", {
+        shopDomain: "publish-conflict.myshopify.com",
+        sourceMediaId: "gid://shopify/MediaImage/1",
+        jobId,
+        itemId,
+        leaseToken,
+        expiresAt: Date.now() + 60_000,
+        createdAt: 1,
+        updatedAt: 1,
+      });
+      return { itemId, jobId, leaseToken };
     });
 
     const args = {
       itemId,
+      leaseToken,
       error: "source changed",
       conflict: true,
+      safeToRelease: true,
     };
     await t.mutation(internal.bulkTransforms.markPublishFailed, args);
     await t.mutation(internal.bulkTransforms.markPublishFailed, args);
@@ -75,6 +105,14 @@ describe("bulk transform workflow counters", () => {
     const result = await t.run(async (ctx) => ({
       item: await ctx.db.get(itemId),
       job: await ctx.db.get(jobId),
+      lock: await ctx.db
+        .query("bulkTransformProductLocks")
+        .withIndex("by_job", (q) => q.eq("jobId", jobId))
+        .first(),
+      mediaLease: await ctx.db
+        .query("bulkTransformMediaLeases")
+        .withIndex("by_job", (q) => q.eq("jobId", jobId))
+        .first(),
     }));
     expect(result.item?.status).toBe("conflict");
     expect(result.job).toMatchObject({
@@ -82,6 +120,309 @@ describe("bulk transform workflow counters", () => {
       conflictItems: 1,
       publishFailedItems: 0,
       publishedItems: 0,
+    });
+    expect(result.lock).toBeNull();
+    expect(result.mediaLease).toBeNull();
+  });
+
+  test("keeps an ambiguous Shopify update leased until a fenced recovery", async () => {
+    const t = convexTest(schema, modules);
+    const { itemId, jobId, oldLeaseToken, productId } = await t.run(
+      async (ctx) => {
+        const userId = await ctx.db.insert("users", {});
+        const shopId = await ctx.db.insert("shops", {
+          domain: "ambiguous-publish.myshopify.com",
+          createdByUserId: userId,
+          createdAt: 1,
+          updatedAt: 1,
+        });
+        const productId = await ctx.db.insert("products", {
+          shopId,
+          shopifyProductId: "gid://shopify/Product/ambiguous",
+          title: "Produit ambigu",
+          handle: "produit-ambigu",
+          tags: [],
+          collections: [],
+          options: [],
+          variants: [],
+          metafields: [],
+          currentShopifyImages: [],
+          generationStatus: "not_started",
+          createdAt: 1,
+          updatedAt: 1,
+        });
+        const jobId = await ctx.db.insert("bulkTransformJobs", {
+          shopId,
+          createdByUserId: userId,
+          operation: "flip_horizontal",
+          status: "publishing",
+          productIds: [productId],
+          seededProductCount: 1,
+          seedAttempts: 0,
+          seedFailedProducts: 0,
+          seededItems: 1,
+          totalItems: 1,
+          transformedItems: 1,
+          transformFailedItems: 0,
+          publishedItems: 0,
+          publishFailedItems: 0,
+          conflictItems: 0,
+          skippedItems: 0,
+          unsupportedItems: 0,
+          createdAt: 1,
+          updatedAt: 1,
+        });
+        const oldLeaseToken = "ambiguous-attempt-1";
+        const itemId = await ctx.db.insert("bulkTransformItems", {
+          shopId,
+          jobId,
+          productId,
+          referencedProductIds: [productId],
+          operation: "flip_horizontal",
+          sourceMediaId: "gid://shopify/MediaImage/ambiguous",
+          sourceUrl: "https://cdn.shopify.com/ambiguous.jpg",
+          sourcePosition: 0,
+          status: "publishing",
+          attempts: 1,
+          publishAttempts: 1,
+          publishLeaseToken: oldLeaseToken,
+          fileUpdateAcceptedAt: 1,
+          createdAt: 1,
+          updatedAt: 1,
+        });
+        await ctx.db.insert("bulkTransformProductLocks", {
+          shopId,
+          productId,
+          jobId,
+          createdAt: 1,
+          updatedAt: 1,
+        });
+        await ctx.db.insert("bulkTransformMediaLeases", {
+          shopDomain: "ambiguous-publish.myshopify.com",
+          sourceMediaId: "gid://shopify/MediaImage/ambiguous",
+          jobId,
+          itemId,
+          leaseToken: oldLeaseToken,
+          expiresAt: Date.now() + 60_000,
+          createdAt: 1,
+          updatedAt: 1,
+        });
+        return { itemId, jobId, oldLeaseToken, productId };
+      },
+    );
+
+    await t.mutation(internal.bulkTransforms.markPublishFailed, {
+      itemId,
+      leaseToken: oldLeaseToken,
+      error: "Shopify is still processing the accepted update",
+      safeToRelease: false,
+    });
+    const recovering = await t.run(async (ctx) => ({
+      item: await ctx.db.get(itemId),
+      job: await ctx.db.get(jobId),
+      productLock: await ctx.db
+        .query("bulkTransformProductLocks")
+        .withIndex("by_product", (q) => q.eq("productId", productId))
+        .unique(),
+      mediaLease: await ctx.db
+        .query("bulkTransformMediaLeases")
+        .withIndex("by_item", (q) => q.eq("itemId", itemId))
+        .unique(),
+    }));
+    expect(recovering.item).toMatchObject({
+      status: "ready",
+      publishRecoveryPending: true,
+      publishAmbiguousSince: expect.any(Number),
+      fileUpdateAcceptedAt: 1,
+    });
+    expect(recovering.item?.publishLeaseToken).toBeUndefined();
+    expect(recovering.job).toMatchObject({
+      status: "publishing",
+      publishedItems: 0,
+      publishFailedItems: 0,
+    });
+    expect(recovering.productLock?.jobId).toBe(jobId);
+    expect(recovering.mediaLease?.leaseToken).toBe(oldLeaseToken);
+
+    const recoveredAttempt = await t.mutation(
+      internal.bulkTransforms.claimNextPublish,
+      { jobId },
+    );
+    expect(recoveredAttempt?.publishLeaseToken).not.toBe(oldLeaseToken);
+    await t.mutation(internal.bulkTransforms.markPublishFailed, {
+      itemId,
+      leaseToken: oldLeaseToken,
+      error: "late callback",
+      conflict: true,
+      safeToRelease: true,
+    });
+    const afterLateCallback = await t.run(async (ctx) => ({
+      item: await ctx.db.get(itemId),
+      mediaLease: await ctx.db
+        .query("bulkTransformMediaLeases")
+        .withIndex("by_item", (q) => q.eq("itemId", itemId))
+        .unique(),
+    }));
+    expect(afterLateCallback.item?.status).toBe("publishing");
+    expect(afterLateCallback.mediaLease?.leaseToken).toBe(
+      recoveredAttempt!.publishLeaseToken,
+    );
+
+    await t.mutation(internal.bulkTransforms.markPublishFailed, {
+      itemId,
+      leaseToken: recoveredAttempt!.publishLeaseToken!,
+      error: "A conflicting source appeared before settlement",
+      conflict: true,
+      safeToRelease: false,
+    });
+    const unsettledConflict = await t.run(async (ctx) => ({
+      item: await ctx.db.get(itemId),
+      job: await ctx.db.get(jobId),
+      mediaLease: await ctx.db
+        .query("bulkTransformMediaLeases")
+        .withIndex("by_item", (q) => q.eq("itemId", itemId))
+        .unique(),
+    }));
+    expect(unsettledConflict.item?.status).toBe("ready");
+    expect(unsettledConflict.job?.conflictItems).toBe(0);
+    expect(unsettledConflict.mediaLease?.leaseToken).toBe(
+      recoveredAttempt!.publishLeaseToken,
+    );
+    const settledAttempt = await t.mutation(
+      internal.bulkTransforms.claimNextPublish,
+      { jobId },
+    );
+    await t.mutation(internal.bulkTransforms.markPublishFailed, {
+      itemId,
+      leaseToken: settledAttempt!.publishLeaseToken!,
+      error: "Shopify returned to a stable source",
+      safeToRelease: true,
+    });
+    const stableFailure = await t.run(async (ctx) => ({
+      item: await ctx.db.get(itemId),
+      mediaLease: await ctx.db
+        .query("bulkTransformMediaLeases")
+        .withIndex("by_item", (q) => q.eq("itemId", itemId))
+        .unique(),
+    }));
+    expect(stableFailure.item).toMatchObject({ status: "publish_failed" });
+    expect(stableFailure.item?.fileUpdateAcceptedAt).toBeUndefined();
+    expect(stableFailure.item?.publishAmbiguousSince).toBeUndefined();
+    expect(stableFailure.mediaLease).toBeNull();
+  });
+
+  test("ignores a late cache refresh after a newer media publication", async () => {
+    const t = convexTest(schema, modules);
+    const { firstItemId, secondItemId, productId } = await t.run(async (ctx) => {
+      const userId = await ctx.db.insert("users", {});
+      const shopId = await ctx.db.insert("shops", {
+        domain: "cache-fence.myshopify.com",
+        createdByUserId: userId,
+        createdAt: 1,
+        updatedAt: 1,
+      });
+      const sourceMediaId = "gid://shopify/MediaImage/cache-fence";
+      const productId = await ctx.db.insert("products", {
+        shopId,
+        shopifyProductId: "gid://shopify/Product/cache-fence",
+        title: "Produit cache fence",
+        handle: "produit-cache-fence",
+        tags: [],
+        collections: [],
+        options: [],
+        variants: [],
+        metafields: [],
+        currentShopifyImages: [
+          {
+            mediaId: sourceMediaId,
+            url: "https://cdn.shopify.com/original.jpg",
+          },
+        ],
+        generationStatus: "not_started",
+        createdAt: 1,
+        updatedAt: 1,
+      });
+      const jobFields = {
+        shopId,
+        createdByUserId: userId,
+        operation: "flip_horizontal" as const,
+        status: "completed" as const,
+        productIds: [productId],
+        seededProductCount: 1,
+        seedAttempts: 0,
+        seedFailedProducts: 0,
+        seededItems: 1,
+        totalItems: 1,
+        transformedItems: 1,
+        transformFailedItems: 0,
+        publishedItems: 1,
+        publishFailedItems: 0,
+        conflictItems: 0,
+        skippedItems: 0,
+        unsupportedItems: 0,
+        createdAt: 1,
+        updatedAt: 1,
+        completedAt: 1,
+      };
+      const firstJobId = await ctx.db.insert("bulkTransformJobs", jobFields);
+      const secondJobId = await ctx.db.insert("bulkTransformJobs", {
+        ...jobFields,
+        createdAt: 2,
+        updatedAt: 2,
+        completedAt: 2,
+      });
+      const itemFields = {
+        shopId,
+        productId,
+        referencedProductIds: [productId],
+        operation: "flip_horizontal" as const,
+        sourceMediaId,
+        sourceUrl: "https://cdn.shopify.com/original.jpg",
+        sourcePosition: 0,
+        status: "published" as const,
+        attempts: 1,
+        publishAttempts: 1,
+        createdAt: 1,
+        updatedAt: 1,
+      };
+      const firstItemId = await ctx.db.insert("bulkTransformItems", {
+        ...itemFields,
+        jobId: firstJobId,
+        transformedSha256: "first-sha",
+        publishedUrl: "https://cdn.shopify.com/first.jpg",
+      });
+      const secondItemId = await ctx.db.insert("bulkTransformItems", {
+        ...itemFields,
+        jobId: secondJobId,
+        transformedSha256: "second-sha",
+        publishedUrl: "https://cdn.shopify.com/second.jpg",
+        createdAt: 2,
+        updatedAt: 2,
+      });
+      await ctx.db.insert("bulkTransformMediaPublicationHeads", {
+        shopDomain: "cache-fence.myshopify.com",
+        sourceMediaId,
+        jobId: secondJobId,
+        itemId: secondItemId,
+        publishedAt: 2,
+        updatedAt: 2,
+      });
+      return { firstItemId, secondItemId, productId };
+    });
+
+    await t.mutation(internal.bulkTransforms.refreshPublishedProductCaches, {
+      itemId: secondItemId,
+      nextProductIndex: 0,
+    });
+    const lateRefresh = await t.mutation(
+      internal.bulkTransforms.refreshPublishedProductCaches,
+      { itemId: firstItemId, nextProductIndex: 0 },
+    );
+    const product = await t.run(async (ctx) => ctx.db.get(productId));
+    expect(lateRefresh).toMatchObject({ updatedProducts: 0, done: true });
+    expect(product?.currentShopifyImages[0]).toMatchObject({
+      url: "https://cdn.shopify.com/second.jpg",
+      displayUrl: expect.stringContaining("second-sha"),
     });
   });
 
@@ -303,7 +644,7 @@ describe("bulk transform workflow counters", () => {
     expect(result.failure?.error).toContain("predates safe image snapshots");
   });
 
-  test("does not revive an old job beside a newer active bulk", async () => {
+  test("does not retry a job whose products overlap another active bulk", async () => {
     const t = convexTest(schema, modules);
     const { oldJobId, userId } = await t.run(async (ctx) => {
       const userId = await ctx.db.insert("users", {
@@ -367,7 +708,194 @@ describe("bulk transform workflow counters", () => {
       t
         .withIdentity({ subject: userId })
         .action(api.bulkTransforms.retryFailures, { jobId: oldJobId }),
-    ).rejects.toThrow("Another bulk image operation is already active");
+    ).rejects.toThrow("1 selected product is already locked");
+  });
+
+  test("retries a job beside an active bulk on disjoint products", async () => {
+    const t = convexTest(schema, modules);
+    const { activeJobId, oldJobId, product1, product2, userId } = await t.run(
+      async (ctx) => {
+        const userId = await ctx.db.insert("users", {
+          approvalStatus: "approved",
+        });
+        const shopId = await ctx.db.insert("shops", {
+          domain: "disjoint-retry.myshopify.com",
+          createdByUserId: userId,
+          createdAt: 1,
+          updatedAt: 1,
+        });
+        await ctx.db.patch(userId, { activeShopId: shopId });
+        const product1 = await ctx.db.insert("products", {
+          shopId,
+          shopifyProductId: "gid://shopify/Product/disjoint-retry-1",
+          title: "Produit retry 1",
+          handle: "produit-retry-1",
+          tags: [],
+          collections: [],
+          options: [],
+          variants: [],
+          metafields: [],
+          currentShopifyImages: [],
+          generationStatus: "not_started",
+          createdAt: 1,
+          updatedAt: 1,
+        });
+        const product2 = await ctx.db.insert("products", {
+          shopId,
+          shopifyProductId: "gid://shopify/Product/disjoint-retry-2",
+          title: "Produit retry 2",
+          handle: "produit-retry-2",
+          tags: [],
+          collections: [],
+          options: [],
+          variants: [],
+          metafields: [],
+          currentShopifyImages: [],
+          generationStatus: "not_started",
+          createdAt: 1,
+          updatedAt: 1,
+        });
+        const base = {
+          shopId,
+          createdByUserId: userId,
+          operation: "flip_horizontal" as const,
+          seededProductCount: 1,
+          seedAttempts: 0,
+          seedFailedProducts: 0,
+          seededItems: 1,
+          totalItems: 1,
+          transformedItems: 0,
+          publishedItems: 0,
+          publishFailedItems: 0,
+          conflictItems: 0,
+          skippedItems: 0,
+          unsupportedItems: 0,
+          createdAt: 1,
+          updatedAt: 1,
+        };
+        const oldJobId = await ctx.db.insert("bulkTransformJobs", {
+          ...base,
+          status: "partial",
+          productIds: [product1],
+          transformFailedItems: 1,
+        });
+        const activeJobId = await ctx.db.insert("bulkTransformJobs", {
+          ...base,
+          status: "queued",
+          productIds: [product2],
+          transformFailedItems: 0,
+        });
+        return { activeJobId, oldJobId, product1, product2, userId };
+      },
+    );
+
+    await expect(
+      t
+        .withIdentity({ subject: userId })
+        .action(api.bulkTransforms.retryFailures, { jobId: oldJobId }),
+    ).resolves.toEqual({ phase: "transform" });
+
+    const result = await t.run(async (ctx) => ({
+      oldJob: await ctx.db.get(oldJobId),
+      firstLock: await ctx.db
+        .query("bulkTransformProductLocks")
+        .withIndex("by_product", (q) => q.eq("productId", product1))
+        .unique(),
+      secondLock: await ctx.db
+        .query("bulkTransformProductLocks")
+        .withIndex("by_product", (q) => q.eq("productId", product2))
+        .unique(),
+    }));
+    expect(result.oldJob?.status).toBe("transforming");
+    expect(result.firstLock?.jobId).toBe(oldJobId);
+    expect(result.secondLock?.jobId).toBe(activeJobId);
+  });
+
+  test("bounds legacy product-lock initialization across stale jobs", async () => {
+    const t = convexTest(schema, modules);
+    const jobIds = await t.run(async (ctx) => {
+      const userId = await ctx.db.insert("users", {});
+      const shopId = await ctx.db.insert("shops", {
+        domain: "stale-lock-budget.myshopify.com",
+        createdByUserId: userId,
+        createdAt: 1,
+        updatedAt: 1,
+      });
+      const jobs = [];
+      for (let jobIndex = 0; jobIndex < 3; jobIndex += 1) {
+        const productIds = [];
+        for (let productIndex = 0; productIndex < 201; productIndex += 1) {
+          const suffix = `${jobIndex}-${productIndex}`;
+          productIds.push(
+            await ctx.db.insert("products", {
+              shopId,
+              shopifyProductId: `gid://shopify/Product/stale-${suffix}`,
+              title: `Produit stale ${suffix}`,
+              handle: `produit-stale-${suffix}`,
+              tags: [],
+              collections: [],
+              options: [],
+              variants: [],
+              metafields: [],
+              currentShopifyImages: [],
+              generationStatus: "not_started",
+              createdAt: 1,
+              updatedAt: 1,
+            }),
+          );
+        }
+        jobs.push(
+          await ctx.db.insert("bulkTransformJobs", {
+            shopId,
+            createdByUserId: userId,
+            operation: "flip_horizontal",
+            status: "queued",
+            productIds,
+            seededProductCount: 0,
+            seedAttempts: 0,
+            seedFailedProducts: 0,
+            seededItems: 0,
+            totalItems: 0,
+            transformedItems: 0,
+            transformFailedItems: 0,
+            publishedItems: 0,
+            publishFailedItems: 0,
+            conflictItems: 0,
+            skippedItems: 0,
+            unsupportedItems: 0,
+            createdAt: 1,
+            updatedAt: 1,
+          }),
+        );
+      }
+      return jobs;
+    });
+
+    const firstPass = await t.mutation(
+      internal.bulkTransforms.resumeStaleJobs,
+      {},
+    );
+    expect(firstPass).toMatchObject({
+      resumedSeeding: 2,
+      deferredLegacyProductLocks: 1,
+    });
+    const afterFirstPass = await t.run(async (ctx) => ({
+      jobs: await Promise.all(jobIds.map((jobId) => ctx.db.get(jobId))),
+      locks: await ctx.db.query("bulkTransformProductLocks").take(1_000),
+    }));
+    expect(afterFirstPass.locks).toHaveLength(402);
+    expect(
+      afterFirstPass.jobs.filter((job) => job?.productLocksInitializedAt),
+    ).toHaveLength(2);
+
+    const secondPass = await t.mutation(
+      internal.bulkTransforms.resumeStaleJobs,
+      {},
+    );
+    expect(secondPass).toMatchObject({
+      resumedSeeding: 1,
+      deferredLegacyProductLocks: 0,
+    });
   });
 
   test("shows an older active bulk before a newer terminal result", async () => {
@@ -539,13 +1067,20 @@ describe("bulk transform workflow counters", () => {
 
   test("updates shared published media caches in bounded batches", async () => {
     const t = convexTest(schema, modules);
-    const { itemId, productIds } = await t.run(async (ctx) => {
+    const { itemId, productIds, referenceCursor } = await t.run(async (ctx) => {
       const userId = await ctx.db.insert("users", {
         approvalStatus: "approved",
+      });
+      const shopId = await ctx.db.insert("shops", {
+        domain: "shared-cache.myshopify.com",
+        createdByUserId: userId,
+        createdAt: 1,
+        updatedAt: 1,
       });
       const productIds = await Promise.all(
         Array.from({ length: 11 }, (_, index) =>
           ctx.db.insert("products", {
+            shopId,
             shopifyProductId: `gid://shopify/Product/cache-${index}`,
             title: `Produit cache ${index}`,
             handle: `produit-cache-${index}`,
@@ -568,6 +1103,7 @@ describe("bulk transform workflow counters", () => {
         ),
       );
       const jobId = await ctx.db.insert("bulkTransformJobs", {
+        shopId,
         createdByUserId: userId,
         operation: "flip_horizontal",
         status: "completed",
@@ -589,6 +1125,7 @@ describe("bulk transform workflow counters", () => {
         completedAt: 1,
       });
       const itemId = await ctx.db.insert("bulkTransformItems", {
+        shopId,
         jobId,
         productId: productIds[0],
         referencedProductIds: productIds,
@@ -604,12 +1141,41 @@ describe("bulk transform workflow counters", () => {
         createdAt: 1,
         updatedAt: 1,
       });
-      return { itemId, productIds };
+      await ctx.db.insert("bulkTransformMediaPublicationHeads", {
+        shopDomain: "shared-cache.myshopify.com",
+        sourceMediaId: "gid://shopify/MediaImage/shared-cache",
+        jobId,
+        itemId,
+        publishedAt: 1,
+        updatedAt: 1,
+      });
+      for (const productId of productIds) {
+        await ctx.db.insert("bulkTransformMediaProductReferences", {
+          shopDomain: "shared-cache.myshopify.com",
+          sourceMediaId: "gid://shopify/MediaImage/shared-cache",
+          productId,
+          createdAt: 1,
+          updatedAt: 1,
+        });
+      }
+      const referencePage = await ctx.db
+        .query("bulkTransformMediaProductReferences")
+        .withIndex("by_shop_domain_and_source_media_id", (q) =>
+          q
+            .eq("shopDomain", "shared-cache.myshopify.com")
+            .eq("sourceMediaId", "gid://shopify/MediaImage/shared-cache"),
+        )
+        .paginate({ cursor: null, numItems: 10 });
+      return {
+        itemId,
+        productIds,
+        referenceCursor: referencePage.continueCursor,
+      };
     });
 
     const firstBatch = await t.mutation(
       internal.bulkTransforms.refreshPublishedProductCaches,
-      { itemId, nextProductIndex: 0 },
+      { itemId, nextProductIndex: 0, referenceCursor: null },
     );
     expect(firstBatch).toEqual({
       updatedProducts: 10,
@@ -634,7 +1200,7 @@ describe("bulk transform workflow counters", () => {
 
     const finalBatch = await t.mutation(
       internal.bulkTransforms.refreshPublishedProductCaches,
-      { itemId, nextProductIndex: 10 },
+      { itemId, nextProductIndex: 10, referenceCursor },
     );
     expect(finalBatch).toEqual({
       updatedProducts: 1,

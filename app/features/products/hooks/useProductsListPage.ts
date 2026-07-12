@@ -9,7 +9,12 @@ import {
   type ProductSearch,
 } from "@/lib/productFilters";
 
-import type { ProductFacets, ProductListItem, ProductPageResult } from "../types";
+import type {
+  BulkProductLock,
+  ProductFacets,
+  ProductListItem,
+  ProductPageResult,
+} from "../types";
 import { useBulkImageTransform } from "./useBulkImageTransform";
 import { useImageTypeSelection } from "./useImageTypeSelection";
 
@@ -55,6 +60,22 @@ export function useProductsListPage(search: ProductSearch) {
     offset,
     limit: pageSize,
   }) as ProductPageResult | undefined;
+  const products = useMemo(() => productPage?.page ?? [], [productPage?.page]);
+  const visibleProductIds = useMemo(
+    () => products.map((product) => product._id),
+    [products],
+  );
+  const bulkProductLocks = useQuery(
+    api.bulkTransforms.productLocks,
+    visibleProductIds.length ? { productIds: visibleProductIds } : "skip",
+  ) as BulkProductLock[] | undefined;
+  const bulkLocksByProductId = useMemo(
+    () =>
+      new Map(
+        (bulkProductLocks ?? []).map((lock) => [lock.productId, lock] as const),
+      ),
+    [bulkProductLocks],
+  );
   const facets = useQuery(api.products.facets) as ProductFacets | undefined;
   const prompts = useQuery(api.prompts.list) as
     | Doc<"promptTemplates">[]
@@ -67,7 +88,6 @@ export function useProductsListPage(search: ProductSearch) {
     selectedProductIds,
   });
 
-  const products = useMemo(() => productPage?.page ?? [], [productPage?.page]);
   const imageTypes = useMemo(
     () => (prompts ?? []).filter((prompt) => prompt.isActive),
     [prompts],
@@ -183,6 +203,7 @@ export function useProductsListPage(search: ProductSearch) {
 
   return {
     allVisibleSelected,
+    bulkLocksByProductId,
     chooserOpen,
     creatingJob,
     facets,

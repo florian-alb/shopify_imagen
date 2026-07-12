@@ -12,6 +12,7 @@ import {
 } from "./bulkTransforms/image";
 import {
   BULK_TRANSFORM_ASSET_RETENTION_MS,
+  BULK_TRANSFORM_PUBLISH_AMBIGUITY_SETTLE_MS,
   bulkTransformCanCompletePublication,
   bulkTransformMediaIdFingerprint,
   bulkTransformOwnsFailedUpdate,
@@ -392,14 +393,49 @@ export const publishNext = internalAction({
       { jobId: args.jobId },
     )) as Doc<"bulkTransformItems"> | null;
     if (!item) return null;
+    const leaseToken = item.publishLeaseToken;
+    if (!leaseToken) {
+      throw new Error("Claimed bulk publication is missing its media lease token.");
+    }
     let conflict = false;
     let mutationAttempted = false;
+    let leaseProtectedMutationAttempted = false;
     let updateAcceptedByShopify = false;
     let fileUpdateAcceptedAt = item.fileUpdateAcceptedAt;
+    let safeToRelease = !item.publishRecoveryPending;
+    let recoverySourceRestored = false;
     let recoveryContext: {
       accessToken: string;
       credentials: ShopifyCredentials;
     } | null = null;
+    const renewMediaLease = async () => {
+      const renewed = await ctx.runMutation(
+        internal.bulkTransforms.renewPublishMediaLease,
+        { itemId: item._id, leaseToken },
+      );
+      if (!renewed) {
+        throw new SourceConflictError(
+          "This publication attempt lost its Shopify media lease.",
+        );
+      }
+      return renewed;
+    };
+    const acknowledgeOwnedFailedUpdate = async (
+      accessToken: string,
+      credentials: ShopifyCredentials,
+    ) => {
+      await renewMediaLease();
+      safeToRelease = false;
+      leaseProtectedMutationAttempted = true;
+      const restored = await acknowledgeFailedUpdate({
+        mediaId: item.sourceMediaId,
+        accessToken,
+        credentials,
+      });
+      recoverySourceRestored = true;
+      safeToRelease = true;
+      return restored;
+    };
     try {
       const context = (await ctx.runQuery(
         internal.bulkTransforms.getProcessingContext,
@@ -417,6 +453,7 @@ export const publishNext = internalAction({
         context.job,
       );
       recoveryContext = { credentials, accessToken };
+      await renewMediaLease();
       let media = await fetchMediaImage({
         mediaId: item.sourceMediaId,
         accessToken,
@@ -435,13 +472,10 @@ export const publishNext = internalAction({
             "The Shopify image is FAILED because of an update outside this bulk. It was not acknowledged or overwritten.",
           );
         }
-        await acknowledgeFailedUpdate({
-          mediaId: item.sourceMediaId,
-          accessToken,
-          credentials,
-        });
+        await acknowledgeOwnedFailedUpdate(accessToken, credentials);
         await ctx.runMutation(internal.bulkTransforms.clearFileUpdateAccepted, {
           itemId: item._id,
+          leaseToken,
         });
         fileUpdateAcceptedAt = undefined;
         media = await fetchMediaImage({
@@ -462,6 +496,30 @@ export const publishNext = internalAction({
         transformedSha256: item.transformedSha256,
       });
 
+      if (item.publishRecoveryPending && sourceState !== "transformed") {
+        const settlementElapsed = Boolean(
+          item.publishAmbiguousSince &&
+            Date.now() - item.publishAmbiguousSince >=
+              BULK_TRANSFORM_PUBLISH_AMBIGUITY_SETTLE_MS,
+        );
+        if (!recoverySourceRestored && !settlementElapsed) {
+          safeToRelease = false;
+          throw new Error(
+            "Shopify is still settling an earlier ambiguous file update.",
+          );
+        }
+        safeToRelease = true;
+        if (sourceState === "conflict") {
+          conflict = true;
+          throw new SourceConflictError(
+            "The Shopify image changed while an earlier update was settling. It was not overwritten again.",
+          );
+        }
+        throw new Error(
+          "The earlier Shopify update did not apply after the settlement window.",
+        );
+      }
+
       if (sourceState === "transformed") {
         if (
           !bulkTransformCanCompletePublication({
@@ -471,6 +529,7 @@ export const publishNext = internalAction({
           })
         ) {
           try {
+            await renewMediaLease();
             media = await waitForUpdatedImage({
               mediaId: item.sourceMediaId,
               transformedSha256: item.transformedSha256,
@@ -491,14 +550,10 @@ export const publishNext = internalAction({
                 );
               }
               try {
-                await acknowledgeFailedUpdate({
-                  mediaId: item.sourceMediaId,
-                  accessToken,
-                  credentials,
-                });
+                await acknowledgeOwnedFailedUpdate(accessToken, credentials);
                 await ctx.runMutation(
                   internal.bulkTransforms.clearFileUpdateAccepted,
-                  { itemId: item._id },
+                  { itemId: item._id, leaseToken },
                 );
                 fileUpdateAcceptedAt = undefined;
               } catch (acknowledgeError) {
@@ -513,11 +568,13 @@ export const publishNext = internalAction({
         }
         await ctx.runMutation(internal.bulkTransforms.markPublished, {
           itemId: item._id,
+          leaseToken,
           publishedUrl: media.image?.url ?? item.sourceUrl,
         });
         return null;
       }
       if (sourceState === "conflict") {
+        safeToRelease = true;
         conflict = true;
         throw new SourceConflictError(
           "The Shopify image changed after the preview was prepared. It was not overwritten.",
@@ -527,7 +584,11 @@ export const publishNext = internalAction({
         throw new Error("The Shopify image is not READY for replacement.");
       }
 
+      safeToRelease = true;
+      await renewMediaLease();
       mutationAttempted = true;
+      leaseProtectedMutationAttempted = true;
+      safeToRelease = false;
       const updated = await shopifyGraphql<{
         fileUpdate: {
           files: Array<{ id: string; fileStatus: string }> | null;
@@ -558,7 +619,7 @@ export const publishNext = internalAction({
       updateAcceptedByShopify = true;
       const acceptedAt = await ctx.runMutation(
         internal.bulkTransforms.markFileUpdateAccepted,
-        { itemId: item._id },
+        { itemId: item._id, leaseToken },
       );
       if (!acceptedAt) {
         throw new Error(
@@ -568,6 +629,7 @@ export const publishNext = internalAction({
       fileUpdateAcceptedAt = acceptedAt;
       let verified: MediaImageNode;
       try {
+        await renewMediaLease();
         verified = await waitForUpdatedImage({
           mediaId: item.sourceMediaId,
           transformedSha256: item.transformedSha256,
@@ -577,14 +639,10 @@ export const publishNext = internalAction({
       } catch (error) {
         if (error instanceof ShopifyFileUpdateFailedError) {
           try {
-            await acknowledgeFailedUpdate({
-              mediaId: item.sourceMediaId,
-              accessToken,
-              credentials,
-            });
+            await acknowledgeOwnedFailedUpdate(accessToken, credentials);
             await ctx.runMutation(
               internal.bulkTransforms.clearFileUpdateAccepted,
-              { itemId: item._id },
+              { itemId: item._id, leaseToken },
             );
             fileUpdateAcceptedAt = undefined;
           } catch (acknowledgeError) {
@@ -598,19 +656,20 @@ export const publishNext = internalAction({
       }
       await ctx.runMutation(internal.bulkTransforms.markPublished, {
         itemId: item._id,
+        leaseToken,
         publishedUrl: verified.image?.url ?? item.sourceUrl,
       });
     } catch (error) {
       let finalError = error;
       if (
         mutationAttempted &&
-        (!updateAcceptedByShopify || !fileUpdateAcceptedAt) &&
         recoveryContext &&
         item.sourceSha256 &&
         item.transformedSha256
       ) {
         const { accessToken, credentials } = recoveryContext;
         try {
+          await renewMediaLease();
           let media = await fetchMediaImage({
             mediaId: item.sourceMediaId,
             accessToken,
@@ -636,7 +695,7 @@ export const publishNext = internalAction({
             if (!fileUpdateAcceptedAt) {
               const recoveredAcceptedAt = await ctx.runMutation(
                 internal.bulkTransforms.markFileUpdateAccepted,
-                { itemId: item._id },
+                { itemId: item._id, leaseToken },
               );
               if (!recoveredAcceptedAt) {
                 throw errorWithCause(
@@ -646,21 +705,20 @@ export const publishNext = internalAction({
               }
               fileUpdateAcceptedAt = recoveredAcceptedAt;
             }
-            media = await acknowledgeFailedUpdate({
-              mediaId: item.sourceMediaId,
+            media = await acknowledgeOwnedFailedUpdate(
               accessToken,
               credentials,
-            });
+            );
             await ctx.runMutation(
               internal.bulkTransforms.clearFileUpdateAccepted,
-              { itemId: item._id },
+              { itemId: item._id, leaseToken },
             );
             fileUpdateAcceptedAt = undefined;
           } else if (media.fileStatus !== "READY" || media.status !== "READY") {
             if (updateAcceptedByShopify && !fileUpdateAcceptedAt) {
               const recoveredAcceptedAt = await ctx.runMutation(
                 internal.bulkTransforms.markFileUpdateAccepted,
-                { itemId: item._id },
+                { itemId: item._id, leaseToken },
               );
               if (!recoveredAcceptedAt) {
                 throw errorWithCause(
@@ -670,6 +728,7 @@ export const publishNext = internalAction({
               }
               fileUpdateAcceptedAt = recoveredAcceptedAt;
             }
+            await renewMediaLease();
             media = await waitForUpdatedImage({
               mediaId: item.sourceMediaId,
               transformedSha256: item.transformedSha256,
@@ -688,19 +747,38 @@ export const publishNext = internalAction({
             if (recoveredState === "transformed") {
               await ctx.runMutation(internal.bulkTransforms.markPublished, {
                 itemId: item._id,
+                leaseToken,
                 publishedUrl: media.image?.url ?? item.sourceUrl,
               });
               return null;
             }
-            if (recoveredState === "conflict") {
-              conflict = true;
-              finalError = new SourceConflictError(
-                "The Shopify image changed while an ambiguous update was being recovered. It was not overwritten again.",
+            const ambiguitySettled =
+              recoverySourceRestored ||
+              Boolean(
+                item.publishAmbiguousSince &&
+                  Date.now() - item.publishAmbiguousSince >=
+                    BULK_TRANSFORM_PUBLISH_AMBIGUITY_SETTLE_MS,
               );
+            if (recoveredState === "conflict") {
+              safeToRelease = ambiguitySettled;
+              conflict = ambiguitySettled;
+              finalError = ambiguitySettled
+                ? new SourceConflictError(
+                    "The Shopify image changed while an ambiguous update was being recovered. It was not overwritten again.",
+                  )
+                : new Error(
+                    "Shopify is still settling an earlier ambiguous file update.",
+                  );
+            } else {
+              // A single read of the old source does not prove that an
+              // ambiguous Shopify mutation was rejected. Keep the lease until
+              // the full settlement window has elapsed without a later state.
+              safeToRelease = ambiguitySettled;
             }
           }
         } catch (recoveryError) {
           if (recoveryError instanceof SourceConflictError) {
+            safeToRelease = true;
             conflict = true;
             finalError = recoveryError;
           } else if (recoveryError instanceof ShopifyFileUpdateFailedError) {
@@ -716,16 +794,13 @@ export const publishNext = internalAction({
               );
             } else {
               try {
-                await acknowledgeFailedUpdate({
-                  mediaId: item.sourceMediaId,
-                  accessToken,
-                  credentials,
-                });
+                await acknowledgeOwnedFailedUpdate(accessToken, credentials);
                 await ctx.runMutation(
                   internal.bulkTransforms.clearFileUpdateAccepted,
-                  { itemId: item._id },
+                  { itemId: item._id, leaseToken },
                 );
                 fileUpdateAcceptedAt = undefined;
+                safeToRelease = true;
               } catch (acknowledgeError) {
                 finalError = errorWithCause(
                   `${errorMessage(error)} Recovery failed: ${errorMessage(acknowledgeError)}`,
@@ -743,8 +818,11 @@ export const publishNext = internalAction({
       }
       await ctx.runMutation(internal.bulkTransforms.markPublishFailed, {
         itemId: item._id,
+        leaseToken,
         error: errorMessage(finalError),
         conflict: conflict || finalError instanceof SourceConflictError,
+        safeToRelease,
+        resetAmbiguityWindow: leaseProtectedMutationAttempted,
       });
     }
     return null;

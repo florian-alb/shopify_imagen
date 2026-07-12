@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router";
 import {
   Activity,
   FlipHorizontal2,
@@ -38,6 +39,7 @@ export function ProductsPage({ search }: { search: ProductSearch }) {
 function ProductsPageForShop({ search }: { search: ProductSearch }) {
   const {
     allVisibleSelected,
+    bulkLocksByProductId,
     bulkTransform,
     chooserOpen,
     creatingJob,
@@ -83,14 +85,11 @@ function ProductsPageForShop({ search }: { search: ProductSearch }) {
               Synchroniser
             </Button>
             {bulkTransform.hasTrackedJob ? (
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={bulkTransform.busy}
-                onClick={bulkTransform.openLatest}
-              >
-                <Activity data-icon="inline-start" />
-                Suivre le bulk
+              <Button variant="outline" size="sm" asChild>
+                <Link to="/bulk-operations">
+                  <Activity data-icon="inline-start" />
+                  Voir les bulks
+                </Link>
               </Button>
             ) : null}
             <Button size="sm" disabled={!selected.size} onClick={openChooser}>
@@ -125,6 +124,7 @@ function ProductsPageForShop({ search }: { search: ProductSearch }) {
           products={products}
           search={search}
           selected={selected}
+          bulkLocksByProductId={bulkLocksByProductId}
           allVisibleSelected={allVisibleSelected}
           onToggleProduct={toggleProduct}
           onToggleVisible={toggleVisible}
@@ -161,13 +161,11 @@ function ProductsPageForShop({ search }: { search: ProductSearch }) {
               <Button
                 size="sm"
                 variant="outline"
-                disabled={bulkTransform.latestLoading || bulkTransform.busy}
+                disabled={bulkTransform.busy}
                 onClick={bulkTransform.openNew}
               >
                 <FlipHorizontal2 data-icon="inline-start" />
-                {bulkTransform.hasActiveJob
-                  ? "Suivre le bulk"
-                  : "Miroir horizontal"}
+                Miroir horizontal
               </Button>
               <Button size="sm" onClick={openChooser}>
                 <ImageIcon data-icon="inline-start" />

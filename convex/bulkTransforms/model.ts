@@ -1,6 +1,7 @@
 export const BULK_TRANSFORM_OPERATION = "flip_horizontal" as const;
 export const BULK_TRANSFORM_ASSET_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 export const MAX_BULK_TRANSFORM_IMAGE_POSITIONS = 250;
+export const BULK_TRANSFORM_PUBLISH_AMBIGUITY_SETTLE_MS = 20 * 60 * 1000;
 
 export type BulkTransformOperation = typeof BULK_TRANSFORM_OPERATION;
 export type BulkTransformRetryPhase = "transform" | "publish" | "conflict";

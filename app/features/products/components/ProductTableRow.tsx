@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { WandSparkles } from "lucide-react";
+import { LockKeyhole, WandSparkles } from "lucide-react";
 
 import { StateBadge } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
@@ -19,18 +19,21 @@ import {
   shopifyStatusLabel,
 } from "@/lib/status";
 
-import type { ProductListItem } from "../types";
+import { bulkTransformStatusLabel } from "../lib/bulkImageTransformViewModel";
+import type { BulkProductLock, ProductListItem } from "../types";
 
 export function ProductTableRow({
   product,
   search,
   selected,
+  bulkLock,
   onToggle,
   onGenerateOne,
 }: {
   product: ProductListItem;
   search: ProductSearch;
   selected: boolean;
+  bulkLock?: BulkProductLock;
   onToggle: () => void;
   onGenerateOne: () => void;
 }) {
@@ -76,6 +79,16 @@ export function ProductTableRow({
               <span className="truncate">
                 {product.productType || "Sans categorie"}
               </span>
+              {bulkLock ? (
+                <Badge
+                  variant="outline"
+                  className="shrink-0 border-amber-400/25 bg-amber-400/10 text-amber-200"
+                  title="Ce produit est réservé par un bulk non terminé."
+                >
+                  <LockKeyhole className="size-3" />
+                  Bulk · {bulkTransformStatusLabel(bulkLock.status)}
+                </Badge>
+              ) : null}
             </div>
           </div>
         </div>
