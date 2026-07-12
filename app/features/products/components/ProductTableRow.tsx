@@ -34,7 +34,7 @@ export function ProductTableRow({
   onToggle: () => void;
   onGenerateOne: () => void;
 }) {
-  const image = product.featuredImageUrl;
+  const image = product.featuredImageDisplayUrl ?? product.featuredImageUrl;
 
   return (
     <TableRow data-state={selected ? "selected" : undefined} className="group">

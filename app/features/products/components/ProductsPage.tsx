@@ -1,4 +1,11 @@
-import { ImageIcon, RefreshCw, WandSparkles } from "lucide-react";
+import {
+  Activity,
+  FlipHorizontal2,
+  ImageIcon,
+  RefreshCw,
+  WandSparkles,
+} from "lucide-react";
+import { useQuery } from "convex/react";
 
 import {
   BusyIcon,
@@ -9,16 +16,29 @@ import {
 } from "@/components/page";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { api } from "@/lib/convex";
 import type { ProductSearch } from "@/lib/productFilters";
 
 import { useProductsListPage } from "../hooks/useProductsListPage";
+import { BulkImageTransformDialogs } from "./BulkImageTransformDialogs";
 import { ImageTypeSelectionDialog } from "./ImageTypeSelectionDialog";
 import { ProductsFilters } from "./ProductsFilters";
 import { ProductsTable } from "./ProductsTable";
 
 export function ProductsPage({ search }: { search: ProductSearch }) {
+  const shopInfo = useQuery(api.settings.shopInfo);
+  const shopKey =
+    shopInfo === undefined
+      ? "loading"
+      : (shopInfo.shopId ?? shopInfo.domain ?? "no-shop");
+
+  return <ProductsPageForShop key={shopKey} search={search} />;
+}
+
+function ProductsPageForShop({ search }: { search: ProductSearch }) {
   const {
     allVisibleSelected,
+    bulkTransform,
     chooserOpen,
     creatingJob,
     facets,
@@ -30,7 +50,6 @@ export function ProductsPage({ search }: { search: ProductSearch }) {
     productPage,
     products,
     selected,
-    selectedProducts,
     syncing,
     generate,
     openChooser,
@@ -63,6 +82,17 @@ export function ProductsPage({ search }: { search: ProductSearch }) {
               {!syncing ? <RefreshCw data-icon="inline-start" /> : null}
               Synchroniser
             </Button>
+            {bulkTransform.hasTrackedJob ? (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={bulkTransform.busy}
+                onClick={bulkTransform.openLatest}
+              >
+                <Activity data-icon="inline-start" />
+                Suivre le bulk
+              </Button>
+            ) : null}
             <Button size="sm" disabled={!selected.size} onClick={openChooser}>
               <WandSparkles data-icon="inline-start" />
               Generer
@@ -124,13 +154,26 @@ export function ProductsPage({ search }: { search: ProductSearch }) {
                 selectionne{selected.size === 1 ? "" : "s"}
               </p>
               <p className="text-xs text-muted-foreground">
-                Choisissez les formats avant de lancer le job.
+                Lancez une génération ou une transformation sur la sélection.
               </p>
             </div>
-            <Button size="sm" onClick={openChooser}>
-              <ImageIcon data-icon="inline-start" />
-              Types
-            </Button>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={bulkTransform.latestLoading || bulkTransform.busy}
+                onClick={bulkTransform.openNew}
+              >
+                <FlipHorizontal2 data-icon="inline-start" />
+                {bulkTransform.hasActiveJob
+                  ? "Suivre le bulk"
+                  : "Miroir horizontal"}
+              </Button>
+              <Button size="sm" onClick={openChooser}>
+                <ImageIcon data-icon="inline-start" />
+                Types
+              </Button>
+            </div>
           </Card>
         </div>
       ) : null}
@@ -143,16 +186,18 @@ export function ProductsPage({ search }: { search: ProductSearch }) {
           selectedTypes={imageTypeSelection.selectedTypes}
           busy={creatingJob}
           title="Types d'images"
-          description={`${selectedProducts.length} produit${
-            selectedProducts.length === 1 ? "" : "s"
+          description={`${selected.size} produit${
+            selected.size === 1 ? "" : "s"
           } selectionne${
-            selectedProducts.length === 1 ? "" : "s"
+            selected.size === 1 ? "" : "s"
           }. Chaque type utilise son prompt actif.`}
           submitLabel="Lancer le job"
           onToggleType={imageTypeSelection.toggleType}
           onGenerate={() => void generate()}
         />
       ) : null}
+
+      <BulkImageTransformDialogs bulkTransform={bulkTransform} />
     </main>
   );
 }

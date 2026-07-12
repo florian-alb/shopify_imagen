@@ -18,6 +18,7 @@ export type ProductListItem = {
   productType?: string | null;
   shopifyStatus?: string | null;
   featuredImageUrl?: string | null;
+  featuredImageDisplayUrl?: string | null;
   shopifyImageCount: number;
   generationStatus: GenerationStatus;
   generationState: ProductGenerationState;
@@ -63,6 +64,7 @@ export type ShopifyGalleryImage = {
   id?: string | null;
   mediaId?: string | null;
   url: string;
+  displayUrl?: string | null;
   altText?: string | null;
 };
 

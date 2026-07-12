@@ -10,6 +10,7 @@ import {
 } from "@/lib/productFilters";
 
 import type { ProductFacets, ProductListItem, ProductPageResult } from "../types";
+import { useBulkImageTransform } from "./useBulkImageTransform";
 import { useImageTypeSelection } from "./useImageTypeSelection";
 
 export function useProductsListPage(search: ProductSearch) {
@@ -60,6 +61,11 @@ export function useProductsListPage(search: ProductSearch) {
     | undefined;
   const syncProducts = useAction(api.shopify.syncProducts);
   const createJob = useMutation(api.jobs.create);
+  const selectedProductIds = useMemo(() => Array.from(selected), [selected]);
+  const bulkTransform = useBulkImageTransform({
+    onStarted: () => setSelected(new Set()),
+    selectedProductIds,
+  });
 
   const products = useMemo(() => productPage?.page ?? [], [productPage?.page]);
   const imageTypes = useMemo(
@@ -71,10 +77,6 @@ export function useProductsListPage(search: ProductSearch) {
   const allVisibleSelected = products.length
     ? products.every((product) => selected.has(product._id))
     : false;
-  const selectedProducts = useMemo(
-    () => products.filter((product) => selected.has(product._id)),
-    [products, selected],
-  );
 
   function updateSearch(patch: Partial<ProductSearch>) {
     void navigate({
@@ -191,8 +193,8 @@ export function useProductsListPage(search: ProductSearch) {
     pageSize,
     productPage,
     products,
+    bulkTransform,
     selected,
-    selectedProducts,
     syncing,
     generate,
     openChooser,

@@ -12,7 +12,12 @@ import {
 import { api } from "@/lib/convex";
 import { cn } from "@/lib/utils";
 
-type BreadcrumbRoute = "/products" | "/jobs" | "/settings" | "/settings/prompts";
+type BreadcrumbRoute =
+  | "/products"
+  | "/jobs"
+  | "/bulk-operations"
+  | "/settings"
+  | "/settings/prompts";
 
 type AppBreadcrumbItem = {
   label: string;
@@ -48,6 +53,10 @@ function routeBreadcrumbs(pathname: string): AppBreadcrumbItem[] {
       { label: "Generations", to: "/jobs" },
       { label: jobId ? `Job ${jobId.slice(-6)}` : "Job" },
     ];
+  }
+
+  if (normalizedPathname === "/bulk-operations") {
+    return [{ label: "Bulk operations", to: "/bulk-operations" }];
   }
 
   if (normalizedPathname === "/settings") {
