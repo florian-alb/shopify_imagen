@@ -116,6 +116,7 @@ export const getShopifyCredentials = internalQuery({
   handler: async (ctx, args) => {
     if (args.shopId) {
       const shop = await ctx.db.get(args.shopId);
+      if (!shop) throw new Error("Shop not found.");
       return shopifyCredentialsForShop(shop);
     }
     if (args.userId) {

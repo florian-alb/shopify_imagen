@@ -37,6 +37,40 @@ export type ShopForm = {
   productQuery: string;
 };
 
+export type ShopifyAuthorizationStatus = {
+  shopDomain: string;
+  status: "missing" | "requested" | "granted";
+  scopes: {
+    missing: string[];
+    requested: string[];
+    granted: string[];
+  };
+  authorizationUrl: string | null;
+  checkedAt: number;
+};
+
+export type ShopAuthorizationState =
+  | { status: "closed" }
+  | { status: "checking"; shop: ShopRow }
+  | {
+      status: "authorization_required";
+      shop: ShopRow;
+      authorization: ShopifyAuthorizationStatus;
+      safeAuthorizationUrl: string | null;
+    }
+  | {
+      status: "awaiting_approval";
+      shop: ShopRow;
+      authorization: ShopifyAuthorizationStatus;
+      safeAuthorizationUrl: string;
+    }
+  | {
+      status: "granted";
+      shop: ShopRow;
+      authorization: ShopifyAuthorizationStatus;
+    }
+  | { status: "error"; shop: ShopRow; message: string };
+
 export type SettingsTab = "boutique" | "generation" | "modeles" | "avance";
 
 export type SettingDefinition = {

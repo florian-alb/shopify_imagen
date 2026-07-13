@@ -1,6 +1,9 @@
 import { ConvexError } from "convex/values";
 
-import type { ShopifyCredentials } from "../shopScope";
+import {
+  normalizeShopDomain,
+  type ShopifyCredentials,
+} from "../shopScope";
 
 type GraphQlResponse<T> = {
   data?: T;
@@ -11,15 +14,10 @@ function env(name: string, fallback = "") {
   return process.env[name] ?? fallback;
 }
 
-function normalizeShopDomain(domain: string) {
-  const trimmed = domain.trim().replace(/^https?:\/\//, "").replace(/\/$/, "");
-  if (!trimmed) throw new Error("SHOPIFY_SHOP_DOMAIN is required.");
-  return trimmed.includes(".") ? trimmed : `${trimmed}.myshopify.com`;
-}
-
 export async function getAccessToken(credentials?: ShopifyCredentials) {
-  const domain =
-    credentials?.domain ?? normalizeShopDomain(env("SHOPIFY_SHOP_DOMAIN"));
+  const domain = normalizeShopDomain(
+    credentials?.domain ?? env("SHOPIFY_SHOP_DOMAIN"),
+  );
   const clientId = credentials?.clientId ?? env("SHOPIFY_CLIENT_ID");
   const clientSecret = credentials?.clientSecret ?? env("SHOPIFY_CLIENT_SECRET");
   if (!clientId || !clientSecret) {
@@ -72,8 +70,9 @@ export async function shopifyGraphql<T>(
   accessToken?: string,
   credentials?: ShopifyCredentials,
 ) {
-  const domain =
-    credentials?.domain ?? normalizeShopDomain(env("SHOPIFY_SHOP_DOMAIN"));
+  const domain = normalizeShopDomain(
+    credentials?.domain ?? env("SHOPIFY_SHOP_DOMAIN"),
+  );
   const version = env("SHOPIFY_API_VERSION", "2026-04");
   const token = accessToken ?? (await getAccessToken(credentials));
 

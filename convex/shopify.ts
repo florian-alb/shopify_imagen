@@ -6,6 +6,10 @@ import { requireUserId } from "./authz";
 import { refreshProductSummary } from "./products";
 import { refreshJobSummary } from "./jobs";
 import type { ShopifyCredentials } from "./shopScope";
+import {
+  fetchShopifyAuthorizationStatus,
+  type ShopifyAuthorizationStatus,
+} from "./shopify/authorization";
 import { getAccessToken, shopifyGraphql } from "./shopify/client";
 import {
   buildMediaMoves,
@@ -31,6 +35,38 @@ type ProductsResponse = {
 
 const REJECTED_IMAGE_RETENTION_MS = 5 * 24 * 60 * 60 * 1000;
 const REJECTED_IMAGE_CLEANUP_BATCH_SIZE = 50;
+
+const shopifyAuthorizationStatusValidator = v.object({
+  shopDomain: v.string(),
+  status: v.union(
+    v.literal("missing"),
+    v.literal("requested"),
+    v.literal("granted"),
+  ),
+  scopes: v.object({
+    missing: v.array(v.string()),
+    requested: v.array(v.string()),
+    granted: v.array(v.string()),
+  }),
+  authorizationUrl: v.union(v.string(), v.null()),
+  checkedAt: v.number(),
+});
+
+export const authorizationStatus = action({
+  args: { shopId: v.optional(v.id("shops")) },
+  returns: shopifyAuthorizationStatusValidator,
+  handler: async (ctx, args): Promise<ShopifyAuthorizationStatus> => {
+    const userId = await requireUserId(ctx);
+    const credentials = (await ctx.runQuery(
+      internal.shops.getShopifyCredentials,
+      {
+        shopId: args.shopId ?? null,
+        userId,
+      },
+    )) as ShopifyCredentials;
+    return await fetchShopifyAuthorizationStatus(credentials);
+  },
+});
 
 function generatedImageAssetUrls(image: Doc<"generatedImages">) {
   return Array.from(

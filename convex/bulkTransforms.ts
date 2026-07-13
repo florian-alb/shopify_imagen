@@ -1,4 +1,4 @@
-import { ConvexError, v } from "convex/values";
+import { v } from "convex/values";
 
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -37,8 +37,11 @@ import {
   type ShopScope,
   type ShopifyCredentials,
 } from "./shopScope";
-import { getAccessToken, shopifyGraphql } from "./shopify/client";
-import { SHOPIFY_ACCESS_SCOPES_QUERY } from "./shopify/graphql";
+import {
+  fetchShopifyAuthorizationStatus,
+  REQUIRED_SHOPIFY_ADMIN_SCOPES,
+  requireShopifyAdminScopes,
+} from "./shopify/authorization";
 
 const MAX_PRODUCTS_PER_JOB = 250;
 const RESET_BATCH_SIZE = 25;
@@ -397,22 +400,11 @@ async function latestActiveJobForShop(
   );
 }
 
-async function requireWriteFilesScope(credentials: ShopifyCredentials) {
-  const accessToken = await getAccessToken(credentials);
-  const data = await shopifyGraphql<{
-    currentAppInstallation: {
-      accessScopes: Array<{ handle: string }>;
-    } | null;
-  }>(SHOPIFY_ACCESS_SCOPES_QUERY, {}, accessToken, credentials);
-  const scopes = new Set(
-    data.currentAppInstallation?.accessScopes.map((scope) => scope.handle) ??
-      [],
-  );
-  if (!scopes.has("write_files")) {
-    throw new ConvexError(
-      "Le scope Shopify write_files est requis. Ajoute-le aux scopes Admin API de l’application personnalisée, enregistre la configuration, puis relance la publication.",
-    );
-  }
+async function requireShopifyPublicationScopes(
+  credentials: ShopifyCredentials,
+) {
+  const status = await fetchShopifyAuthorizationStatus(credentials);
+  requireShopifyAdminScopes(status, REQUIRED_SHOPIFY_ADMIN_SCOPES);
 }
 
 export const start = action({
@@ -447,10 +439,10 @@ export const publish = action({
       internal.shops.getShopifyCredentials,
       {
         shopId: job.shopId ?? null,
-        ...(job.shopId ? { userId } : {}),
+        userId,
       },
     )) as ShopifyCredentials;
-    await requireWriteFilesScope(credentials);
+    await requireShopifyPublicationScopes(credentials);
     await ctx.runMutation(internal.bulkTransforms.startPublishing, {
       jobId: job._id,
       userId,
@@ -843,10 +835,10 @@ export const retryFailures = action({
         internal.shops.getShopifyCredentials,
         {
           shopId: job.shopId ?? null,
-          ...(job.shopId ? { userId } : {}),
+          userId,
         },
       )) as ShopifyCredentials;
-      await requireWriteFilesScope(credentials);
+      await requireShopifyPublicationScopes(credentials);
     }
     return await ctx.runMutation(internal.bulkTransforms.prepareRetry, {
       jobId: job._id,
