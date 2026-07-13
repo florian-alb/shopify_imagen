@@ -164,7 +164,7 @@ function AuthorizationDialogAction({
             onClick={onAuthorizationOpened}
           >
             <ExternalLink data-icon="inline-start" />
-            Ouvrir Shopify
+            Autoriser dans Shopify
           </a>
         </Button>
       </>
