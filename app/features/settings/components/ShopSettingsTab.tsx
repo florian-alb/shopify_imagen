@@ -1,7 +1,9 @@
 import type { FormEvent } from "react";
 import { type Id } from "@/lib/convex";
+import { useShopAuthorization } from "../hooks/useShopAuthorization";
 import type { ShopForm, ShopRow } from "../types";
 import { SettingsPanel } from "./SettingsPanel";
+import { ShopAuthorizationDialog } from "./ShopAuthorizationDialog";
 import { ShopOnboarding } from "./ShopOnboarding";
 import { ShopTable } from "./ShopTable";
 
@@ -35,12 +37,19 @@ export function ShopSettingsTab({
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onUseShop: (shopId: Id<"shops">) => void;
 }) {
+  const shopAuthorization = useShopAuthorization();
+
   return (
     <SettingsPanel
       title="Boutiques connectees"
       description="Chaque boutique garde ses produits, prompts, jobs et reglages de generation."
     >
-      <ShopTable shops={shops} saving={saving} onUseShop={onUseShop} />
+      <ShopTable
+        shops={shops}
+        saving={saving}
+        onCheckAuthorization={shopAuthorization.open}
+        onUseShop={onUseShop}
+      />
       <ShopOnboarding
         appOrigin={appOrigin}
         currentHandle={currentHandle}
@@ -52,6 +61,14 @@ export function ShopSettingsTab({
         onResetForm={onResetForm}
         onStepChange={onStepChange}
         onSubmit={onSubmit}
+      />
+      <ShopAuthorizationDialog
+        state={shopAuthorization.state}
+        open={shopAuthorization.isOpen}
+        onOpenChange={shopAuthorization.handleOpenChange}
+        onClose={shopAuthorization.close}
+        onAuthorizationOpened={shopAuthorization.markAuthorizationOpened}
+        onVerify={shopAuthorization.verify}
       />
     </SettingsPanel>
   );

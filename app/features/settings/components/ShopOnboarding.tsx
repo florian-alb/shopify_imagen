@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ADMIN_SCOPES, APP_NAME } from "../settingsData";
+import { APP_NAME, SHOPIFY_ONBOARDING_SCOPES } from "../settingsData";
 import type { ShopForm } from "../types";
 
 export function ShopOnboarding({
@@ -50,7 +50,6 @@ export function ShopOnboarding({
 }) {
   const [previewOpen, setPreviewOpen] = useState(false);
   const appUrl = appOrigin.replace(/\/$/, "");
-  const redirectUrl = `${appUrl}/auth/shopify/callback`;
   const devDashboardUrl = currentHandle
     ? `https://admin.shopify.com/store/${currentHandle}/settings/apps/development`
     : "https://admin.shopify.com/";
@@ -102,7 +101,7 @@ export function ShopOnboarding({
           ) : step === 2 ? (
             <StepTwo appName={APP_NAME} dashboardUrl={devDashboardUrl} />
           ) : step === 3 ? (
-            <StepThree appUrl={appUrl} redirectUrl={redirectUrl} />
+            <StepThree appUrl={appUrl} />
           ) : (
             <StepFour
               form={form}
@@ -116,9 +115,7 @@ export function ShopOnboarding({
               type="button"
               variant="outline"
               onClick={() =>
-            step === 1
-              ? onResetForm()
-              : onStepChange(step - 1)
+                step === 1 ? onResetForm() : onStepChange(step - 1)
               }
               disabled={saving}
             >
@@ -283,25 +280,40 @@ function StepTwo({
   );
 }
 
-function StepThree({
-  appUrl,
-  redirectUrl,
-}: {
-  appUrl: string;
-  redirectUrl: string;
-}) {
+function StepThree({ appUrl }: { appUrl: string }) {
   return (
     <div className="grid gap-4">
       <div>
-        <h4 className="font-medium">Configuration OAuth</h4>
+        <h4 className="font-medium">Version et autorisations Shopify</h4>
         <p className="mt-1 text-sm text-muted-foreground">
-          Colle ces valeurs dans l'app Shopify avant de créer les clés.
+          Shopify gère l’installation de l’application et la demande des
+          autorisations publiées.
         </p>
+      </div>
+      <div className="grid gap-2 text-sm text-muted-foreground">
+        <InstructionLine index={1}>
+          Configure les scopes Admin API indiqués ci-dessous et publie une
+          nouvelle version de l’application.
+        </InstructionLine>
+        <InstructionLine index={2}>
+          Garde le flux d’installation géré par Shopify avec{" "}
+          <code className="font-mono text-foreground">
+            use_legacy_install_flow = false
+          </code>
+          .
+        </InstructionLine>
+        <InstructionLine index={3}>
+          Après avoir enregistré les clés à l’étape suivante, utilise Accès
+          Shopify dans le tableau pour vérifier et, si nécessaire, autoriser la
+          boutique.
+        </InstructionLine>
       </div>
       <div className="overflow-hidden rounded-lg border border-border">
         <CopyRow label="URL de l'application" value={appUrl} />
-        <CopyRow label="URL de redirection" value={redirectUrl} />
-        <CopyRow label="Scopes Admin API" value={ADMIN_SCOPES} />
+        <CopyRow
+          label="Scopes Admin API à publier"
+          value={SHOPIFY_ONBOARDING_SCOPES}
+        />
       </div>
     </div>
   );
@@ -448,7 +460,7 @@ function OnboardingVisual({
       <div className="grid h-full grid-cols-[72px_1fr] gap-4 rounded-lg bg-[#080d0f] text-white">
         <aside className="rounded-l-lg bg-[#101719] p-3 text-[9px] text-white/45">
           <div className="mb-5 h-4 w-14 rounded bg-white/10" />
-          {["Domaines", "Apps", "OAuth", "Cles"].map((item, index) => (
+          {["Domaines", "Apps", "Version", "Cles"].map((item, index) => (
             <div
               key={item}
               className={`mb-2 rounded px-2 py-1 ${

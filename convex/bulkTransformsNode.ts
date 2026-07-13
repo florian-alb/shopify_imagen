@@ -130,7 +130,7 @@ async function credentialsForJob(
     internal.shops.getShopifyCredentials,
     {
       shopId: job.shopId ?? null,
-      ...(job.shopId ? { userId: job.createdByUserId } : {}),
+      userId: job.createdByUserId,
     },
   )) as ShopifyCredentials;
   const accessToken = await getAccessToken(credentials);

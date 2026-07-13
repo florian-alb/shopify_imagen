@@ -25,9 +25,23 @@ function env(name: string, fallback = "") {
 }
 
 export function normalizeShopDomain(domain: string) {
-  const trimmed = domain.trim().replace(/^https?:\/\//, "").replace(/\/$/, "").toLowerCase();
+  const trimmed = domain
+    .trim()
+    .replace(/^https?:\/\//i, "")
+    .replace(/\/$/, "")
+    .toLowerCase();
   if (!trimmed) throw new Error("Shop domain is required.");
-  return trimmed.includes(".") ? trimmed : `${trimmed}.myshopify.com`;
+  const normalized = trimmed.includes(".")
+    ? trimmed
+    : `${trimmed}.myshopify.com`;
+  if (
+    !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.myshopify\.com$/.test(
+      normalized,
+    )
+  ) {
+    throw new Error("Shop domain must be a valid .myshopify.com domain.");
+  }
+  return normalized;
 }
 
 export function storeHandleFromDomain(domain: string) {
