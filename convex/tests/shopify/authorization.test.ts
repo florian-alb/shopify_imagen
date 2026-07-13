@@ -90,7 +90,7 @@ describe("buildShopifyAuthorizationStatus", () => {
     expect(result.scopes.missing).toEqual([]);
     expect(result.scopes.requested).toEqual(["write_files"]);
     expect(result.scopes.granted).toEqual(["write_products"]);
-    expect(result.authorizationUrl).toBe(MANAGED_INSTALL_URL);
+    expect(result.authorizationUrl).toBe(CUSTOM_PERMISSION_URL);
     expect([
       ...result.scopes.missing,
       ...result.scopes.requested,
@@ -118,7 +118,7 @@ describe("buildShopifyAuthorizationStatus", () => {
     expect(result.authorizationUrl).toBeNull();
   });
 
-  it("prefers App.installUrl and uses the strict custom-app fallback", () => {
+  it("prefers the installation permission URL and keeps App.installUrl as fallback", () => {
     const requestedAccess = {
       accessScopes: [{ handle: "write_products" }],
     };
@@ -130,27 +130,27 @@ describe("buildShopifyAuthorizationStatus", () => {
     const fallback = buildShopifyAuthorizationStatus(
       installation({
         ...requestedAccess,
-        app: { installUrl: null },
+        launchUrl: null,
       }),
       SHOP_DOMAIN,
       CLIENT_ID,
     );
 
-    expect(preferred.authorizationUrl).toBe(MANAGED_INSTALL_URL);
-    expect(fallback.authorizationUrl).toBe(CUSTOM_PERMISSION_URL);
+    expect(preferred.authorizationUrl).toBe(CUSTOM_PERMISSION_URL);
+    expect(fallback.authorizationUrl).toBe(MANAGED_INSTALL_URL);
   });
 
-  it("falls back safely when Shopify changes the managed install URL", () => {
+  it("falls back safely when Shopify changes the installation permission URL", () => {
     const result = buildShopifyAuthorizationStatus(
       installation({
         accessScopes: [{ handle: "write_products" }],
-        app: { installUrl: "https://example.test/install" },
+        launchUrl: "https://example.test/launch",
       }),
       SHOP_DOMAIN,
       CLIENT_ID,
     );
 
-    expect(result.authorizationUrl).toBe(CUSTOM_PERMISSION_URL);
+    expect(result.authorizationUrl).toBe(MANAGED_INSTALL_URL);
   });
 
   it("fails closed when Shopify returns no safe authorization URL", () => {
