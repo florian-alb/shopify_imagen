@@ -108,7 +108,7 @@ function authorizationUrl(
   shopDomain: string,
   clientId: string,
 ) {
-  const candidates = [installation.app.installUrl, installation.launchUrl];
+  const candidates = [installation.launchUrl, installation.app.installUrl];
   for (const candidate of candidates) {
     if (!candidate) continue;
     try {
