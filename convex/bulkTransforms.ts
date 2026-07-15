@@ -60,7 +60,10 @@ const PRODUCT_LOCK_QUERY_MAX_SIZE = 100;
 const PUBLISH_MEDIA_LEASE_MS =
   BULK_TRANSFORM_PUBLISH_AMBIGUITY_SETTLE_MS;
 const PUBLISH_MEDIA_LEASE_RETRY_MS = 5_000;
-const PUBLISH_MEDIA_RECOVERY_RETRY_MS = 30_000;
+// Shopify file updates are independent across media. Keep a small worker pool
+// so a slow CDN verification does not serialize the whole bulk, while the
+// media lease still fences duplicate writes to the same Shopify file.
+const BULK_TRANSFORM_PUBLISH_CONCURRENCY = 4;
 // A stale-job recovery is one Convex transaction. Bound the one-time legacy
 // migration so a fleet of 250-product jobs cannot exceed mutation write limits.
 const LEGACY_PRODUCT_LOCK_RESUME_BUDGET = 500;
@@ -70,6 +73,21 @@ const ACTIVE_JOB_STATUSES = [
   "ready",
   "publishing",
 ] as const;
+
+async function schedulePublishWorkers(
+  ctx: MutationCtx,
+  jobId: Id<"bulkTransformJobs">,
+) {
+  for (
+    let worker = 0;
+    worker < BULK_TRANSFORM_PUBLISH_CONCURRENCY;
+    worker += 1
+  ) {
+    await ctx.scheduler.runAfter(0, internal.bulkTransformsNode.publishNext, {
+      jobId,
+    });
+  }
+}
 
 type JobReadCtx = QueryCtx | MutationCtx;
 
@@ -362,7 +380,7 @@ async function ownedMediaLease(
   if (
     item.status !== "publishing" ||
     item.publishLeaseToken !== leaseToken ||
-    job.status !== "publishing"
+    (job.status !== "publishing" && job.status !== "cancelled")
   ) {
     return null;
   }
@@ -913,6 +931,22 @@ export const dismiss = mutation({
   },
 });
 
+async function cancelBulkTransformJob(
+  ctx: MutationCtx,
+  job: Doc<"bulkTransformJobs">,
+) {
+  const now = Date.now();
+  await ctx.db.patch(job._id, {
+    status: "cancelled",
+    retryPhase: undefined,
+    completedAt: now,
+    error: null,
+    updatedAt: now,
+  });
+  await releaseProductLocks(ctx, job._id);
+  return job._id;
+}
+
 export const cancel = mutation({
   args: { jobId: v.id("bulkTransformJobs") },
   handler: async (ctx, args) => {
@@ -922,20 +956,25 @@ export const cancel = mutation({
     if (
       job.status !== "queued" &&
       job.status !== "transforming" &&
-      job.status !== "ready"
+      job.status !== "ready" &&
+      job.status !== "publishing"
     ) {
       throw new Error("This bulk operation can no longer be cancelled safely.");
     }
-    const now = Date.now();
-    await ctx.db.patch(job._id, {
-      status: "cancelled",
-      retryPhase: undefined,
-      completedAt: now,
-      error: null,
-      updatedAt: now,
-    });
-    await releaseProductLocks(ctx, job._id);
-    return job._id;
+    return await cancelBulkTransformJob(ctx, job);
+  },
+});
+
+// Deployment-key-only recovery entrypoint for stopping a live publication
+// when the authenticated frontend is not yet running the matching UI release.
+export const cancelActivePublishing = internalMutation({
+  args: { jobId: v.id("bulkTransformJobs") },
+  handler: async (ctx, args) => {
+    const job = await ctx.db.get(args.jobId);
+    if (!job) throw new Error("Bulk transform job not found.");
+    if (job.status !== "publishing") return job.status;
+    await cancelBulkTransformJob(ctx, job);
+    return "cancelled" as const;
   },
 });
 
@@ -1437,9 +1476,7 @@ export const startPublishing = internalMutation({
       error: null,
       updatedAt: now,
     });
-    await ctx.scheduler.runAfter(0, internal.bulkTransformsNode.publishNext, {
-      jobId: job._id,
-    });
+    await schedulePublishWorkers(ctx, job._id);
     return job._id;
   },
 });
@@ -1449,15 +1486,41 @@ export const claimNextPublish = internalMutation({
   handler: async (ctx, args) => {
     const job = await ctx.db.get(args.jobId);
     if (!job || job.status !== "publishing") return null;
-    const item = await ctx.db
+    const activeItems = await ctx.db
       .query("bulkTransformItems")
       .withIndex("by_job_and_status", (q) =>
-        q.eq("jobId", job._id).eq("status", "ready"),
+        q.eq("jobId", job._id).eq("status", "publishing"),
       )
-      .order("asc")
-      .first();
-    if (!item) return null;
+      .take(BULK_TRANSFORM_PUBLISH_CONCURRENCY);
+    if (activeItems.length >= BULK_TRANSFORM_PUBLISH_CONCURRENCY) return null;
     const now = Date.now();
+    const recoveryCutoff =
+      now - BULK_TRANSFORM_PUBLISH_AMBIGUITY_SETTLE_MS;
+    const item =
+      (await ctx.db
+        .query("bulkTransformItems")
+        .withIndex(
+          "by_job_status_recovery_pending_ambiguous_since",
+          (q) =>
+            q
+              .eq("jobId", job._id)
+              .eq("status", "ready")
+              .eq("publishRecoveryPending", undefined),
+        )
+        .first()) ??
+      (await ctx.db
+        .query("bulkTransformItems")
+        .withIndex(
+          "by_job_status_recovery_pending_ambiguous_since",
+          (q) =>
+            q
+              .eq("jobId", job._id)
+              .eq("status", "ready")
+              .eq("publishRecoveryPending", true)
+              .lte("publishAmbiguousSince", recoveryCutoff),
+        )
+        .first());
+    if (!item) return null;
     const { lease: existingLease, shopDomain } = await mediaLeaseForItem(
       ctx,
       job,
@@ -1619,15 +1682,17 @@ async function finishPublish(
   const succeeded = Boolean(args.publishedUrl);
   const conflict = !succeeded && args.conflict === true;
   const safeToRelease = succeeded || args.safeToRelease !== false;
+  const cancelled = job.status === "cancelled";
   const now = Date.now();
   if (!safeToRelease) {
+    const publishAmbiguousSince = args.resetAmbiguityWindow
+      ? now
+      : item.publishAmbiguousSince ?? now;
     await ctx.db.patch(item._id, {
       status: "ready",
       publishLeaseToken: undefined,
       publishRecoveryPending: true,
-      publishAmbiguousSince: args.resetAmbiguityWindow
-        ? now
-        : item.publishAmbiguousSince ?? now,
+      publishAmbiguousSince,
       processingStartedAt: undefined,
       error: args.error ?? null,
       updatedAt: now,
@@ -1637,16 +1702,33 @@ async function finishPublish(
       updatedAt: now,
     });
     await ctx.db.patch(job._id, {
-      error:
-        args.error ??
-        "Shopify is still resolving an earlier file update; publication recovery will retry.",
+      ...(cancelled
+        ? {}
+        : {
+            error:
+              args.error ??
+              "Shopify is still resolving an earlier file update; publication recovery will retry.",
+          }),
       updatedAt: now,
     });
-    await ctx.scheduler.runAfter(
-      PUBLISH_MEDIA_RECOVERY_RETRY_MS,
-      internal.bulkTransformsNode.publishNext,
-      { jobId: job._id },
-    );
+    if (!cancelled) {
+      // Replace the worker immediately so unrelated media continue. A second,
+      // exact wake-up makes the deferred media eligible once Shopify's ambiguity
+      // window has elapsed. claimNextPublish enforces the global worker cap.
+      await ctx.scheduler.runAfter(0, internal.bulkTransformsNode.publishNext, {
+        jobId: job._id,
+      });
+      await ctx.scheduler.runAfter(
+        Math.max(
+          0,
+          publishAmbiguousSince +
+            BULK_TRANSFORM_PUBLISH_AMBIGUITY_SETTLE_MS -
+            now,
+        ),
+        internal.bulkTransformsNode.publishNext,
+        { jobId: job._id },
+      );
+    }
     return { done: false, recovering: true };
   }
   const publishedItems = job.publishedItems + (succeeded ? 1 : 0);
@@ -1723,7 +1805,7 @@ async function finishPublish(
     publishedItems,
     publishFailedItems,
     conflictItems,
-    ...(done
+    ...(done && !cancelled
       ? {
           status: hasFailures ? ("partial" as const) : ("completed" as const),
           completedAt: now,
@@ -1735,8 +1817,8 @@ async function finishPublish(
     updatedAt: now,
   });
   await ctx.db.delete(lease._id);
-  if (done) await releaseProductLocks(ctx, job._id);
-  if (!done) {
+  if (done && !cancelled) await releaseProductLocks(ctx, job._id);
+  if (!done && !cancelled) {
     await ctx.scheduler.runAfter(0, internal.bulkTransformsNode.publishNext, {
       jobId: job._id,
     });
@@ -1948,13 +2030,15 @@ export const resetFailures = internalMutation({
         retryPhase: undefined,
         updatedAt: now,
       });
-      await ctx.scheduler.runAfter(
-        0,
-        args.phase === "publish"
-          ? internal.bulkTransformsNode.publishNext
-          : internal.bulkTransformsNode.transformNext,
-        { jobId: job._id },
-      );
+      if (args.phase === "publish") {
+        await schedulePublishWorkers(ctx, job._id);
+      } else {
+        await ctx.scheduler.runAfter(
+          0,
+          internal.bulkTransformsNode.transformNext,
+          { jobId: job._id },
+        );
+      }
     }
     return { reset: failed.length };
   },
@@ -2078,11 +2162,7 @@ export const resumeStaleJobs = internalMutation({
         );
       } else {
         resumedPublishes += 1;
-        await ctx.scheduler.runAfter(
-          0,
-          internal.bulkTransformsNode.publishNext,
-          { jobId: job._id },
-        );
+        await schedulePublishWorkers(ctx, job._id);
       }
     }
     return {

@@ -54,7 +54,8 @@ export function bulkTransformCanCancel(job: BulkTransformJob) {
   return (
     job.status === "queued" ||
     job.status === "transforming" ||
-    job.status === "ready"
+    job.status === "ready" ||
+    job.status === "publishing"
   );
 }
 

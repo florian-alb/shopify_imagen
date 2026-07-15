@@ -142,7 +142,7 @@ describe("bulk image transform view model", () => {
 
   test("aligns cancel and retry actions with durable backend states", () => {
     expect(bulkTransformCanCancel(job({ status: "ready" }))).toBe(true);
-    expect(bulkTransformCanCancel(job({ status: "publishing" }))).toBe(false);
+    expect(bulkTransformCanCancel(job({ status: "publishing" }))).toBe(true);
     expect(
       bulkTransformCanRetry(
         job({ status: "partial", transformFailedItems: 1 }),

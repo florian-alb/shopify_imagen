@@ -57,6 +57,7 @@ type MediaImageResponse = { node: MediaImageNode | null };
 
 class SourceConflictError extends Error {}
 class ShopifyFileUpdateFailedError extends Error {}
+class BulkPublishCancelledError extends Error {}
 
 type CleanupJobAssetsResult = {
   cleaned: boolean;
@@ -445,6 +446,11 @@ export const publishNext = internalAction({
         job: Doc<"bulkTransformJobs">;
       } | null;
       if (!context) throw new Error("Bulk publish context was not found.");
+      if (context.job.status !== "publishing") {
+        throw new BulkPublishCancelledError(
+          "Bulk publication was cancelled before this image was sent.",
+        );
+      }
       if (!item.outputUrl || !item.sourceSha256 || !item.transformedSha256) {
         throw new Error("The transformed image is incomplete.");
       }
@@ -586,6 +592,18 @@ export const publishNext = internalAction({
 
       safeToRelease = true;
       await renewMediaLease();
+      const latestContext = (await ctx.runQuery(
+        internal.bulkTransforms.getProcessingContext,
+        { itemId: item._id },
+      )) as {
+        item: Doc<"bulkTransformItems">;
+        job: Doc<"bulkTransformJobs">;
+      } | null;
+      if (!latestContext || latestContext.job.status !== "publishing") {
+        throw new BulkPublishCancelledError(
+          "Bulk publication was cancelled before this image was sent.",
+        );
+      }
       mutationAttempted = true;
       leaseProtectedMutationAttempted = true;
       safeToRelease = false;

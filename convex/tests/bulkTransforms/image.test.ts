@@ -19,14 +19,23 @@ describe("bulk image transform", () => {
       raw: { width: 20, height: 1, channels: 3 },
     })
       .png()
+      .withExif({ IFD0: { Artist: "private bulk metadata" } })
       .toBuffer();
 
+    expect((await sharp(source).metadata()).exif).toBeDefined();
+
     const transformed = await flipImageHorizontally(source);
+    const transformedMetadata = await sharp(transformed).metadata();
     const { data, info } = await sharp(transformed)
       .removeAlpha()
       .raw()
       .toBuffer({ resolveWithObject: true });
 
+    expect(transformedMetadata.format).toBe("webp");
+    expect(transformedMetadata.exif).toBeUndefined();
+    expect(transformedMetadata.xmp).toBeUndefined();
+    expect(transformedMetadata.icc).toBeUndefined();
+    expect(transformedMetadata.orientation).toBeUndefined();
     expect(info.width).toBe(20);
     expect(info.height).toBe(1);
     expect(data[2]).toBe(255);

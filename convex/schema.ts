@@ -573,6 +573,12 @@ export default defineSchema({
   })
     .index("by_job", ["jobId"])
     .index("by_job_and_status", ["jobId", "status"])
+    .index("by_job_status_recovery_pending_ambiguous_since", [
+      "jobId",
+      "status",
+      "publishRecoveryPending",
+      "publishAmbiguousSince",
+    ])
     .index("by_job_and_source_media_id", ["jobId", "sourceMediaId"])
     .index("by_product_and_source_media_id", ["productId", "sourceMediaId"])
     .index("by_status_and_updated_at", ["status", "updatedAt"]),
