@@ -8,6 +8,7 @@ import {
   bulkTransformOwnsFailedUpdate,
   bulkTransformResumeTask,
   cacheBustedShopifyImageUrl,
+  classifyBulkTransformRollbackSource,
   classifyBulkTransformSource,
   eligibleShopifyImages,
   normalizeBulkTransformImagePositions,
@@ -198,6 +199,30 @@ describe("bulk transform model", () => {
     ).toBe("transformed");
     expect(
       classifyBulkTransformSource({
+        currentSha256: "merchant-change",
+        sourceSha256: "source",
+        transformedSha256: "mirrored",
+      }),
+    ).toBe("conflict");
+  });
+
+  test("restores only the exact transformed source and stays idempotent", () => {
+    expect(
+      classifyBulkTransformRollbackSource({
+        currentSha256: "mirrored",
+        sourceSha256: "source",
+        transformedSha256: "mirrored",
+      }),
+    ).toBe("restorable");
+    expect(
+      classifyBulkTransformRollbackSource({
+        currentSha256: "source",
+        sourceSha256: "source",
+        transformedSha256: "mirrored",
+      }),
+    ).toBe("already_restored");
+    expect(
+      classifyBulkTransformRollbackSource({
         currentSha256: "merchant-change",
         sourceSha256: "source",
         transformedSha256: "mirrored",

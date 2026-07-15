@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   FlipHorizontal2,
   RotateCcw,
+  Undo2,
   UploadCloud,
 } from "lucide-react";
 
@@ -28,12 +29,14 @@ import type {
 import {
   bulkTransformCanCancel,
   bulkTransformCanPublish,
+  bulkTransformCanRollback,
   bulkTransformCanRetry,
   bulkTransformImagePositionsLabel,
+  bulkTransformDisplayStatusLabel,
   bulkTransformIsTerminal,
   bulkTransformProgress,
   bulkTransformReadyToPublishCount,
-  bulkTransformStatusLabel,
+  bulkTransformRollbackCount,
   MAX_BULK_TRANSFORM_PRODUCTS,
 } from "../lib/bulkImageTransformViewModel";
 
@@ -54,6 +57,7 @@ export function BulkImageTransformDialog({
   onStart,
   onRequestCancel,
   onRequestPublish,
+  onRequestRollback,
   onRetry,
   onClose,
   onRequestDismiss,
@@ -77,6 +81,7 @@ export function BulkImageTransformDialog({
   onStart: () => void;
   onRequestCancel: () => void;
   onRequestPublish: () => void;
+  onRequestRollback: () => void;
   onRetry: () => void;
   onClose: () => void;
   onRequestDismiss: () => void;
@@ -89,6 +94,8 @@ export function BulkImageTransformDialog({
   const progress = job ? bulkTransformProgress(job) : null;
   const terminal = job ? bulkTransformIsTerminal(job.status) : false;
   const canRetry = job ? bulkTransformCanRetry(job) : false;
+  const canRollback = job ? bulkTransformCanRollback(job) : false;
+  const rollbackCount = job ? bulkTransformRollbackCount(job) : 0;
   const failures = job
     ? job.transformFailedItems + job.publishFailedItems + job.conflictItems
     : 0;
@@ -324,7 +331,7 @@ export function BulkImageTransformDialog({
             <div className="grid gap-2">
               <div className="flex items-center justify-between gap-4 text-sm">
                 <span className="font-medium" aria-live="polite">
-                  {bulkTransformStatusLabel(job.status)}
+                  {bulkTransformDisplayStatusLabel(job)}
                 </span>
                 <span className="tabular-nums text-muted-foreground">
                   {progress?.completed ?? 0} / {progress?.total ?? 0}
@@ -337,13 +344,18 @@ export function BulkImageTransformDialog({
                     ? "Progression de l’inventaire des produits Shopify"
                     : progress?.phase === "publish"
                       ? "Progression du remplacement Shopify"
-                      : "Progression de la préparation des miroirs"
+                      : progress?.phase === "rollback"
+                        ? "Progression de la restauration des originaux"
+                        : "Progression de la préparation des miroirs"
                 }
                 aria-valuetext={`${progress?.completed ?? 0} sur ${progress?.total ?? 0} ${progress?.phase === "seed" ? "produits" : "images"}`}
               />
               <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                 <span>{job.transformedItems} préparées</span>
                 <span>{job.publishedItems} remplacées</span>
+                {job.rollbackStatus ? (
+                  <span>{job.rolledBackItems ?? 0} restaurées</span>
+                ) : null}
                 <span>
                   {bulkTransformImagePositionsLabel(job.selectedImagePositions)}
                 </span>
@@ -364,7 +376,7 @@ export function BulkImageTransformDialog({
               </div>
             </div>
 
-            {job.status === "completed" ? (
+            {job.status === "completed" && !job.rollbackStatus ? (
               <Alert>
                 <CheckCircle2 />
                 <AlertTitle>Remplacement terminé</AlertTitle>
@@ -372,6 +384,47 @@ export function BulkImageTransformDialog({
                   {job.publishedItems} image
                   {job.publishedItems === 1 ? "" : "s"} mise
                   {job.publishedItems === 1 ? "" : "s"} à jour sur Shopify.
+                </AlertDescription>
+              </Alert>
+            ) : null}
+
+            {job.rollbackStatus === "running" ? (
+              <Alert>
+                <Undo2 />
+                <AlertTitle>Restauration en cours</AlertTitle>
+                <AlertDescription>
+                  Les originaux sont vérifiés et republiés par lots. Les images
+                  plus récentes sont automatiquement laissées intactes.
+                </AlertDescription>
+              </Alert>
+            ) : null}
+
+            {job.rollbackStatus === "completed" ? (
+              <Alert>
+                <CheckCircle2 />
+                <AlertTitle>Images originales restaurées</AlertTitle>
+                <AlertDescription>
+                  {job.rolledBackItems ?? 0} image
+                  {(job.rolledBackItems ?? 0) === 1
+                    ? " a été restaurée"
+                    : "s ont été restaurées"}{" "}
+                  et vérifiées sur Shopify.
+                </AlertDescription>
+              </Alert>
+            ) : null}
+
+            {job.rollbackStatus === "partial" ? (
+              <Alert>
+                <AlertTriangle />
+                <AlertTitle>Restauration terminée avec alertes</AlertTitle>
+                <AlertDescription>
+                  {job.rolledBackItems ?? 0} restaurée
+                  {(job.rolledBackItems ?? 0) === 1 ? "" : "s"},{" "}
+                  {job.rollbackConflictItems ?? 0} conflit
+                  {(job.rollbackConflictItems ?? 0) === 1 ? "" : "s"} et{" "}
+                  {job.rollbackFailedItems ?? 0} échec
+                  {(job.rollbackFailedItems ?? 0) === 1 ? "" : "s"}. Les images
+                  en conflit n’ont pas été écrasées.
                 </AlertDescription>
               </Alert>
             ) : null}
@@ -501,7 +554,7 @@ export function BulkImageTransformDialog({
             <Button
               type="button"
               variant="outline"
-              disabled={busy}
+              disabled={busy || job.rollbackStatus === "running"}
               onClick={onRequestDismiss}
             >
               <BusyIcon busy={dismissing} />
@@ -555,6 +608,15 @@ export function BulkImageTransformDialog({
               <UploadCloud data-icon="inline-start" />
               Remplacer {readyToPublish} image
               {readyToPublish === 1 ? "" : "s"}
+            </Button>
+          ) : null}
+          {job && canRollback ? (
+            <Button type="button" disabled={busy} onClick={onRequestRollback}>
+              <Undo2 data-icon="inline-start" />
+              {job.rollbackStatus === "partial"
+                ? "Réessayer"
+                : "Restaurer"}{" "}
+              {rollbackCount} image{rollbackCount === 1 ? "" : "s"}
             </Button>
           ) : null}
         </DialogFooter>

@@ -57,10 +57,12 @@ const PRODUCT_LOCK_QUERY_MAX_SIZE = 100;
 // Convex actions have a shorter maximum runtime than this lease. Keeping the
 // lease longer than every Shopify request + polling window prevents a stale
 // resume from fencing out an action that can still mutate the source file.
-const PUBLISH_MEDIA_LEASE_MS =
-  BULK_TRANSFORM_PUBLISH_AMBIGUITY_SETTLE_MS;
+const PUBLISH_MEDIA_LEASE_MS = BULK_TRANSFORM_PUBLISH_AMBIGUITY_SETTLE_MS;
 const PUBLISH_MEDIA_LEASE_RETRY_MS = 5_000;
-const PUBLISH_MEDIA_RECOVERY_RETRY_MS = 30_000;
+// Shopify file updates are independent across media. Keep a small worker pool
+// so a slow CDN verification does not serialize the whole bulk, while the
+// media lease still fences duplicate writes to the same Shopify file.
+const BULK_TRANSFORM_PUBLISH_CONCURRENCY = 4;
 // A stale-job recovery is one Convex transaction. Bound the one-time legacy
 // migration so a fleet of 250-product jobs cannot exceed mutation write limits.
 const LEGACY_PRODUCT_LOCK_RESUME_BUDGET = 500;
@@ -70,6 +72,36 @@ const ACTIVE_JOB_STATUSES = [
   "ready",
   "publishing",
 ] as const;
+
+async function schedulePublishWorkers(
+  ctx: MutationCtx,
+  jobId: Id<"bulkTransformJobs">,
+) {
+  for (
+    let worker = 0;
+    worker < BULK_TRANSFORM_PUBLISH_CONCURRENCY;
+    worker += 1
+  ) {
+    await ctx.scheduler.runAfter(0, internal.bulkTransformsNode.publishNext, {
+      jobId,
+    });
+  }
+}
+
+async function scheduleRollbackWorkers(
+  ctx: MutationCtx,
+  jobId: Id<"bulkTransformJobs">,
+) {
+  for (
+    let worker = 0;
+    worker < BULK_TRANSFORM_PUBLISH_CONCURRENCY;
+    worker += 1
+  ) {
+    await ctx.scheduler.runAfter(0, internal.bulkTransformsNode.rollbackNext, {
+      jobId,
+    });
+  }
+}
 
 type JobReadCtx = QueryCtx | MutationCtx;
 
@@ -298,7 +330,9 @@ async function mediaLeaseShopDomain(
   }
   const shop = await ctx.db.get(job.shopId);
   if (!shop) {
-    throw new Error("The Shopify shop for this bulk operation no longer exists.");
+    throw new Error(
+      "The Shopify shop for this bulk operation no longer exists.",
+    );
   }
   return normalizeShopDomain(shop.domain);
 }
@@ -312,9 +346,7 @@ async function mediaLeaseForItem(
   const lease = await ctx.db
     .query("bulkTransformMediaLeases")
     .withIndex("by_shop_domain_and_source_media_id", (q) =>
-      q
-        .eq("shopDomain", shopDomain)
-        .eq("sourceMediaId", item.sourceMediaId),
+      q.eq("shopDomain", shopDomain).eq("sourceMediaId", item.sourceMediaId),
     )
     .unique();
   return { lease, shopDomain };
@@ -331,13 +363,11 @@ async function ensureMediaProductReference(
 ) {
   const existing = await ctx.db
     .query("bulkTransformMediaProductReferences")
-    .withIndex(
-      "by_shop_domain_and_source_media_id_and_product_id",
-      (q) =>
-        q
-          .eq("shopDomain", args.shopDomain)
-          .eq("sourceMediaId", args.sourceMediaId)
-          .eq("productId", args.productId),
+    .withIndex("by_shop_domain_and_source_media_id_and_product_id", (q) =>
+      q
+        .eq("shopDomain", args.shopDomain)
+        .eq("sourceMediaId", args.sourceMediaId)
+        .eq("productId", args.productId),
     )
     .unique();
   if (existing) {
@@ -362,7 +392,33 @@ async function ownedMediaLease(
   if (
     item.status !== "publishing" ||
     item.publishLeaseToken !== leaseToken ||
-    job.status !== "publishing"
+    (job.status !== "publishing" && job.status !== "cancelled")
+  ) {
+    return null;
+  }
+  const { lease } = await mediaLeaseForItem(ctx, job, item);
+  if (
+    !lease ||
+    lease.jobId !== job._id ||
+    lease.itemId !== item._id ||
+    lease.leaseToken !== leaseToken
+  ) {
+    return null;
+  }
+  return lease;
+}
+
+async function ownedRollbackMediaLease(
+  ctx: JobReadCtx,
+  job: Doc<"bulkTransformJobs">,
+  item: Doc<"bulkTransformItems">,
+  leaseToken: string,
+) {
+  if (
+    item.status !== "published" ||
+    item.rollbackStatus !== "restoring" ||
+    item.rollbackLeaseToken !== leaseToken ||
+    job.rollbackStatus !== "running"
   ) {
     return null;
   }
@@ -444,6 +500,28 @@ export const publish = action({
     )) as ShopifyCredentials;
     await requireShopifyPublicationScopes(credentials);
     await ctx.runMutation(internal.bulkTransforms.startPublishing, {
+      jobId: job._id,
+      userId,
+    });
+    return job._id;
+  },
+});
+
+export const rollback = action({
+  args: { jobId: v.id("bulkTransformJobs") },
+  handler: async (ctx, args): Promise<Id<"bulkTransformJobs">> => {
+    const userId = await requireUserId(ctx);
+    const job = (await ctx.runQuery(internal.bulkTransforms.getJobForUser, {
+      jobId: args.jobId,
+      userId,
+    })) as Doc<"bulkTransformJobs"> | null;
+    if (!job) throw new Error("Bulk transform job not found.");
+    const credentials = (await ctx.runQuery(
+      internal.shops.getShopifyCredentials,
+      { shopId: job.shopId ?? null, userId },
+    )) as ShopifyCredentials;
+    await requireShopifyPublicationScopes(credentials);
+    await ctx.runMutation(internal.bulkTransforms.startRollback, {
       jobId: job._id,
       userId,
     });
@@ -697,6 +775,13 @@ export const list = query({
         completedAt: job.completedAt ?? null,
         dismissedAt: job.dismissedAt ?? null,
         assetsCleanedAt: job.assetsCleanedAt ?? null,
+        rollbackStatus: job.rollbackStatus ?? null,
+        rollbackTotalItems: job.rollbackTotalItems ?? null,
+        rolledBackItems: job.rolledBackItems ?? 0,
+        rollbackFailedItems: job.rollbackFailedItems ?? 0,
+        rollbackConflictItems: job.rollbackConflictItems ?? 0,
+        rollbackStartedAt: job.rollbackStartedAt ?? null,
+        rollbackCompletedAt: job.rollbackCompletedAt ?? null,
       })),
       limit: args.limit,
       hasNext,
@@ -818,6 +903,7 @@ export const retryFailures = action({
     if (
       job.dismissedAt ||
       job.status === "cancelled" ||
+      job.rollbackStatus !== undefined ||
       job.assetsCleanupStartedAt ||
       job.assetsCleanedAt
     ) {
@@ -866,6 +952,7 @@ export const prepareRetry = internalMutation({
     }
     if (
       job.status === "cancelled" ||
+      job.rollbackStatus !== undefined ||
       job.assetsCleanupStartedAt ||
       job.assetsCleanedAt
     ) {
@@ -907,11 +994,30 @@ export const dismiss = mutation({
     if (!bulkTransformJobIsTerminal(job.status)) {
       throw new Error("An active bulk operation cannot be dismissed.");
     }
+    if (job.rollbackStatus === "running") {
+      throw new Error("An active image restoration cannot be dismissed.");
+    }
     const now = Date.now();
     await ctx.db.patch(job._id, { dismissedAt: now, updatedAt: now });
     return job._id;
   },
 });
+
+async function cancelBulkTransformJob(
+  ctx: MutationCtx,
+  job: Doc<"bulkTransformJobs">,
+) {
+  const now = Date.now();
+  await ctx.db.patch(job._id, {
+    status: "cancelled",
+    retryPhase: undefined,
+    completedAt: now,
+    error: null,
+    updatedAt: now,
+  });
+  await releaseProductLocks(ctx, job._id);
+  return job._id;
+}
 
 export const cancel = mutation({
   args: { jobId: v.id("bulkTransformJobs") },
@@ -922,20 +1028,25 @@ export const cancel = mutation({
     if (
       job.status !== "queued" &&
       job.status !== "transforming" &&
-      job.status !== "ready"
+      job.status !== "ready" &&
+      job.status !== "publishing"
     ) {
       throw new Error("This bulk operation can no longer be cancelled safely.");
     }
-    const now = Date.now();
-    await ctx.db.patch(job._id, {
-      status: "cancelled",
-      retryPhase: undefined,
-      completedAt: now,
-      error: null,
-      updatedAt: now,
-    });
-    await releaseProductLocks(ctx, job._id);
-    return job._id;
+    return await cancelBulkTransformJob(ctx, job);
+  },
+});
+
+// Deployment-key-only recovery entrypoint for stopping a live publication
+// when the authenticated frontend is not yet running the matching UI release.
+export const cancelActivePublishing = internalMutation({
+  args: { jobId: v.id("bulkTransformJobs") },
+  handler: async (ctx, args) => {
+    const job = await ctx.db.get(args.jobId);
+    if (!job) throw new Error("Bulk transform job not found.");
+    if (job.status !== "publishing") return job.status;
+    await cancelBulkTransformJob(ctx, job);
+    return "cancelled" as const;
   },
 });
 
@@ -1437,10 +1548,228 @@ export const startPublishing = internalMutation({
       error: null,
       updatedAt: now,
     });
-    await ctx.scheduler.runAfter(0, internal.bulkTransformsNode.publishNext, {
-      jobId: job._id,
-    });
+    await schedulePublishWorkers(ctx, job._id);
     return job._id;
+  },
+});
+
+export const startRollback = internalMutation({
+  args: {
+    jobId: v.id("bulkTransformJobs"),
+    userId: v.id("users"),
+  },
+  handler: async (ctx, args) => {
+    const job = await jobForUser(ctx, args.jobId, args.userId);
+    if (!job) throw new Error("Bulk transform job not found.");
+    if (!bulkTransformJobIsTerminal(job.status)) {
+      throw new Error(
+        "Wait for the bulk operation to finish before restoring its images.",
+      );
+    }
+    if (job.assetsCleanupStartedAt || job.assetsCleanedAt) {
+      throw new Error("The original image backups are no longer available.");
+    }
+    if (job.publishedItems <= 0) {
+      throw new Error(
+        "This bulk operation did not replace any Shopify images.",
+      );
+    }
+    const activePublication = await ctx.db
+      .query("bulkTransformItems")
+      .withIndex("by_job_and_status", (q) =>
+        q.eq("jobId", job._id).eq("status", "publishing"),
+      )
+      .first();
+    if (activePublication) {
+      throw new Error(
+        "Shopify is still settling the cancellation. Try the restoration again in a few moments.",
+      );
+    }
+    if (job.rollbackStatus === "running") return job._id;
+    const failedItems = job.rollbackFailedItems ?? 0;
+    if (job.rollbackStatus === "completed") {
+      throw new Error(
+        "All eligible images from this bulk are already restored.",
+      );
+    }
+    if (job.rollbackStatus === "partial" && failedItems <= 0) {
+      throw new Error(
+        "No restoration failure can be retried. Conflicting images were left untouched.",
+      );
+    }
+    const now = Date.now();
+    await ctx.db.patch(job._id, {
+      rollbackStatus: "running",
+      rollbackTotalItems: job.rollbackTotalItems ?? job.publishedItems,
+      rollbackFailedItems: job.rollbackStatus === "partial" ? 0 : failedItems,
+      rollbackRunNumber: (job.rollbackRunNumber ?? 0) + 1,
+      rollbackStartedAt: job.rollbackStartedAt ?? now,
+      rollbackCompletedAt: undefined,
+      updatedAt: now,
+    });
+    await scheduleRollbackWorkers(ctx, job._id);
+    return job._id;
+  },
+});
+
+export const claimNextRollback = internalMutation({
+  args: { jobId: v.id("bulkTransformJobs") },
+  handler: async (ctx, args) => {
+    const job = await ctx.db.get(args.jobId);
+    if (!job || job.rollbackStatus !== "running") return null;
+    const activeItems = await ctx.db
+      .query("bulkTransformItems")
+      .withIndex("by_job_and_rollback_status", (q) =>
+        q.eq("jobId", job._id).eq("rollbackStatus", "restoring"),
+      )
+      .take(BULK_TRANSFORM_PUBLISH_CONCURRENCY);
+    if (activeItems.length >= BULK_TRANSFORM_PUBLISH_CONCURRENCY) return null;
+    const now = Date.now();
+    const recoveryCutoff = now - BULK_TRANSFORM_PUBLISH_AMBIGUITY_SETTLE_MS;
+    const runNumber = job.rollbackRunNumber ?? 1;
+    const candidateLimit = BULK_TRANSFORM_PUBLISH_CONCURRENCY * 2;
+    const candidateGroups = await Promise.all([
+      ctx.db
+        .query("bulkTransformItems")
+        .withIndex("by_job_status_and_rollback_status", (q) =>
+          q
+            .eq("jobId", job._id)
+            .eq("status", "published")
+            .eq("rollbackStatus", undefined),
+        )
+        .take(candidateLimit),
+      ctx.db
+        .query("bulkTransformItems")
+        .withIndex("by_job_rollback_recovery_and_ambiguous_since", (q) =>
+          q
+            .eq("jobId", job._id)
+            .eq("rollbackStatus", "queued")
+            .eq("rollbackRecoveryPending", undefined),
+        )
+        .take(candidateLimit),
+      ctx.db
+        .query("bulkTransformItems")
+        .withIndex("by_job_rollback_recovery_and_ambiguous_since", (q) =>
+          q
+            .eq("jobId", job._id)
+            .eq("rollbackStatus", "queued")
+            .eq("rollbackRecoveryPending", true)
+            .lte("rollbackAmbiguousSince", recoveryCutoff),
+        )
+        .take(candidateLimit),
+      ctx.db
+        .query("bulkTransformItems")
+        .withIndex("by_job_rollback_status_and_attempt_cycle", (q) =>
+          q
+            .eq("jobId", job._id)
+            .eq("rollbackStatus", "failed")
+            .lt("rollbackAttemptCycle", runNumber),
+        )
+        .take(candidateLimit),
+    ]);
+    const candidates = candidateGroups.flat();
+    for (const item of candidates) {
+      const { lease: existingLease, shopDomain } = await mediaLeaseForItem(
+        ctx,
+        job,
+        item,
+      );
+      if (existingLease && existingLease.expiresAt > now) continue;
+      if (existingLease) await ctx.db.delete(existingLease._id);
+      const rollbackAttempts = (item.rollbackAttempts ?? 0) + 1;
+      const rollbackLeaseToken = `${item._id}:rollback:${rollbackAttempts}:${now}`;
+      await ctx.db.insert("bulkTransformMediaLeases", {
+        shopDomain,
+        sourceMediaId: item.sourceMediaId,
+        jobId: job._id,
+        itemId: item._id,
+        leaseToken: rollbackLeaseToken,
+        expiresAt: now + PUBLISH_MEDIA_LEASE_MS,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await ctx.db.patch(item._id, {
+        rollbackStatus: "restoring",
+        rollbackAttempts,
+        rollbackAttemptCycle: runNumber,
+        rollbackLeaseToken,
+        rollbackStartedAt: item.rollbackStartedAt ?? now,
+        rollbackError: null,
+        updatedAt: now,
+      });
+      await ctx.db.patch(job._id, { updatedAt: now });
+      return {
+        ...item,
+        rollbackStatus: "restoring" as const,
+        rollbackAttempts,
+        rollbackAttemptCycle: runNumber,
+        rollbackLeaseToken,
+      };
+    }
+    if (candidates.length) {
+      await ctx.scheduler.runAfter(
+        PUBLISH_MEDIA_LEASE_RETRY_MS,
+        internal.bulkTransformsNode.rollbackNext,
+        { jobId: job._id },
+      );
+    }
+    return null;
+  },
+});
+
+export const renewRollbackMediaLease = internalMutation({
+  args: {
+    itemId: v.id("bulkTransformItems"),
+    leaseToken: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const item = await ctx.db.get(args.itemId);
+    if (!item) return null;
+    const job = await ctx.db.get(item.jobId);
+    if (!job) return null;
+    const lease = await ownedRollbackMediaLease(
+      ctx,
+      job,
+      item,
+      args.leaseToken,
+    );
+    if (!lease) return null;
+    const now = Date.now();
+    const expiresAt = now + PUBLISH_MEDIA_LEASE_MS;
+    await ctx.db.patch(lease._id, { expiresAt, updatedAt: now });
+    await ctx.db.patch(item._id, { updatedAt: now });
+    await ctx.db.patch(job._id, { updatedAt: now });
+    return expiresAt;
+  },
+});
+
+export const markRollbackFileUpdateAccepted = internalMutation({
+  args: {
+    itemId: v.id("bulkTransformItems"),
+    leaseToken: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const item = await ctx.db.get(args.itemId);
+    if (!item) return null;
+    const job = await ctx.db.get(item.jobId);
+    if (!job) return null;
+    const lease = await ownedRollbackMediaLease(
+      ctx,
+      job,
+      item,
+      args.leaseToken,
+    );
+    if (!lease) return null;
+    const now = Date.now();
+    await ctx.db.patch(item._id, {
+      rollbackFileUpdateAcceptedAt: now,
+      updatedAt: now,
+    });
+    await ctx.db.patch(lease._id, {
+      expiresAt: now + PUBLISH_MEDIA_LEASE_MS,
+      updatedAt: now,
+    });
+    return now;
   },
 });
 
@@ -1449,15 +1778,36 @@ export const claimNextPublish = internalMutation({
   handler: async (ctx, args) => {
     const job = await ctx.db.get(args.jobId);
     if (!job || job.status !== "publishing") return null;
-    const item = await ctx.db
+    const activeItems = await ctx.db
       .query("bulkTransformItems")
       .withIndex("by_job_and_status", (q) =>
-        q.eq("jobId", job._id).eq("status", "ready"),
+        q.eq("jobId", job._id).eq("status", "publishing"),
       )
-      .order("asc")
-      .first();
-    if (!item) return null;
+      .take(BULK_TRANSFORM_PUBLISH_CONCURRENCY);
+    if (activeItems.length >= BULK_TRANSFORM_PUBLISH_CONCURRENCY) return null;
     const now = Date.now();
+    const recoveryCutoff = now - BULK_TRANSFORM_PUBLISH_AMBIGUITY_SETTLE_MS;
+    const item =
+      (await ctx.db
+        .query("bulkTransformItems")
+        .withIndex("by_job_status_recovery_pending_ambiguous_since", (q) =>
+          q
+            .eq("jobId", job._id)
+            .eq("status", "ready")
+            .eq("publishRecoveryPending", undefined),
+        )
+        .first()) ??
+      (await ctx.db
+        .query("bulkTransformItems")
+        .withIndex("by_job_status_recovery_pending_ambiguous_since", (q) =>
+          q
+            .eq("jobId", job._id)
+            .eq("status", "ready")
+            .eq("publishRecoveryPending", true)
+            .lte("publishAmbiguousSince", recoveryCutoff),
+        )
+        .first());
+    if (!item) return null;
     const { lease: existingLease, shopDomain } = await mediaLeaseForItem(
       ctx,
       job,
@@ -1465,14 +1815,10 @@ export const claimNextPublish = internalMutation({
     );
     const resumingOwnedLease = Boolean(
       existingLease &&
-        existingLease.jobId === job._id &&
-        existingLease.itemId === item._id,
+      existingLease.jobId === job._id &&
+      existingLease.itemId === item._id,
     );
-    if (
-      existingLease &&
-      !resumingOwnedLease &&
-      existingLease.expiresAt > now
-    ) {
+    if (existingLease && !resumingOwnedLease && existingLease.expiresAt > now) {
       await ctx.db.patch(job._id, { updatedAt: now });
       await ctx.scheduler.runAfter(
         PUBLISH_MEDIA_LEASE_RETRY_MS,
@@ -1619,15 +1965,17 @@ async function finishPublish(
   const succeeded = Boolean(args.publishedUrl);
   const conflict = !succeeded && args.conflict === true;
   const safeToRelease = succeeded || args.safeToRelease !== false;
+  const cancelled = job.status === "cancelled";
   const now = Date.now();
   if (!safeToRelease) {
+    const publishAmbiguousSince = args.resetAmbiguityWindow
+      ? now
+      : (item.publishAmbiguousSince ?? now);
     await ctx.db.patch(item._id, {
       status: "ready",
       publishLeaseToken: undefined,
       publishRecoveryPending: true,
-      publishAmbiguousSince: args.resetAmbiguityWindow
-        ? now
-        : item.publishAmbiguousSince ?? now,
+      publishAmbiguousSince,
       processingStartedAt: undefined,
       error: args.error ?? null,
       updatedAt: now,
@@ -1637,16 +1985,33 @@ async function finishPublish(
       updatedAt: now,
     });
     await ctx.db.patch(job._id, {
-      error:
-        args.error ??
-        "Shopify is still resolving an earlier file update; publication recovery will retry.",
+      ...(cancelled
+        ? {}
+        : {
+            error:
+              args.error ??
+              "Shopify is still resolving an earlier file update; publication recovery will retry.",
+          }),
       updatedAt: now,
     });
-    await ctx.scheduler.runAfter(
-      PUBLISH_MEDIA_RECOVERY_RETRY_MS,
-      internal.bulkTransformsNode.publishNext,
-      { jobId: job._id },
-    );
+    if (!cancelled) {
+      // Replace the worker immediately so unrelated media continue. A second,
+      // exact wake-up makes the deferred media eligible once Shopify's ambiguity
+      // window has elapsed. claimNextPublish enforces the global worker cap.
+      await ctx.scheduler.runAfter(0, internal.bulkTransformsNode.publishNext, {
+        jobId: job._id,
+      });
+      await ctx.scheduler.runAfter(
+        Math.max(
+          0,
+          publishAmbiguousSince +
+            BULK_TRANSFORM_PUBLISH_AMBIGUITY_SETTLE_MS -
+            now,
+        ),
+        internal.bulkTransformsNode.publishNext,
+        { jobId: job._id },
+      );
+    }
     return { done: false, recovering: true };
   }
   const publishedItems = job.publishedItems + (succeeded ? 1 : 0);
@@ -1723,7 +2088,7 @@ async function finishPublish(
     publishedItems,
     publishFailedItems,
     conflictItems,
-    ...(done
+    ...(done && !cancelled
       ? {
           status: hasFailures ? ("partial" as const) : ("completed" as const),
           completedAt: now,
@@ -1735,8 +2100,8 @@ async function finishPublish(
     updatedAt: now,
   });
   await ctx.db.delete(lease._id);
-  if (done) await releaseProductLocks(ctx, job._id);
-  if (!done) {
+  if (done && !cancelled) await releaseProductLocks(ctx, job._id);
+  if (!done && !cancelled) {
     await ctx.scheduler.runAfter(0, internal.bulkTransformsNode.publishNext, {
       jobId: job._id,
     });
@@ -1773,9 +2138,7 @@ export const refreshPublishedProductCaches = internalMutation({
     const publicationHead = await ctx.db
       .query("bulkTransformMediaPublicationHeads")
       .withIndex("by_shop_domain_and_source_media_id", (q) =>
-        q
-          .eq("shopDomain", shopDomain)
-          .eq("sourceMediaId", item.sourceMediaId),
+        q.eq("shopDomain", shopDomain).eq("sourceMediaId", item.sourceMediaId),
       )
       .unique();
     if (!publicationHead || publicationHead.itemId !== item._id) {
@@ -1784,9 +2147,7 @@ export const refreshPublishedProductCaches = internalMutation({
     const referencePage = await ctx.db
       .query("bulkTransformMediaProductReferences")
       .withIndex("by_shop_domain_and_source_media_id", (q) =>
-        q
-          .eq("shopDomain", shopDomain)
-          .eq("sourceMediaId", item.sourceMediaId),
+        q.eq("shopDomain", shopDomain).eq("sourceMediaId", item.sourceMediaId),
       )
       .paginate({
         cursor: args.referenceCursor ?? null,
@@ -1800,10 +2161,7 @@ export const refreshPublishedProductCaches = internalMutation({
     );
     const productIds = useReferenceIndex
       ? referencePage.page.map((reference) => reference.productId)
-      : item.referencedProductIds.slice(
-          args.nextProductIndex,
-          legacyEndIndex,
-        );
+      : item.referencedProductIds.slice(args.nextProductIndex, legacyEndIndex);
     const products = await Promise.all(
       productIds.map((productId) => ctx.db.get(productId)),
     );
@@ -1855,6 +2213,256 @@ export const refreshPublishedProductCaches = internalMutation({
       done,
       nextProductIndex,
     };
+  },
+});
+
+async function finishRollback(
+  ctx: MutationCtx,
+  args: {
+    itemId: Id<"bulkTransformItems">;
+    leaseToken: string;
+    outcome: "restored" | "failed" | "conflict";
+    error?: string;
+    resolvedUrl?: string;
+    resolvedSha256?: string;
+    safeToRelease?: boolean;
+    resetAmbiguityWindow?: boolean;
+  },
+) {
+  const item = await ctx.db.get(args.itemId);
+  if (!item) return null;
+  const job = await ctx.db.get(item.jobId);
+  if (!job) return null;
+  const lease = await ownedRollbackMediaLease(ctx, job, item, args.leaseToken);
+  if (!lease) return null;
+  const now = Date.now();
+  if (args.safeToRelease === false) {
+    const rollbackAmbiguousSince = args.resetAmbiguityWindow
+      ? now
+      : (item.rollbackAmbiguousSince ?? now);
+    await ctx.db.patch(item._id, {
+      rollbackStatus: "queued",
+      rollbackLeaseToken: undefined,
+      rollbackRecoveryPending: true,
+      rollbackAmbiguousSince,
+      rollbackError: args.error ?? null,
+      updatedAt: now,
+    });
+    await ctx.db.patch(lease._id, {
+      expiresAt: now + PUBLISH_MEDIA_LEASE_MS,
+      updatedAt: now,
+    });
+    await ctx.db.patch(job._id, { updatedAt: now });
+    await ctx.scheduler.runAfter(0, internal.bulkTransformsNode.rollbackNext, {
+      jobId: job._id,
+    });
+    await ctx.scheduler.runAfter(
+      Math.max(
+        0,
+        rollbackAmbiguousSince +
+          BULK_TRANSFORM_PUBLISH_AMBIGUITY_SETTLE_MS -
+          now,
+      ),
+      internal.bulkTransformsNode.rollbackNext,
+      { jobId: job._id },
+    );
+    return { done: false, recovering: true };
+  }
+
+  const restored = args.outcome === "restored";
+  const conflict = args.outcome === "conflict";
+  const rolledBackItems = (job.rolledBackItems ?? 0) + (restored ? 1 : 0);
+  const rollbackFailedItems =
+    (job.rollbackFailedItems ?? 0) + (!restored && !conflict ? 1 : 0);
+  const rollbackConflictItems =
+    (job.rollbackConflictItems ?? 0) + (conflict ? 1 : 0);
+  const total = job.rollbackTotalItems ?? job.publishedItems;
+  const done =
+    rolledBackItems + rollbackFailedItems + rollbackConflictItems >= total;
+  await ctx.db.patch(item._id, {
+    rollbackStatus: args.outcome,
+    rollbackLeaseToken: undefined,
+    rollbackRecoveryPending: undefined,
+    rollbackAmbiguousSince: undefined,
+    rollbackFileUpdateAcceptedAt: undefined,
+    rollbackError: args.error ?? null,
+    rolledBackAt: restored ? now : item.rolledBackAt,
+    rollbackResolvedUrl: args.resolvedUrl ?? item.rollbackResolvedUrl ?? null,
+    rollbackResolvedSha256:
+      args.resolvedSha256 ?? item.rollbackResolvedSha256 ?? null,
+    updatedAt: now,
+  });
+
+  if ((restored || conflict) && args.resolvedUrl && args.resolvedSha256) {
+    const publicationHead = await ctx.db
+      .query("bulkTransformMediaPublicationHeads")
+      .withIndex("by_shop_domain_and_source_media_id", (q) =>
+        q
+          .eq("shopDomain", lease.shopDomain)
+          .eq("sourceMediaId", item.sourceMediaId),
+      )
+      .unique();
+    if (publicationHead?.itemId === item._id) {
+      await ctx.db.delete(publicationHead._id);
+    }
+    await ctx.scheduler.runAfter(
+      0,
+      internal.bulkTransforms.refreshRollbackProductCaches,
+      { itemId: item._id, nextProductIndex: 0 },
+    );
+  }
+
+  await ctx.db.patch(job._id, {
+    rolledBackItems,
+    rollbackFailedItems,
+    rollbackConflictItems,
+    ...(done
+      ? {
+          rollbackStatus:
+            rollbackFailedItems + rollbackConflictItems > 0
+              ? ("partial" as const)
+              : ("completed" as const),
+          rollbackCompletedAt: now,
+        }
+      : {}),
+    updatedAt: now,
+  });
+  await ctx.db.delete(lease._id);
+  if (!done) {
+    await ctx.scheduler.runAfter(0, internal.bulkTransformsNode.rollbackNext, {
+      jobId: job._id,
+    });
+  }
+  return { done };
+}
+
+export const markRollbackRestored = internalMutation({
+  args: {
+    itemId: v.id("bulkTransformItems"),
+    leaseToken: v.string(),
+    resolvedUrl: v.string(),
+    resolvedSha256: v.string(),
+  },
+  handler: async (ctx, args) =>
+    await finishRollback(ctx, { ...args, outcome: "restored" }),
+});
+
+export const markRollbackFailed = internalMutation({
+  args: {
+    itemId: v.id("bulkTransformItems"),
+    leaseToken: v.string(),
+    error: v.string(),
+    conflict: v.optional(v.boolean()),
+    resolvedUrl: v.optional(v.string()),
+    resolvedSha256: v.optional(v.string()),
+    safeToRelease: v.boolean(),
+    resetAmbiguityWindow: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) =>
+    await finishRollback(ctx, {
+      ...args,
+      outcome: args.conflict ? "conflict" : "failed",
+    }),
+});
+
+export const refreshRollbackProductCaches = internalMutation({
+  args: {
+    itemId: v.id("bulkTransformItems"),
+    nextProductIndex: v.number(),
+    referenceCursor: v.optional(v.union(v.string(), v.null())),
+  },
+  handler: async (ctx, args) => {
+    if (!Number.isInteger(args.nextProductIndex) || args.nextProductIndex < 0) {
+      throw new Error("Rollback cache cursor must be a non-negative integer.");
+    }
+    const item = await ctx.db.get(args.itemId);
+    if (
+      !item ||
+      (item.rollbackStatus !== "restored" &&
+        item.rollbackStatus !== "conflict") ||
+      !item.rollbackResolvedUrl ||
+      !item.rollbackResolvedSha256
+    ) {
+      return null;
+    }
+    const job = await ctx.db.get(item.jobId);
+    if (!job) return null;
+    const shopDomain = await mediaLeaseShopDomain(ctx, job);
+    const publicationHead = await ctx.db
+      .query("bulkTransformMediaPublicationHeads")
+      .withIndex("by_shop_domain_and_source_media_id", (q) =>
+        q.eq("shopDomain", shopDomain).eq("sourceMediaId", item.sourceMediaId),
+      )
+      .unique();
+    if (publicationHead) {
+      return { updatedProducts: 0, done: true, nextProductIndex: null };
+    }
+    const referencePage = await ctx.db
+      .query("bulkTransformMediaProductReferences")
+      .withIndex("by_shop_domain_and_source_media_id", (q) =>
+        q.eq("shopDomain", shopDomain).eq("sourceMediaId", item.sourceMediaId),
+      )
+      .paginate({
+        cursor: args.referenceCursor ?? null,
+        numItems: PUBLISHED_CACHE_UPDATE_BATCH_SIZE,
+      });
+    const useReferenceIndex =
+      args.referenceCursor !== undefined || referencePage.page.length > 0;
+    const legacyEndIndex = Math.min(
+      item.referencedProductIds.length,
+      args.nextProductIndex + PUBLISHED_CACHE_UPDATE_BATCH_SIZE,
+    );
+    const productIds = useReferenceIndex
+      ? referencePage.page.map((reference) => reference.productId)
+      : item.referencedProductIds.slice(args.nextProductIndex, legacyEndIndex);
+    const products = await Promise.all(
+      productIds.map((productId) => ctx.db.get(productId)),
+    );
+    const displayUrl = cacheBustedShopifyImageUrl(
+      item.rollbackResolvedUrl,
+      item.rollbackResolvedSha256,
+    );
+    let updatedProducts = 0;
+    const now = Date.now();
+    for (const product of products) {
+      if (!product) continue;
+      const cached = replaceCachedShopifyImageUrl({
+        images: product.currentShopifyImages,
+        mediaId: item.sourceMediaId,
+        url: item.rollbackResolvedUrl,
+        displayUrl,
+      });
+      if (!cached.replaced) continue;
+      const first = cached.images[0] as
+        | { url?: string | null; displayUrl?: string | null }
+        | undefined;
+      await ctx.db.patch(product._id, {
+        currentShopifyImages: cached.images,
+        featuredImageUrl: first?.url ?? product.featuredImageUrl ?? null,
+        updatedAt: now,
+      });
+      updatedProducts += 1;
+    }
+    const done = useReferenceIndex
+      ? referencePage.isDone
+      : legacyEndIndex >= item.referencedProductIds.length;
+    const nextProductIndex = done
+      ? null
+      : args.nextProductIndex + productIds.length;
+    if (!done) {
+      await ctx.scheduler.runAfter(
+        0,
+        internal.bulkTransforms.refreshRollbackProductCaches,
+        {
+          itemId: item._id,
+          nextProductIndex: nextProductIndex!,
+          ...(useReferenceIndex
+            ? { referenceCursor: referencePage.continueCursor }
+            : {}),
+        },
+      );
+    }
+    return { updatedProducts, done, nextProductIndex };
   },
 });
 
@@ -1948,13 +2556,15 @@ export const resetFailures = internalMutation({
         retryPhase: undefined,
         updatedAt: now,
       });
-      await ctx.scheduler.runAfter(
-        0,
-        args.phase === "publish"
-          ? internal.bulkTransformsNode.publishNext
-          : internal.bulkTransformsNode.transformNext,
-        { jobId: job._id },
-      );
+      if (args.phase === "publish") {
+        await schedulePublishWorkers(ctx, job._id);
+      } else {
+        await ctx.scheduler.runAfter(
+          0,
+          internal.bulkTransformsNode.transformNext,
+          { jobId: job._id },
+        );
+      }
     }
     return { reset: failed.length };
   },
@@ -1983,6 +2593,12 @@ export const resumeStaleJobs = internalMutation({
         q.eq("status", "publishing").lte("updatedAt", cutoff),
       )
       .take(10);
+    const staleRollbackJobs = await ctx.db
+      .query("bulkTransformJobs")
+      .withIndex("by_rollback_status_and_updated_at", (q) =>
+        q.eq("rollbackStatus", "running").lte("updatedAt", cutoff),
+      )
+      .take(10);
     const staleTransforms = await ctx.db
       .query("bulkTransformItems")
       .withIndex("by_status_and_updated_at", (q) =>
@@ -1995,12 +2611,21 @@ export const resumeStaleJobs = internalMutation({
         q.eq("status", "publishing").lte("updatedAt", cutoff),
       )
       .take(10);
+    const staleRollbacks = await ctx.db
+      .query("bulkTransformItems")
+      .withIndex("by_rollback_status_and_updated_at", (q) =>
+        q.eq("rollbackStatus", "restoring").lte("updatedAt", cutoff),
+      )
+      .take(10);
     const resumeJobIds = new Set<Id<"bulkTransformJobs">>([
       ...staleQueuedJobs.map((job) => job._id),
       ...staleTransformJobs.map((job) => job._id),
       ...stalePublishJobs.map((job) => job._id),
     ]);
     const protectedPublishJobIds = new Set<Id<"bulkTransformJobs">>();
+    const rollbackResumeJobIds = new Set<Id<"bulkTransformJobs">>(
+      staleRollbackJobs.map((job) => job._id),
+    );
     for (const item of staleTransforms) {
       await ctx.db.patch(item._id, {
         status: "queued",
@@ -2015,9 +2640,9 @@ export const resumeStaleJobs = internalMutation({
         const { lease } = await mediaLeaseForItem(ctx, job, item);
         const ownsLease = Boolean(
           lease &&
-            lease.jobId === job._id &&
-            lease.itemId === item._id &&
-            lease.leaseToken === item.publishLeaseToken,
+          lease.jobId === job._id &&
+          lease.itemId === item._id &&
+          lease.leaseToken === item.publishLeaseToken,
         );
         if (ownsLease && lease!.expiresAt > now) {
           protectedPublishJobIds.add(job._id);
@@ -2033,14 +2658,36 @@ export const resumeStaleJobs = internalMutation({
       });
       resumeJobIds.add(item.jobId);
     }
+    for (const item of staleRollbacks) {
+      const job = await ctx.db.get(item.jobId);
+      if (job && item.rollbackLeaseToken) {
+        const { lease } = await mediaLeaseForItem(ctx, job, item);
+        const ownsLease = Boolean(
+          lease &&
+          lease.jobId === job._id &&
+          lease.itemId === item._id &&
+          lease.leaseToken === item.rollbackLeaseToken,
+        );
+        if (ownsLease && lease!.expiresAt > now) continue;
+        if (ownsLease) await ctx.db.delete(lease!._id);
+      }
+      await ctx.db.patch(item._id, {
+        rollbackStatus: "queued",
+        rollbackLeaseToken: undefined,
+        rollbackRecoveryPending: true,
+        rollbackAmbiguousSince: item.rollbackAmbiguousSince ?? now,
+        updatedAt: now,
+      });
+      rollbackResumeJobIds.add(item.jobId);
+    }
     for (const jobId of protectedPublishJobIds) resumeJobIds.delete(jobId);
     let resumedSeeding = 0;
     let resumedTransforms = 0;
     let resumedPublishes = 0;
     let resumedResets = 0;
+    let resumedRollbacks = 0;
     let deferredLegacyProductLocks = 0;
-    let remainingLegacyProductLockBudget =
-      LEGACY_PRODUCT_LOCK_RESUME_BUDGET;
+    let remainingLegacyProductLockBudget = LEGACY_PRODUCT_LOCK_RESUME_BUDGET;
     for (const jobId of resumeJobIds) {
       const job = await ctx.db.get(jobId);
       if (!job) continue;
@@ -2078,18 +2725,22 @@ export const resumeStaleJobs = internalMutation({
         );
       } else {
         resumedPublishes += 1;
-        await ctx.scheduler.runAfter(
-          0,
-          internal.bulkTransformsNode.publishNext,
-          { jobId: job._id },
-        );
+        await schedulePublishWorkers(ctx, job._id);
       }
+    }
+    for (const jobId of rollbackResumeJobIds) {
+      const job = await ctx.db.get(jobId);
+      if (!job || job.rollbackStatus !== "running") continue;
+      await ctx.db.patch(job._id, { updatedAt: now });
+      await scheduleRollbackWorkers(ctx, job._id);
+      resumedRollbacks += 1;
     }
     return {
       resumedSeeding,
       resumedTransforms,
       resumedPublishes,
       resumedResets,
+      resumedRollbacks,
       deferredLegacyProductLocks,
     };
   },
@@ -2147,6 +2798,7 @@ export const markAssetsCleaned = internalMutation({
     if (
       !job ||
       job.assetsCleanedAt ||
+      job.rollbackStatus === "running" ||
       job.assetsCleanupStartedAt !== args.leaseStartedAt
     ) {
       return null;
@@ -2170,7 +2822,9 @@ export const claimAssetsCleanup = internalMutation({
   args: { jobId: v.id("bulkTransformJobs"), cutoff: v.number() },
   handler: async (ctx, args) => {
     const job = await ctx.db.get(args.jobId);
-    if (!job || job.assetsCleanedAt) return null;
+    if (!job || job.assetsCleanedAt || job.rollbackStatus === "running") {
+      return null;
+    }
     const eligible =
       (bulkTransformJobIsTerminal(job.status) &&
         Boolean(job.completedAt && job.completedAt <= args.cutoff)) ||
@@ -2201,6 +2855,7 @@ export const isAssetsCleanupLeaseActive = internalQuery({
     return Boolean(
       job &&
       !job.assetsCleanedAt &&
+      job.rollbackStatus !== "running" &&
       job.assetsCleanupStartedAt === args.leaseStartedAt,
     );
   },
