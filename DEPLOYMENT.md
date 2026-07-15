@@ -32,7 +32,7 @@ GEMINI_API_KEY, GEMINI_IMAGE_MODEL, GEMINI_IMAGE_REQUESTS_PER_MINUTE
 
 # Shopify
 SHOPIFY_SHOP_DOMAIN, SHOPIFY_CLIENT_ID, SHOPIFY_CLIENT_SECRET,
-SHOPIFY_API_VERSION, SHOPIFY_PRODUCT_QUERY
+SHOPIFY_API_VERSION, SHOPIFY_PRODUCT_QUERY, SHOPIFY_OAUTH_REDIRECT_URL
 
 # Cloudflare R2 storage
 R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET,
@@ -59,6 +59,11 @@ Notes:
   npx @convex-dev/auth --prod
   ```
   (This also sets `SITE_URL`.)
+- Set `SHOPIFY_OAUTH_REDIRECT_URL` to the production Convex HTTP callback:
+  `https://<production-deployment>.convex.site/shopify/oauth/callback`. Add this
+  exact URL to the app version's allowed redirection URLs in the Shopify Dev
+  Dashboard. The in-app **Autoriser dans Shopify** action uses this callback to
+  verify Shopify's signature and save the newly authorized offline token.
 
 ## 2. Get a Convex production deploy key
 

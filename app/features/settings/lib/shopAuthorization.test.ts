@@ -134,12 +134,12 @@ describe("shop authorization state", () => {
         status: "unknown",
       }),
     ).toThrow("Réponse d'autorisation Shopify invalide.");
-    expect(() =>
+    expect(
       parseShopifyAuthorizationStatus({
         ...authorization("requested"),
         authorizationUrl: null,
-      }),
-    ).toThrow("Réponse d'autorisation Shopify invalide.");
+      }).authorizationUrl,
+    ).toBeNull();
     expect(() =>
       parseShopifyAuthorizationStatus({
         ...authorization("granted"),

@@ -17,6 +17,7 @@ export type ShopifyCredentials = {
   storeHandle: string;
   clientId: string;
   clientSecret: string;
+  accessToken?: string;
   productQuery: string;
 };
 
@@ -216,6 +217,7 @@ export function shopifyCredentialsForShop(shop: Doc<"shops"> | null | undefined)
     storeHandle: storeHandleFromDomain(domain),
     clientId,
     clientSecret,
+    ...(shop.accessToken ? { accessToken: shop.accessToken } : {}),
     productQuery: shop.productQuery ?? envProductQuery()
   };
 }

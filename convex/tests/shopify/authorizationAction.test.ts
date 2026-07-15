@@ -18,10 +18,18 @@ describe("Shopify authorization action access", () => {
     await expect(t.action(api.shopify.authorizationStatus, {})).rejects.toThrow(
       "Authentication required",
     );
+    await expect(t.action(api.shopify.beginAuthorization, {})).rejects.toThrow(
+      "Authentication required",
+    );
     await expect(
       t
         .withIdentity({ subject: pendingUserId })
         .action(api.shopify.authorizationStatus, {}),
+    ).rejects.toThrow("waiting for admin approval");
+    await expect(
+      t
+        .withIdentity({ subject: pendingUserId })
+        .action(api.shopify.beginAuthorization, {}),
     ).rejects.toThrow("waiting for admin approval");
   });
 
