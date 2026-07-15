@@ -36,15 +36,36 @@ type BulkHistoryCursor = FunctionArgs<typeof api.bulkTransforms.list>["cursor"];
 
 const BULK_HISTORY_PAGE_SIZE = 20;
 
-function statusTone(status: ListedBulkOperation["status"]) {
-  if (status === "completed") return "success" as const;
-  if (status === "failed" || status === "cancelled") {
+function statusTone(job: ListedBulkOperation) {
+  if (job.rollbackStatus === "completed") return "success" as const;
+  if (job.rollbackStatus === "running" || job.rollbackStatus === "partial") {
+    return "warning" as const;
+  }
+  if (job.status === "completed") return "success" as const;
+  if (job.status === "failed" || job.status === "cancelled") {
     return "danger" as const;
   }
   return "warning" as const;
 }
 
+function operationStatusLabel(job: ListedBulkOperation) {
+  if (job.rollbackStatus === "running") return "Restauration";
+  if (job.rollbackStatus === "completed") return "Originaux restaurés";
+  if (job.rollbackStatus === "partial") return "Restauration avec alertes";
+  return bulkTransformStatusLabel(job.status);
+}
+
 function operationProgress(job: ListedBulkOperation) {
+  if (job.rollbackStatus) {
+    const completed =
+      job.rolledBackItems + job.rollbackFailedItems + job.rollbackConflictItems;
+    const total = job.rollbackTotalItems ?? job.publishedItems;
+    return {
+      completed,
+      total,
+      label: `${completed}/${total} images restaurées ou vérifiées`,
+    };
+  }
   if (job.status === "queued") {
     return {
       completed: job.seededProductCount,
@@ -166,17 +187,23 @@ function BulkOperationsForShop() {
                   job.conflictItems +
                   job.skippedItems +
                   job.unsupportedItems;
+                const rollbackFailures =
+                  job.rollbackFailedItems + job.rollbackConflictItems;
                 const resultSummary = job.error
                   ? job.error
-                  : failures
-                    ? `${failures} élément${failures === 1 ? "" : "s"} non traité${failures === 1 ? "" : "s"}`
-                    : "Aucune erreur";
+                  : job.rollbackStatus && rollbackFailures
+                    ? `${rollbackFailures} restauration${rollbackFailures === 1 ? "" : "s"} en échec ou conflit`
+                    : job.rollbackStatus === "completed"
+                      ? "Toutes les images éligibles ont été restaurées"
+                      : failures
+                        ? `${failures} élément${failures === 1 ? "" : "s"} non traité${failures === 1 ? "" : "s"}`
+                        : "Aucune erreur";
                 return (
                   <TableRow key={job._id}>
                     <TableCell>
                       <div className="flex flex-wrap gap-1">
-                        <StateBadge state={statusTone(job.status)}>
-                          {bulkTransformStatusLabel(job.status)}
+                        <StateBadge state={statusTone(job)}>
+                          {operationStatusLabel(job)}
                         </StateBadge>
                         {job.dismissedAt ? (
                           <StateBadge>Archivé</StateBadge>
@@ -210,6 +237,9 @@ function BulkOperationsForShop() {
                       <p className="text-sm">
                         {job.transformedItems} préparées · {job.publishedItems}{" "}
                         publiées
+                        {job.rollbackStatus
+                          ? ` · ${job.rolledBackItems} restaurées`
+                          : ""}
                       </p>
                       <p className="mt-1 text-xs text-muted-foreground">
                         {resultSummary}
@@ -228,7 +258,8 @@ function BulkOperationsForShop() {
                         {job.status === "queued" ||
                         job.status === "transforming" ||
                         job.status === "ready" ||
-                        job.status === "publishing"
+                        job.status === "publishing" ||
+                        job.rollbackStatus === "running"
                           ? "Suivre"
                           : "Voir"}
                       </Button>

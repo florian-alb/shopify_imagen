@@ -14,6 +14,7 @@ import {
   BULK_TRANSFORM_ASSET_RETENTION_MS,
   BULK_TRANSFORM_PUBLISH_AMBIGUITY_SETTLE_MS,
   bulkTransformCanCompletePublication,
+  classifyBulkTransformRollbackSource,
   bulkTransformMediaIdFingerprint,
   bulkTransformOwnsFailedUpdate,
   classifyBulkTransformSource,
@@ -334,6 +335,18 @@ async function waitForUpdatedImage(args: {
   accessToken: string;
   credentials: ShopifyCredentials;
 }) {
+  return await waitForImageSha256({
+    ...args,
+    expectedSha256: args.transformedSha256,
+  });
+}
+
+async function waitForImageSha256(args: {
+  mediaId: string;
+  expectedSha256: string;
+  accessToken: string;
+  credentials: ShopifyCredentials;
+}) {
   await delay(MEDIA_POLL_INTERVAL_MS);
   for (let attempt = 0; attempt < MEDIA_POLL_ATTEMPTS; attempt += 1) {
     const media = await fetchMediaImage(args);
@@ -347,7 +360,7 @@ async function waitForUpdatedImage(args: {
       const originalUrl = media.originalSource?.url;
       if (originalUrl) {
         const current = await downloadImage(originalUrl);
-        if (imageSha256(current.bytes) === args.transformedSha256) return media;
+        if (imageSha256(current.bytes) === args.expectedSha256) return media;
       }
     }
     await delay(Math.min(5_000, MEDIA_POLL_INTERVAL_MS + attempt * 250));
@@ -396,7 +409,9 @@ export const publishNext = internalAction({
     if (!item) return null;
     const leaseToken = item.publishLeaseToken;
     if (!leaseToken) {
-      throw new Error("Claimed bulk publication is missing its media lease token.");
+      throw new Error(
+        "Claimed bulk publication is missing its media lease token.",
+      );
     }
     let conflict = false;
     let mutationAttempted = false;
@@ -505,8 +520,8 @@ export const publishNext = internalAction({
       if (item.publishRecoveryPending && sourceState !== "transformed") {
         const settlementElapsed = Boolean(
           item.publishAmbiguousSince &&
-            Date.now() - item.publishAmbiguousSince >=
-              BULK_TRANSFORM_PUBLISH_AMBIGUITY_SETTLE_MS,
+          Date.now() - item.publishAmbiguousSince >=
+            BULK_TRANSFORM_PUBLISH_AMBIGUITY_SETTLE_MS,
         );
         if (!recoverySourceRestored && !settlementElapsed) {
           safeToRelease = false;
@@ -774,8 +789,8 @@ export const publishNext = internalAction({
               recoverySourceRestored ||
               Boolean(
                 item.publishAmbiguousSince &&
-                  Date.now() - item.publishAmbiguousSince >=
-                    BULK_TRANSFORM_PUBLISH_AMBIGUITY_SETTLE_MS,
+                Date.now() - item.publishAmbiguousSince >=
+                  BULK_TRANSFORM_PUBLISH_AMBIGUITY_SETTLE_MS,
               );
             if (recoveredState === "conflict") {
               safeToRelease = ambiguitySettled;
@@ -841,6 +856,284 @@ export const publishNext = internalAction({
         conflict: conflict || finalError instanceof SourceConflictError,
         safeToRelease,
         resetAmbiguityWindow: leaseProtectedMutationAttempted,
+      });
+    }
+    return null;
+  },
+});
+
+export const rollbackNext = internalAction({
+  args: { jobId: v.id("bulkTransformJobs") },
+  handler: async (ctx, args) => {
+    const item = (await ctx.runMutation(
+      internal.bulkTransforms.claimNextRollback,
+      { jobId: args.jobId },
+    )) as Doc<"bulkTransformItems"> | null;
+    if (!item) return null;
+    const leaseToken = item.rollbackLeaseToken;
+    if (!leaseToken) {
+      throw new Error(
+        "Claimed bulk rollback is missing its media lease token.",
+      );
+    }
+    let mutationAttempted = false;
+    let updateAccepted = Boolean(item.rollbackFileUpdateAcceptedAt);
+    let safeToRelease = !item.rollbackRecoveryPending;
+    let conflict = false;
+    let resolvedUrl: string | undefined;
+    let resolvedSha256: string | undefined;
+    let recoveryContext: {
+      accessToken: string;
+      credentials: ShopifyCredentials;
+    } | null = null;
+    const renewMediaLease = async () => {
+      const renewed = await ctx.runMutation(
+        internal.bulkTransforms.renewRollbackMediaLease,
+        { itemId: item._id, leaseToken },
+      );
+      if (!renewed) {
+        throw new SourceConflictError(
+          "This restoration attempt lost its Shopify media lease.",
+        );
+      }
+    };
+    const recordRestored = async (media: MediaImageNode) => {
+      resolvedUrl = media.image?.url ?? item.sourceUrl;
+      resolvedSha256 = item.sourceSha256!;
+      await ctx.runMutation(internal.bulkTransforms.markRollbackRestored, {
+        itemId: item._id,
+        leaseToken,
+        resolvedUrl,
+        resolvedSha256,
+      });
+    };
+    try {
+      const context = (await ctx.runQuery(
+        internal.bulkTransforms.getProcessingContext,
+        { itemId: item._id },
+      )) as {
+        item: Doc<"bulkTransformItems">;
+        job: Doc<"bulkTransformJobs">;
+      } | null;
+      if (!context || context.job.rollbackStatus !== "running") {
+        throw new Error("The bulk restoration is no longer running.");
+      }
+      if (
+        !item.sourceBackupUrl ||
+        !item.sourceSha256 ||
+        !item.transformedSha256
+      ) {
+        throw new Error(
+          "The exact original backup for this image is incomplete.",
+        );
+      }
+      const { credentials, accessToken } = await credentialsForJob(
+        ctx,
+        context.job,
+      );
+      recoveryContext = { credentials, accessToken };
+      await renewMediaLease();
+      let media = await fetchMediaImage({
+        mediaId: item.sourceMediaId,
+        accessToken,
+        credentials,
+      });
+      if (!media) throw new Error("The Shopify image no longer exists.");
+      if (media.fileStatus === "FAILED" || media.status === "FAILED") {
+        if (!updateAccepted) {
+          conflict = true;
+          throw new SourceConflictError(
+            "The Shopify image is FAILED because of an update this rollback cannot prove it owns. It was left untouched.",
+          );
+        }
+        media = await acknowledgeFailedUpdate({
+          mediaId: item.sourceMediaId,
+          accessToken,
+          credentials,
+        });
+        safeToRelease = true;
+      }
+      const originalUrl = media.originalSource?.url;
+      if (!originalUrl) {
+        throw new Error("Shopify did not return the current image source.");
+      }
+      const current = await downloadImage(originalUrl);
+      const currentSha256 = imageSha256(current.bytes);
+      const sourceState = classifyBulkTransformRollbackSource({
+        currentSha256,
+        sourceSha256: item.sourceSha256,
+        transformedSha256: item.transformedSha256,
+      });
+      resolvedUrl = media.image?.url ?? item.sourceUrl;
+      resolvedSha256 = currentSha256;
+      if (sourceState === "already_restored") {
+        safeToRelease = true;
+        await recordRestored(media);
+        return null;
+      }
+      if (sourceState === "conflict") {
+        safeToRelease = true;
+        conflict = true;
+        throw new SourceConflictError(
+          "The Shopify image changed after this bulk published it. The newer image was not overwritten.",
+        );
+      }
+      if (media.fileStatus !== "READY" || media.status !== "READY") {
+        throw new Error("The Shopify image is not READY for restoration.");
+      }
+      await renewMediaLease();
+      const latestContext = (await ctx.runQuery(
+        internal.bulkTransforms.getProcessingContext,
+        { itemId: item._id },
+      )) as {
+        item: Doc<"bulkTransformItems">;
+        job: Doc<"bulkTransformJobs">;
+      } | null;
+      if (!latestContext || latestContext.job.rollbackStatus !== "running") {
+        throw new Error(
+          "The bulk restoration stopped before this image was sent.",
+        );
+      }
+      mutationAttempted = true;
+      safeToRelease = false;
+      const updated = await shopifyGraphql<{
+        fileUpdate: {
+          files: Array<{ id: string; fileStatus: string }> | null;
+          userErrors: Array<{
+            field?: string[] | null;
+            message: string;
+            code?: string | null;
+          }>;
+        };
+      }>(
+        FILE_UPDATE_MUTATION,
+        {
+          files: [
+            {
+              id: item.sourceMediaId,
+              originalSource: item.sourceBackupUrl,
+            },
+          ],
+        },
+        accessToken,
+        credentials,
+      );
+      throwUserErrors(
+        updated.fileUpdate.userErrors,
+        "Shopify file restoration failed",
+      );
+      const acceptedFile = updated.fileUpdate.files?.find(
+        (file) => file.id === item.sourceMediaId,
+      );
+      if (!acceptedFile) {
+        throw new Error(
+          "Shopify did not confirm the file restoration request.",
+        );
+      }
+      const acceptedAt = await ctx.runMutation(
+        internal.bulkTransforms.markRollbackFileUpdateAccepted,
+        { itemId: item._id, leaseToken },
+      );
+      if (!acceptedAt) {
+        throw new Error(
+          "The rollback item changed before acceptance was recorded.",
+        );
+      }
+      updateAccepted = true;
+      await renewMediaLease();
+      const verified = await waitForImageSha256({
+        mediaId: item.sourceMediaId,
+        expectedSha256: item.sourceSha256,
+        accessToken,
+        credentials,
+      });
+      safeToRelease = true;
+      await recordRestored(verified);
+    } catch (error) {
+      let finalError = error;
+      if (mutationAttempted && recoveryContext && item.sourceSha256) {
+        const { accessToken, credentials } = recoveryContext;
+        try {
+          await renewMediaLease();
+          let media = await fetchMediaImage({
+            mediaId: item.sourceMediaId,
+            accessToken,
+            credentials,
+          });
+          if (!media)
+            throw errorWithCause(
+              "The Shopify image disappeared during rollback recovery.",
+              error,
+            );
+          if (media.fileStatus === "FAILED" || media.status === "FAILED") {
+            if (!updateAccepted) {
+              conflict = true;
+              safeToRelease = true;
+              throw new SourceConflictError(
+                "A failed Shopify update could not be attributed to this rollback.",
+              );
+            }
+            media = await acknowledgeFailedUpdate({
+              mediaId: item.sourceMediaId,
+              accessToken,
+              credentials,
+            });
+            safeToRelease = true;
+          } else if (media.fileStatus !== "READY" || media.status !== "READY") {
+            await renewMediaLease();
+            media = await waitForImageSha256({
+              mediaId: item.sourceMediaId,
+              expectedSha256: item.sourceSha256,
+              accessToken,
+              credentials,
+            });
+          }
+          const originalUrl = media.originalSource?.url;
+          if (originalUrl) {
+            const current = await downloadImage(originalUrl);
+            const currentSha256 = imageSha256(current.bytes);
+            const state = classifyBulkTransformRollbackSource({
+              currentSha256,
+              sourceSha256: item.sourceSha256,
+              transformedSha256: item.transformedSha256!,
+            });
+            resolvedUrl = media.image?.url ?? item.sourceUrl;
+            resolvedSha256 = currentSha256;
+            if (state === "already_restored") {
+              safeToRelease = true;
+              await recordRestored(media);
+              return null;
+            }
+            if (state === "conflict") {
+              safeToRelease = true;
+              conflict = true;
+              finalError = new SourceConflictError(
+                "The Shopify image changed while restoration was being verified. It was left untouched.",
+              );
+            }
+          }
+        } catch (recoveryError) {
+          if (recoveryError instanceof SourceConflictError) {
+            conflict = true;
+            safeToRelease = true;
+            finalError = recoveryError;
+          } else {
+            finalError = errorWithCause(
+              `${errorMessage(error)} Recovery check failed: ${errorMessage(recoveryError)}`,
+              recoveryError,
+            );
+          }
+        }
+      }
+      await ctx.runMutation(internal.bulkTransforms.markRollbackFailed, {
+        itemId: item._id,
+        leaseToken,
+        error: errorMessage(finalError),
+        conflict: conflict || finalError instanceof SourceConflictError,
+        ...(resolvedUrl ? { resolvedUrl } : {}),
+        ...(resolvedSha256 ? { resolvedSha256 } : {}),
+        safeToRelease,
+        resetAmbiguityWindow: mutationAttempted,
       });
     }
     return null;

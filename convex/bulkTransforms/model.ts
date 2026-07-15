@@ -187,6 +187,17 @@ export function classifyBulkTransformSource(args: {
   return "conflict" as const;
 }
 
+export function classifyBulkTransformRollbackSource(args: {
+  currentSha256: string;
+  sourceSha256: string;
+  transformedSha256: string;
+}) {
+  const state = classifyBulkTransformSource(args);
+  if (state === "source") return "already_restored" as const;
+  if (state === "transformed") return "restorable" as const;
+  return "conflict" as const;
+}
+
 export function bulkTransformOwnsFailedUpdate(args: {
   fileUpdateAcceptedAt?: number;
   updateAcceptedByShopifyInCurrentRun: boolean;

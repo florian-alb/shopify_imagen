@@ -531,102 +531,104 @@ describe("bulk transform workflow counters", () => {
 
   test("ignores a late cache refresh after a newer media publication", async () => {
     const t = convexTest(schema, modules);
-    const { firstItemId, secondItemId, productId } = await t.run(async (ctx) => {
-      const userId = await ctx.db.insert("users", {});
-      const shopId = await ctx.db.insert("shops", {
-        domain: "cache-fence.myshopify.com",
-        createdByUserId: userId,
-        createdAt: 1,
-        updatedAt: 1,
-      });
-      const sourceMediaId = "gid://shopify/MediaImage/cache-fence";
-      const productId = await ctx.db.insert("products", {
-        shopId,
-        shopifyProductId: "gid://shopify/Product/cache-fence",
-        title: "Produit cache fence",
-        handle: "produit-cache-fence",
-        tags: [],
-        collections: [],
-        options: [],
-        variants: [],
-        metafields: [],
-        currentShopifyImages: [
-          {
-            mediaId: sourceMediaId,
-            url: "https://cdn.shopify.com/original.jpg",
-          },
-        ],
-        generationStatus: "not_started",
-        createdAt: 1,
-        updatedAt: 1,
-      });
-      const jobFields = {
-        shopId,
-        createdByUserId: userId,
-        operation: "flip_horizontal" as const,
-        status: "completed" as const,
-        productIds: [productId],
-        seededProductCount: 1,
-        seedAttempts: 0,
-        seedFailedProducts: 0,
-        seededItems: 1,
-        totalItems: 1,
-        transformedItems: 1,
-        transformFailedItems: 0,
-        publishedItems: 1,
-        publishFailedItems: 0,
-        conflictItems: 0,
-        skippedItems: 0,
-        unsupportedItems: 0,
-        createdAt: 1,
-        updatedAt: 1,
-        completedAt: 1,
-      };
-      const firstJobId = await ctx.db.insert("bulkTransformJobs", jobFields);
-      const secondJobId = await ctx.db.insert("bulkTransformJobs", {
-        ...jobFields,
-        createdAt: 2,
-        updatedAt: 2,
-        completedAt: 2,
-      });
-      const itemFields = {
-        shopId,
-        productId,
-        referencedProductIds: [productId],
-        operation: "flip_horizontal" as const,
-        sourceMediaId,
-        sourceUrl: "https://cdn.shopify.com/original.jpg",
-        sourcePosition: 0,
-        status: "published" as const,
-        attempts: 1,
-        publishAttempts: 1,
-        createdAt: 1,
-        updatedAt: 1,
-      };
-      const firstItemId = await ctx.db.insert("bulkTransformItems", {
-        ...itemFields,
-        jobId: firstJobId,
-        transformedSha256: "first-sha",
-        publishedUrl: "https://cdn.shopify.com/first.jpg",
-      });
-      const secondItemId = await ctx.db.insert("bulkTransformItems", {
-        ...itemFields,
-        jobId: secondJobId,
-        transformedSha256: "second-sha",
-        publishedUrl: "https://cdn.shopify.com/second.jpg",
-        createdAt: 2,
-        updatedAt: 2,
-      });
-      await ctx.db.insert("bulkTransformMediaPublicationHeads", {
-        shopDomain: "cache-fence.myshopify.com",
-        sourceMediaId,
-        jobId: secondJobId,
-        itemId: secondItemId,
-        publishedAt: 2,
-        updatedAt: 2,
-      });
-      return { firstItemId, secondItemId, productId };
-    });
+    const { firstItemId, secondItemId, productId } = await t.run(
+      async (ctx) => {
+        const userId = await ctx.db.insert("users", {});
+        const shopId = await ctx.db.insert("shops", {
+          domain: "cache-fence.myshopify.com",
+          createdByUserId: userId,
+          createdAt: 1,
+          updatedAt: 1,
+        });
+        const sourceMediaId = "gid://shopify/MediaImage/cache-fence";
+        const productId = await ctx.db.insert("products", {
+          shopId,
+          shopifyProductId: "gid://shopify/Product/cache-fence",
+          title: "Produit cache fence",
+          handle: "produit-cache-fence",
+          tags: [],
+          collections: [],
+          options: [],
+          variants: [],
+          metafields: [],
+          currentShopifyImages: [
+            {
+              mediaId: sourceMediaId,
+              url: "https://cdn.shopify.com/original.jpg",
+            },
+          ],
+          generationStatus: "not_started",
+          createdAt: 1,
+          updatedAt: 1,
+        });
+        const jobFields = {
+          shopId,
+          createdByUserId: userId,
+          operation: "flip_horizontal" as const,
+          status: "completed" as const,
+          productIds: [productId],
+          seededProductCount: 1,
+          seedAttempts: 0,
+          seedFailedProducts: 0,
+          seededItems: 1,
+          totalItems: 1,
+          transformedItems: 1,
+          transformFailedItems: 0,
+          publishedItems: 1,
+          publishFailedItems: 0,
+          conflictItems: 0,
+          skippedItems: 0,
+          unsupportedItems: 0,
+          createdAt: 1,
+          updatedAt: 1,
+          completedAt: 1,
+        };
+        const firstJobId = await ctx.db.insert("bulkTransformJobs", jobFields);
+        const secondJobId = await ctx.db.insert("bulkTransformJobs", {
+          ...jobFields,
+          createdAt: 2,
+          updatedAt: 2,
+          completedAt: 2,
+        });
+        const itemFields = {
+          shopId,
+          productId,
+          referencedProductIds: [productId],
+          operation: "flip_horizontal" as const,
+          sourceMediaId,
+          sourceUrl: "https://cdn.shopify.com/original.jpg",
+          sourcePosition: 0,
+          status: "published" as const,
+          attempts: 1,
+          publishAttempts: 1,
+          createdAt: 1,
+          updatedAt: 1,
+        };
+        const firstItemId = await ctx.db.insert("bulkTransformItems", {
+          ...itemFields,
+          jobId: firstJobId,
+          transformedSha256: "first-sha",
+          publishedUrl: "https://cdn.shopify.com/first.jpg",
+        });
+        const secondItemId = await ctx.db.insert("bulkTransformItems", {
+          ...itemFields,
+          jobId: secondJobId,
+          transformedSha256: "second-sha",
+          publishedUrl: "https://cdn.shopify.com/second.jpg",
+          createdAt: 2,
+          updatedAt: 2,
+        });
+        await ctx.db.insert("bulkTransformMediaPublicationHeads", {
+          shopDomain: "cache-fence.myshopify.com",
+          sourceMediaId,
+          jobId: secondJobId,
+          itemId: secondItemId,
+          publishedAt: 2,
+          updatedAt: 2,
+        });
+        return { firstItemId, secondItemId, productId };
+      },
+    );
 
     await t.mutation(internal.bulkTransforms.refreshPublishedProductCaches, {
       itemId: secondItemId,
@@ -1633,6 +1635,126 @@ describe("bulk transform workflow counters", () => {
       dismissedAt: 11,
     });
     expect(oldest.hasNext).toBe(false);
+  });
+
+  test("caps rollback concurrency and fences stale publication caches", async () => {
+    const t = convexTest(schema, modules);
+    const { jobId, publicationHeadId } = await t.run(async (ctx) => {
+      const userId = await ctx.db.insert("users", {});
+      const shopId = await ctx.db.insert("shops", {
+        domain: "rollback-concurrency.myshopify.com",
+        createdByUserId: userId,
+        createdAt: 1,
+        updatedAt: 1,
+      });
+      const productId = await ctx.db.insert("products", {
+        shopId,
+        shopifyProductId: "gid://shopify/Product/rollback",
+        title: "Produit rollback",
+        handle: "produit-rollback",
+        tags: [],
+        collections: [],
+        options: [],
+        variants: [],
+        metafields: [],
+        currentShopifyImages: [],
+        generationStatus: "not_started",
+        createdAt: 1,
+        updatedAt: 1,
+      });
+      const jobId = await ctx.db.insert("bulkTransformJobs", {
+        shopId,
+        createdByUserId: userId,
+        operation: "flip_horizontal",
+        status: "cancelled",
+        rollbackStatus: "running",
+        rollbackTotalItems: 5,
+        rollbackRunNumber: 1,
+        productIds: [productId],
+        seededProductCount: 1,
+        seedAttempts: 0,
+        seedFailedProducts: 0,
+        seededItems: 5,
+        totalItems: 5,
+        transformedItems: 5,
+        transformFailedItems: 0,
+        publishedItems: 5,
+        publishFailedItems: 0,
+        conflictItems: 0,
+        skippedItems: 0,
+        unsupportedItems: 0,
+        createdAt: 1,
+        updatedAt: 1,
+      });
+      let publicationHeadId = null;
+      for (let index = 0; index < 5; index += 1) {
+        const itemId = await ctx.db.insert("bulkTransformItems", {
+          shopId,
+          jobId,
+          productId,
+          referencedProductIds: [productId],
+          operation: "flip_horizontal",
+          sourceMediaId: `gid://shopify/MediaImage/rollback-${index}`,
+          sourceUrl: `https://cdn.shopify.com/source-${index}.jpg`,
+          sourcePosition: index,
+          sourceSha256: `source-${index}`,
+          transformedSha256: `transformed-${index}`,
+          sourceBackupUrl: `https://r2.example.com/source-${index}.jpg`,
+          publishedUrl: `https://cdn.shopify.com/transformed-${index}.webp`,
+          status: "published",
+          attempts: 1,
+          publishAttempts: 1,
+          createdAt: index + 1,
+          updatedAt: index + 1,
+        });
+        if (index === 0) {
+          publicationHeadId = await ctx.db.insert(
+            "bulkTransformMediaPublicationHeads",
+            {
+              shopDomain: "rollback-concurrency.myshopify.com",
+              sourceMediaId: `gid://shopify/MediaImage/rollback-${index}`,
+              jobId,
+              itemId,
+              publishedAt: 1,
+              updatedAt: 1,
+            },
+          );
+        }
+      }
+      return { jobId, publicationHeadId };
+    });
+
+    const claims = [];
+    for (let worker = 0; worker < 4; worker += 1) {
+      claims.push(
+        await t.mutation(internal.bulkTransforms.claimNextRollback, { jobId }),
+      );
+    }
+    expect(new Set(claims.map((claim) => claim?._id)).size).toBe(4);
+    await expect(
+      t.mutation(internal.bulkTransforms.claimNextRollback, { jobId }),
+    ).resolves.toBeNull();
+    await t.mutation(internal.bulkTransforms.markRollbackRestored, {
+      itemId: claims[0]!._id,
+      leaseToken: claims[0]!.rollbackLeaseToken!,
+      resolvedUrl: "https://cdn.shopify.com/restored-0.jpg",
+      resolvedSha256: "source-0",
+    });
+    expect(
+      await t.mutation(internal.bulkTransforms.claimNextRollback, { jobId }),
+    ).not.toBeNull();
+    const result = await t.run(async (ctx) => ({
+      job: await ctx.db.get(jobId),
+      head: publicationHeadId ? await ctx.db.get(publicationHeadId) : null,
+    }));
+    expect(result.job?.rolledBackItems).toBe(1);
+    expect(result.head).toBeNull();
+    expect(
+      await t.mutation(internal.bulkTransforms.refreshPublishedProductCaches, {
+        itemId: claims[0]!._id,
+        nextProductIndex: 0,
+      }),
+    ).toMatchObject({ done: true, updatedProducts: 0 });
   });
 
   test("locks retries before deleting expired R2 assets", async () => {
