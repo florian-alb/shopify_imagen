@@ -4,11 +4,13 @@ import type { Doc, Id } from "@/lib/convex";
 import {
   bulkTransformCanPublish,
   bulkTransformCanCancel,
+  bulkTransformCanRollback,
   bulkTransformCanRetry,
   bulkTransformImagePositionsLabel,
   bulkTransformIsTerminal,
   bulkTransformProgress,
   bulkTransformReadyToPublishCount,
+  bulkTransformRollbackCount,
   resolveBulkImagePositionSelection,
   toggleBulkImagePosition,
 } from "./bulkImageTransformViewModel";
@@ -142,7 +144,7 @@ describe("bulk image transform view model", () => {
 
   test("aligns cancel and retry actions with durable backend states", () => {
     expect(bulkTransformCanCancel(job({ status: "ready" }))).toBe(true);
-    expect(bulkTransformCanCancel(job({ status: "publishing" }))).toBe(false);
+    expect(bulkTransformCanCancel(job({ status: "publishing" }))).toBe(true);
     expect(
       bulkTransformCanRetry(
         job({ status: "partial", transformFailedItems: 1 }),
@@ -161,6 +163,49 @@ describe("bulk image transform view model", () => {
           assetsCleanedAt: 2,
         }),
       ),
+    ).toBe(false);
+  });
+
+  test("offers an exact rollback only while original backups are available", () => {
+    const cancelled = job({
+      status: "cancelled",
+      publishedItems: 48,
+      transformedItems: 180,
+    });
+    expect(bulkTransformCanRollback(cancelled)).toBe(true);
+    expect(bulkTransformRollbackCount(cancelled)).toBe(48);
+    expect(
+      bulkTransformCanRollback(job({ status: "cancelled", publishedItems: 0 })),
+    ).toBe(false);
+    expect(bulkTransformCanRollback({ ...cancelled, assetsCleanedAt: 2 })).toBe(
+      false,
+    );
+  });
+
+  test("reports rollback progress and retries only restoration failures", () => {
+    const partialRollback = job({
+      status: "cancelled",
+      publishedItems: 48,
+      rollbackStatus: "partial",
+      rollbackTotalItems: 48,
+      rolledBackItems: 44,
+      rollbackConflictItems: 2,
+      rollbackFailedItems: 2,
+    });
+    expect(bulkTransformProgress(partialRollback)).toMatchObject({
+      phase: "rollback",
+      completed: 48,
+      total: 48,
+      percent: 100,
+      failed: 4,
+    });
+    expect(bulkTransformRollbackCount(partialRollback)).toBe(2);
+    expect(bulkTransformCanRollback(partialRollback)).toBe(true);
+    expect(
+      bulkTransformCanRollback({
+        ...partialRollback,
+        rollbackFailedItems: 0,
+      }),
     ).toBe(false);
   });
 });

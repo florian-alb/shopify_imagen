@@ -1,11 +1,13 @@
 import type { useBulkImageTransform } from "../hooks/useBulkImageTransform";
 import {
   bulkTransformCanRetry,
+  bulkTransformRollbackCount,
   bulkTransformReadyToPublishCount,
 } from "../lib/bulkImageTransformViewModel";
 import { BulkImageArchiveConfirmDialog } from "./BulkImageArchiveConfirmDialog";
 import { BulkImageCancelConfirmDialog } from "./BulkImageCancelConfirmDialog";
 import { BulkImagePublishConfirmDialog } from "./BulkImagePublishConfirmDialog";
+import { BulkImageRollbackConfirmDialog } from "./BulkImageRollbackConfirmDialog";
 import { BulkImageTransformDialog } from "./BulkImageTransformDialog";
 
 export type BulkImageTransformController = ReturnType<
@@ -36,6 +38,7 @@ export function BulkImageTransformDialogs({
         onStart={() => void bulkTransform.start()}
         onRequestCancel={bulkTransform.requestCancel}
         onRequestPublish={bulkTransform.requestPublish}
+        onRequestRollback={bulkTransform.requestRollback}
         onRetry={() => void bulkTransform.retry()}
         onClose={bulkTransform.close}
         onRequestDismiss={bulkTransform.requestDismiss}
@@ -62,6 +65,18 @@ export function BulkImageTransformDialogs({
         commandError={bulkTransform.commandError}
         onOpenChange={bulkTransform.onCancelConfirmChange}
         onConfirm={() => void bulkTransform.cancel()}
+      />
+      <BulkImageRollbackConfirmDialog
+        open={bulkTransform.rollbackConfirmOpen}
+        imageCount={
+          bulkTransform.details
+            ? bulkTransformRollbackCount(bulkTransform.details.job)
+            : 0
+        }
+        rollingBack={bulkTransform.rollingBack}
+        commandError={bulkTransform.commandError}
+        onOpenChange={bulkTransform.onRollbackConfirmChange}
+        onConfirm={() => void bulkTransform.rollback()}
       />
       <BulkImageArchiveConfirmDialog
         open={bulkTransform.dismissConfirmOpen}

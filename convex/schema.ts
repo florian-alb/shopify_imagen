@@ -103,6 +103,19 @@ const bulkTransformItemStatus = v.union(
   v.literal("publish_failed"),
   v.literal("conflict"),
 );
+const bulkTransformRollbackStatus = v.union(
+  v.literal("queued"),
+  v.literal("running"),
+  v.literal("completed"),
+  v.literal("partial"),
+);
+const bulkTransformItemRollbackStatus = v.union(
+  v.literal("queued"),
+  v.literal("restoring"),
+  v.literal("restored"),
+  v.literal("failed"),
+  v.literal("conflict"),
+);
 const backgroundMode = v.union(v.literal("solid"), v.literal("transparent"));
 const backgroundRemovalProvider = v.union(v.literal("fal_ideogram"), v.null());
 const promptKind = v.union(
@@ -135,15 +148,21 @@ export default defineSchema({
     phoneVerificationTime: v.optional(v.number()),
     isAnonymous: v.optional(v.boolean()),
     role: v.optional(v.string()),
-    approvalStatus: v.optional(v.union(v.literal("pending"), v.literal("approved"), v.literal("rejected"))),
+    approvalStatus: v.optional(
+      v.union(
+        v.literal("pending"),
+        v.literal("approved"),
+        v.literal("rejected"),
+      ),
+    ),
     approvalUpdatedAt: v.optional(v.number()),
     activeShopId: v.optional(v.union(v.id("shops"), v.null())),
     createdAt: v.optional(v.number()),
     updatedAt: v.optional(v.number()),
   })
-  .index("email", ["email"])
-  .index("phone", ["phone"])
-  .index("by_approval_status", ["approvalStatus"]),
+    .index("email", ["email"])
+    .index("phone", ["phone"])
+    .index("by_approval_status", ["approvalStatus"]),
   shops: defineTable({
     domain: v.string(),
     name: v.optional(v.union(v.string(), v.null())),
@@ -250,11 +269,11 @@ export default defineSchema({
       filterFields: ["shopId", "generationStatus"],
     }),
   promptTemplates: defineTable({
-  shopId: v.optional(v.id("shops")),
-  imageType: v.string(),
-  label: v.string(),
-  content: v.string(),
-  defaultContent: v.string(),
+    shopId: v.optional(v.id("shops")),
+    imageType: v.string(),
+    label: v.string(),
+    content: v.string(),
+    defaultContent: v.string(),
     isActive: v.boolean(),
     // When true, this template is pre-checked in the generation chooser.
     // Optional so pre-existing rows default to non-preset.
@@ -281,11 +300,11 @@ export default defineSchema({
     masterPrompt: v.string(),
     defaultMasterPrompt: v.optional(v.string()),
     modelReferences: v.optional(v.record(v.string(), modelReference)),
-  // Legacy optional field kept so existing rows remain readable during rollout.
-  modelReferenceUrls: v.optional(v.record(v.string(), v.string())),
-  createdAt: v.number(),
-  updatedAt: v.number(),
-}).index("by_shop", ["shopId"]),
+    // Legacy optional field kept so existing rows remain readable during rollout.
+    modelReferenceUrls: v.optional(v.record(v.string(), v.string())),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_shop", ["shopId"]),
   generationJobs: defineTable({
     shopId: v.optional(v.id("shops")),
     status: jobStatus,
@@ -385,7 +404,9 @@ export default defineSchema({
     retrySourceImageId: v.optional(v.union(v.id("generatedImages"), v.null())),
     activeRetryImageId: v.optional(v.union(v.id("generatedImages"), v.null())),
     retryError: v.optional(v.union(v.string(), v.null())),
-    retouchSourceImageId: v.optional(v.union(v.id("generatedImages"), v.null())),
+    retouchSourceImageId: v.optional(
+      v.union(v.id("generatedImages"), v.null()),
+    ),
     retouchTool: v.optional(v.union(v.literal("manual_brush"), v.null())),
     retouchedAt: v.optional(v.number()),
     retouchedByUserId: v.optional(v.id("users")),
@@ -399,7 +420,9 @@ export default defineSchema({
     postProcessingInputExtension: v.optional(v.union(v.string(), v.null())),
     postProcessingStartedAt: v.optional(v.union(v.number(), v.null())),
     transparentCutoutUrl: v.optional(v.union(v.string(), v.null())),
-    batchSegmentId: v.optional(v.union(v.id("generationBatchSegments"), v.null())),
+    batchSegmentId: v.optional(
+      v.union(v.id("generationBatchSegments"), v.null()),
+    ),
     providerBatchId: v.optional(v.union(v.string(), v.null())),
     providerRequestId: v.optional(v.union(v.string(), v.null())),
     providerResponseId: v.optional(v.union(v.string(), v.null())),
@@ -466,6 +489,14 @@ export default defineSchema({
     dismissedAt: v.optional(v.number()),
     assetsCleanupStartedAt: v.optional(v.number()),
     assetsCleanedAt: v.optional(v.number()),
+    rollbackStatus: v.optional(bulkTransformRollbackStatus),
+    rollbackTotalItems: v.optional(v.number()),
+    rolledBackItems: v.optional(v.number()),
+    rollbackFailedItems: v.optional(v.number()),
+    rollbackConflictItems: v.optional(v.number()),
+    rollbackRunNumber: v.optional(v.number()),
+    rollbackStartedAt: v.optional(v.number()),
+    rollbackCompletedAt: v.optional(v.number()),
   })
     .index("by_shop_and_status", ["shopId", "status"])
     .index("by_shop_and_status_and_product_locks_initialized_at", [
@@ -475,6 +506,7 @@ export default defineSchema({
     ])
     .index("by_shop_and_created_at", ["shopId", "createdAt"])
     .index("by_status_and_updated_at", ["status", "updatedAt"])
+    .index("by_rollback_status_and_updated_at", ["rollbackStatus", "updatedAt"])
     .index("by_status_and_assets_cleaned_at_and_completed_at", [
       "status",
       "assetsCleanedAt",
@@ -567,15 +599,54 @@ export default defineSchema({
     publishRecoveryPending: v.optional(v.boolean()),
     publishAmbiguousSince: v.optional(v.number()),
     fileUpdateAcceptedAt: v.optional(v.number()),
+    rollbackStatus: v.optional(bulkTransformItemRollbackStatus),
+    rollbackAttempts: v.optional(v.number()),
+    rollbackAttemptCycle: v.optional(v.number()),
+    rollbackLeaseToken: v.optional(v.string()),
+    rollbackRecoveryPending: v.optional(v.boolean()),
+    rollbackAmbiguousSince: v.optional(v.number()),
+    rollbackFileUpdateAcceptedAt: v.optional(v.number()),
+    rollbackError: v.optional(v.union(v.string(), v.null())),
+    rollbackStartedAt: v.optional(v.number()),
+    rolledBackAt: v.optional(v.number()),
+    rollbackResolvedUrl: v.optional(v.union(v.string(), v.null())),
+    rollbackResolvedSha256: v.optional(v.union(v.string(), v.null())),
     processingStartedAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_job", ["jobId"])
     .index("by_job_and_status", ["jobId", "status"])
+    .index("by_job_and_rollback_status", ["jobId", "rollbackStatus"])
+    .index("by_job_status_and_rollback_status", [
+      "jobId",
+      "status",
+      "rollbackStatus",
+    ])
+    .index("by_job_rollback_status_and_attempt_cycle", [
+      "jobId",
+      "rollbackStatus",
+      "rollbackAttemptCycle",
+    ])
+    .index("by_job_rollback_recovery_and_ambiguous_since", [
+      "jobId",
+      "rollbackStatus",
+      "rollbackRecoveryPending",
+      "rollbackAmbiguousSince",
+    ])
+    .index("by_job_status_recovery_pending_ambiguous_since", [
+      "jobId",
+      "status",
+      "publishRecoveryPending",
+      "publishAmbiguousSince",
+    ])
     .index("by_job_and_source_media_id", ["jobId", "sourceMediaId"])
     .index("by_product_and_source_media_id", ["productId", "sourceMediaId"])
-    .index("by_status_and_updated_at", ["status", "updatedAt"]),
+    .index("by_status_and_updated_at", ["status", "updatedAt"])
+    .index("by_rollback_status_and_updated_at", [
+      "rollbackStatus",
+      "updatedAt",
+    ]),
   bulkTransformSeedFailures: defineTable({
     shopId: v.optional(v.id("shops")),
     jobId: v.id("bulkTransformJobs"),

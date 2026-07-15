@@ -7,6 +7,7 @@ import { errorMessage } from "@/lib/errors";
 import {
   bulkTransformCanCancel,
   bulkTransformCanPublish,
+  bulkTransformCanRollback,
   bulkTransformCanRetry,
   bulkTransformIsTerminal,
   MAX_BULK_TRANSFORM_PRODUCTS,
@@ -63,6 +64,7 @@ export function useBulkImageTransform({
 }) {
   const startBulk = useAction(api.bulkTransforms.start);
   const publishBulk = useAction(api.bulkTransforms.publish);
+  const rollbackBulk = useAction(api.bulkTransforms.rollback);
   const retryFailures = useAction(api.bulkTransforms.retryFailures);
   const dismissBulk = useMutation(api.bulkTransforms.dismiss);
   const cancelBulk = useMutation(api.bulkTransforms.cancel);
@@ -75,12 +77,14 @@ export function useBulkImageTransform({
   const [open, setOpen] = useState(false);
   const [publishConfirmOpen, setPublishConfirmOpen] = useState(false);
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
+  const [rollbackConfirmOpen, setRollbackConfirmOpen] = useState(false);
   const [dismissConfirmOpen, setDismissConfirmOpen] = useState(false);
   const [starting, setStarting] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [dismissing, setDismissing] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [rollingBack, setRollingBack] = useState(false);
   const [commandError, setCommandError] = useState<string | null>(null);
   const [imagePositionSelection, setImagePositionSelection] =
     useState<Set<number> | null>(null);
@@ -88,7 +92,11 @@ export function useBulkImageTransform({
   const trackedJobId = jobId ?? (!newFlow ? (latest?._id ?? null) : null);
   const shouldLoadDetails = Boolean(
     trackedJobId &&
-    (open || publishConfirmOpen || cancelConfirmOpen || dismissConfirmOpen),
+    (open ||
+      publishConfirmOpen ||
+      cancelConfirmOpen ||
+      rollbackConfirmOpen ||
+      dismissConfirmOpen),
   );
   const details = useQuery(
     api.bulkTransforms.get,
@@ -110,7 +118,13 @@ export function useBulkImageTransform({
     availableImagePositions,
     imagePositionSelection,
   );
-  const busy = starting || publishing || retrying || dismissing || cancelling;
+  const busy =
+    starting ||
+    publishing ||
+    retrying ||
+    dismissing ||
+    cancelling ||
+    rollingBack;
 
   function acquireCommand() {
     if (commandLockRef.current) return false;
@@ -392,6 +406,55 @@ export function useBulkImageTransform({
     }
   }
 
+  function requestRollback() {
+    if (
+      commandLockRef.current ||
+      !details?.job ||
+      !bulkTransformCanRollback(details.job)
+    ) {
+      return;
+    }
+    setCommandError(null);
+    setOpen(false);
+    setRollbackConfirmOpen(true);
+  }
+
+  function onRollbackConfirmChange(nextOpen: boolean) {
+    if (!nextOpen && commandLockRef.current) return;
+    setRollbackConfirmOpen(nextOpen);
+    if (!nextOpen) setOpen(true);
+  }
+
+  async function rollback() {
+    const currentJob = details?.job;
+    const currentJobId = currentJob?._id;
+    if (!currentJobId || !bulkTransformCanRollback(currentJob)) {
+      setCommandError(
+        "L’état du bulk a changé. La restauration n’a pas été lancée.",
+      );
+      return;
+    }
+    if (!acquireCommand()) return;
+    setCommandError(null);
+    setRollingBack(true);
+    try {
+      await rollbackBulk({ jobId: currentJobId });
+      setRollbackConfirmOpen(false);
+      setOpen(true);
+      toast.success("Restauration lancée", {
+        description:
+          "Chaque image est vérifiée avant de republier son original exact.",
+      });
+    } catch (error) {
+      const description = errorMessage(error);
+      setCommandError(description);
+      toast.error("Restauration impossible", { description });
+    } finally {
+      setRollingBack(false);
+      releaseCommand();
+    }
+  }
+
   return {
     details,
     selectionOptions,
@@ -400,6 +463,8 @@ export function useBulkImageTransform({
     selectedImagePositions,
     cancelling,
     cancelConfirmOpen,
+    rollingBack,
+    rollbackConfirmOpen,
     commandError,
     busy,
     dismissing,
@@ -413,6 +478,7 @@ export function useBulkImageTransform({
     retrying,
     starting,
     cancel,
+    rollback,
     close,
     dismiss,
     openJob,
@@ -421,10 +487,12 @@ export function useBulkImageTransform({
     retry,
     onOpenChange,
     onCancelConfirmChange,
+    onRollbackConfirmChange,
     onDismissConfirmChange,
     onPublishConfirmChange,
     requestPublish,
     requestCancel,
+    requestRollback,
     requestDismiss,
     toggleImagePosition,
     selectAllImagePositions,

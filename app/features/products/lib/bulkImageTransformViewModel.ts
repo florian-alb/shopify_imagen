@@ -54,7 +54,8 @@ export function bulkTransformCanCancel(job: BulkTransformJob) {
   return (
     job.status === "queued" ||
     job.status === "transforming" ||
-    job.status === "ready"
+    job.status === "ready" ||
+    job.status === "publishing"
   );
 }
 
@@ -66,8 +67,27 @@ export function bulkTransformCanRetry(job: BulkTransformJob) {
     !job.dismissedAt &&
     !job.assetsCleanupStartedAt &&
     !job.assetsCleanedAt &&
+    job.rollbackStatus === undefined &&
     job.status !== "cancelled" &&
     (job.status === "ready" || bulkTransformIsTerminal(job.status))
+  );
+}
+
+export function bulkTransformRollbackCount(job: BulkTransformJob) {
+  if (job.rollbackStatus === "partial") {
+    return Math.max(0, job.rollbackFailedItems ?? 0);
+  }
+  if (job.rollbackStatus) return 0;
+  return Math.max(0, job.publishedItems);
+}
+
+export function bulkTransformCanRollback(job: BulkTransformJob) {
+  return (
+    bulkTransformIsTerminal(job.status) &&
+    !job.dismissedAt &&
+    !job.assetsCleanupStartedAt &&
+    !job.assetsCleanedAt &&
+    bulkTransformRollbackCount(job) > 0
   );
 }
 
@@ -82,6 +102,20 @@ export function bulkTransformReadyToPublishCount(job: BulkTransformJob) {
 }
 
 export function bulkTransformProgress(job: BulkTransformJob) {
+  if (job.rollbackStatus) {
+    const total = job.rollbackTotalItems ?? job.publishedItems;
+    const completed =
+      (job.rolledBackItems ?? 0) +
+      (job.rollbackFailedItems ?? 0) +
+      (job.rollbackConflictItems ?? 0);
+    return {
+      phase: "rollback" as const,
+      completed,
+      total,
+      percent: total > 0 ? Math.min(100, (completed / total) * 100) : 0,
+      failed: (job.rollbackFailedItems ?? 0) + (job.rollbackConflictItems ?? 0),
+    };
+  }
   if (job.status === "queued") {
     const total = job.productIds.length;
     const completed = job.seededProductCount;
@@ -109,6 +143,21 @@ export function bulkTransformProgress(job: BulkTransformJob) {
     failed:
       job.transformFailedItems + job.publishFailedItems + job.conflictItems,
   };
+}
+
+export function bulkTransformDisplayStatusLabel(job: BulkTransformJob) {
+  switch (job.rollbackStatus) {
+    case "queued":
+      return "Restauration planifiée";
+    case "running":
+      return "Restauration des originaux";
+    case "completed":
+      return "Originaux restaurés";
+    case "partial":
+      return "Restauration terminée avec alertes";
+    default:
+      return bulkTransformStatusLabel(job.status);
+  }
 }
 
 export function bulkTransformStatusLabel(status: BulkTransformJob["status"]) {
