@@ -5,6 +5,8 @@ import {
   Sparkles,
   Store,
 } from "lucide-react";
+import { useEffect } from "react";
+import { toast } from "sonner";
 import {
   BusyIcon,
   PageHeader,
@@ -23,6 +25,25 @@ import { ShopSettingsTab } from "./ShopSettingsTab";
 
 export function SettingsPage() {
   const page = useSettingsPage();
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const shopifyOAuthStatus = url.searchParams.get("shopify_oauth");
+    if (shopifyOAuthStatus === "success") {
+      toast.success("Accès Shopify mis à jour", {
+        description: "La boutique peut maintenant publier les images.",
+      });
+    } else if (shopifyOAuthStatus === "error") {
+      toast.error("Autorisation Shopify non finalisée", {
+        description:
+          "Vérifie l’URL de callback autorisée dans Shopify, puis réessaie.",
+      });
+    }
+    if (shopifyOAuthStatus === "success" || shopifyOAuthStatus === "error") {
+      url.searchParams.delete("shopify_oauth");
+      window.history.replaceState(window.history.state, "", url);
+    }
+  }, []);
 
   return (
     <main className={pageContentClass}>

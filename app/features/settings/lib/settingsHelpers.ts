@@ -92,7 +92,47 @@ export function safeShopifyAuthorizationUrl(
     url.pathname === `/store/${expectedHandle}/oauth/install` &&
     hasOnlyClientId;
 
-  return isShopPermissionRedirect || isAdminInstallUrl ? url.toString() : null;
+  const oauthClientIds = url.searchParams.getAll("client_id");
+  const oauthScopes = url.searchParams.getAll("scope");
+  const oauthRedirectUris = url.searchParams.getAll("redirect_uri");
+  const oauthStates = url.searchParams.getAll("state");
+  const oauthKeys = Array.from(url.searchParams.keys());
+  const expectedOauthKeys = new Set([
+    "client_id",
+    "scope",
+    "redirect_uri",
+    "state",
+  ]);
+  const hasSafeOauthRedirect = (() => {
+    try {
+      const redirectUri = new URL(oauthRedirectUris[0] ?? "");
+      return (
+        redirectUri.protocol === "https:" &&
+        !redirectUri.username &&
+        !redirectUri.password &&
+        !redirectUri.hash
+      );
+    } catch {
+      return false;
+    }
+  })();
+  const isOauthAuthorizationUrl =
+    url.hostname.toLowerCase() === expectedDomain &&
+    url.pathname === "/admin/oauth/authorize" &&
+    oauthKeys.length === expectedOauthKeys.size &&
+    oauthKeys.every((key) => expectedOauthKeys.has(key)) &&
+    oauthClientIds.length === 1 &&
+    Boolean(oauthClientIds[0]?.trim()) &&
+    oauthScopes.length === 1 &&
+    oauthScopes[0] === "write_products,write_files" &&
+    oauthRedirectUris.length === 1 &&
+    hasSafeOauthRedirect &&
+    oauthStates.length === 1 &&
+    /^[a-f0-9]{64}$/.test(oauthStates[0] ?? "");
+
+  return isShopPermissionRedirect || isAdminInstallUrl || isOauthAuthorizationUrl
+    ? url.toString()
+    : null;
 }
 
 export function shopDisplayName(shop: ShopRow) {

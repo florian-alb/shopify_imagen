@@ -73,7 +73,18 @@ export const connect = mutation({
 
     let shopId: Id<"shops">;
     if (existing) {
-      await ctx.db.patch(existing._id, payload);
+      const credentialsChanged =
+        existing.clientId !== clientId || existing.clientSecret !== clientSecret;
+      await ctx.db.patch(existing._id, {
+        ...payload,
+        ...(credentialsChanged
+          ? {
+              accessToken: null,
+              accessTokenScopes: [],
+              accessTokenUpdatedAt: now,
+            }
+          : {}),
+      });
       shopId = existing._id;
     } else {
       shopId = await ctx.db.insert("shops", {

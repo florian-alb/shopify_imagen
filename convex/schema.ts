@@ -149,6 +149,9 @@ export default defineSchema({
     name: v.optional(v.union(v.string(), v.null())),
     clientId: v.optional(v.union(v.string(), v.null())),
     clientSecret: v.optional(v.union(v.string(), v.null())),
+    accessToken: v.optional(v.union(v.string(), v.null())),
+    accessTokenScopes: v.optional(v.array(v.string())),
+    accessTokenUpdatedAt: v.optional(v.number()),
     productQuery: v.optional(v.union(v.string(), v.null())),
     createdByUserId: v.id("users"),
     createdAt: v.number(),
@@ -157,6 +160,16 @@ export default defineSchema({
     .index("by_domain", ["domain"])
     .index("by_created_by_user", ["createdByUserId"])
     .index("by_created_by_user_and_domain", ["createdByUserId", "domain"]),
+  shopifyOauthAttempts: defineTable({
+    stateHash: v.string(),
+    shopId: v.id("shops"),
+    userId: v.id("users"),
+    shopDomain: v.string(),
+    createdAt: v.number(),
+    expiresAt: v.number(),
+  })
+    .index("by_state_hash", ["stateHash"])
+    .index("by_expires_at", ["expiresAt"]),
   products: defineTable({
     shopId: v.optional(v.id("shops")),
     shopifyProductId: v.string(),

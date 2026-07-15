@@ -138,34 +138,28 @@ function AuthorizationDialogBody({ state }: { state: ShopAuthorizationState }) {
 
 function AuthorizationDialogAction({
   state,
-  onAuthorizationOpened,
+  isAuthorizing,
+  onAuthorize,
   onVerify,
 }: {
   state: ShopAuthorizationState;
-  onAuthorizationOpened: () => void;
+  isAuthorizing: boolean;
+  onAuthorize: () => void;
   onVerify: () => void;
 }) {
   if (
     state.status === "authorization_required" &&
-    state.authorization.status === "requested" &&
-    state.safeAuthorizationUrl
+    state.authorization.status === "requested"
   ) {
     return (
       <>
         <Button type="button" variant="outline" onClick={onVerify}>
           Vérifier à nouveau
         </Button>
-        <Button asChild>
-          <a
-            href={state.safeAuthorizationUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            referrerPolicy="no-referrer"
-            onClick={onAuthorizationOpened}
-          >
-            <ExternalLink data-icon="inline-start" />
-            Autoriser dans Shopify
-          </a>
+        <Button type="button" onClick={onAuthorize} disabled={isAuthorizing}>
+          <BusyIcon busy={isAuthorizing} />
+          {!isAuthorizing ? <ExternalLink data-icon="inline-start" /> : null}
+          {isAuthorizing ? "Redirection…" : "Autoriser dans Shopify"}
         </Button>
       </>
     );
@@ -192,14 +186,16 @@ export function ShopAuthorizationDialog({
   open,
   onOpenChange,
   onClose,
-  onAuthorizationOpened,
+  isAuthorizing,
+  onAuthorize,
   onVerify,
 }: {
   state: ShopAuthorizationState;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onClose: () => void;
-  onAuthorizationOpened: () => void;
+  isAuthorizing: boolean;
+  onAuthorize: () => void;
   onVerify: () => void;
 }) {
   const shop = state.status === "closed" ? null : state.shop;
@@ -221,7 +217,8 @@ export function ShopAuthorizationDialog({
           </Button>
           <AuthorizationDialogAction
             state={state}
-            onAuthorizationOpened={onAuthorizationOpened}
+            isAuthorizing={isAuthorizing}
+            onAuthorize={onAuthorize}
             onVerify={onVerify}
           />
         </DialogFooter>

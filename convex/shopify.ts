@@ -1,16 +1,33 @@
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
-import { action, internalAction, internalMutation, internalQuery } from "./_generated/server";
+import {
+  action,
+  internalAction,
+  internalMutation,
+  internalQuery,
+  type ActionCtx,
+} from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireUserId } from "./authz";
 import { refreshProductSummary } from "./products";
 import { refreshJobSummary } from "./jobs";
-import type { ShopifyCredentials } from "./shopScope";
+import {
+  normalizeShopDomain,
+  shopifyCredentialsForShop,
+  type ShopifyCredentials,
+} from "./shopScope";
 import {
   fetchShopifyAuthorizationStatus,
+  REQUIRED_SHOPIFY_ADMIN_SCOPES,
   type ShopifyAuthorizationStatus,
 } from "./shopify/authorization";
 import { getAccessToken, shopifyGraphql } from "./shopify/client";
+import {
+  buildShopifyOAuthAuthorizationUrl,
+  createShopifyOAuthState,
+  hashShopifyOAuthState,
+  shopifyOAuthCallbackUrl,
+} from "./shopify/oauth";
 import {
   buildMediaMoves,
   sameIds,
@@ -35,6 +52,8 @@ type ProductsResponse = {
 
 const REJECTED_IMAGE_RETENTION_MS = 5 * 24 * 60 * 60 * 1000;
 const REJECTED_IMAGE_CLEANUP_BATCH_SIZE = 50;
+const SHOPIFY_OAUTH_ATTEMPT_TTL_MS = 10 * 60 * 1000;
+const SHOPIFY_OAUTH_CLEANUP_BATCH_SIZE = 50;
 
 const shopifyAuthorizationStatusValidator = v.object({
   shopDomain: v.string(),
@@ -67,6 +86,163 @@ export const authorizationStatus = action({
     return await fetchShopifyAuthorizationStatus(credentials);
   },
 });
+
+export const createShopifyOauthAttempt = internalMutation({
+  args: {
+    stateHash: v.string(),
+    shopId: v.id("shops"),
+    userId: v.id("users"),
+    shopDomain: v.string(),
+    expiresAt: v.number(),
+  },
+  returns: v.id("shopifyOauthAttempts"),
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const expired = await ctx.db
+      .query("shopifyOauthAttempts")
+      .withIndex("by_expires_at", (query) => query.lt("expiresAt", now))
+      .take(SHOPIFY_OAUTH_CLEANUP_BATCH_SIZE);
+    for (const attempt of expired) {
+      await ctx.db.delete("shopifyOauthAttempts", attempt._id);
+    }
+    return await ctx.db.insert("shopifyOauthAttempts", {
+      ...args,
+      shopDomain: normalizeShopDomain(args.shopDomain),
+      createdAt: now,
+    });
+  },
+});
+
+export const getShopifyOauthAttempt = internalQuery({
+  args: { stateHash: v.string() },
+  handler: async (ctx, args) => {
+    const attempt = await ctx.db
+      .query("shopifyOauthAttempts")
+      .withIndex("by_state_hash", (query) =>
+        query.eq("stateHash", args.stateHash),
+      )
+      .unique();
+    if (!attempt || attempt.expiresAt <= Date.now()) return null;
+    const shop = await ctx.db.get(attempt.shopId);
+    if (!shop || shop.domain !== attempt.shopDomain) return null;
+    return {
+      stateHash: attempt.stateHash,
+      shopId: attempt.shopId,
+      shopDomain: attempt.shopDomain,
+      expiresAt: attempt.expiresAt,
+      credentials: shopifyCredentialsForShop(shop),
+    };
+  },
+});
+
+export const completeShopifyOauthAttempt = internalMutation({
+  args: {
+    stateHash: v.string(),
+    shopDomain: v.string(),
+    accessToken: v.string(),
+    scopes: v.array(v.string()),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const attempt = await ctx.db
+      .query("shopifyOauthAttempts")
+      .withIndex("by_state_hash", (query) =>
+        query.eq("stateHash", args.stateHash),
+      )
+      .unique();
+    const shopDomain = normalizeShopDomain(args.shopDomain);
+    if (
+      !attempt ||
+      attempt.expiresAt <= Date.now() ||
+      attempt.shopDomain !== shopDomain
+    ) {
+      throw new Error("Shopify OAuth attempt is invalid or expired.");
+    }
+    const grantedScopes = new Set(
+      args.scopes.map((scope) => scope.trim().toLowerCase()).filter(Boolean),
+    );
+    const missingScopes = REQUIRED_SHOPIFY_ADMIN_SCOPES.filter(
+      (scope) => !grantedScopes.has(scope),
+    );
+    if (missingScopes.length) {
+      throw new Error(
+        `Shopify did not grant the required scopes: ${missingScopes.join(", ")}.`,
+      );
+    }
+    await ctx.db.patch(attempt.shopId, {
+      accessToken: args.accessToken,
+      accessTokenScopes: Array.from(grantedScopes),
+      accessTokenUpdatedAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    await ctx.db.delete("shopifyOauthAttempts", attempt._id);
+    return null;
+  },
+});
+
+export const beginAuthorization = action({
+  args: { shopId: v.optional(v.id("shops")) },
+  returns: v.object({ authorizationUrl: v.string() }),
+  handler: async (ctx, args) => {
+    const userId = await requireUserId(ctx);
+    const credentials = (await ctx.runMutation(
+      internal.shops.ensureActiveForAction,
+      { userId },
+    )) as ShopifyCredentials;
+    if (args.shopId && credentials.shopId !== args.shopId) {
+      const selectedCredentials = (await ctx.runQuery(
+        internal.shops.getShopifyCredentials,
+        { shopId: args.shopId, userId },
+      )) as ShopifyCredentials;
+      return await createAuthorizationAttempt(ctx, userId, selectedCredentials);
+    }
+    return await createAuthorizationAttempt(ctx, userId, credentials);
+  },
+});
+
+async function createAuthorizationAttempt(
+  ctx: ActionCtx,
+  userId: Id<"users">,
+  credentials: ShopifyCredentials,
+) {
+  if (!credentials.shopId) {
+    throw new ConvexError("La boutique doit être enregistrée avant l'autorisation Shopify.");
+  }
+  const status = await fetchShopifyAuthorizationStatus(credentials);
+  if (status.status === "missing") {
+    throw new ConvexError(
+      `Publie d'abord les scopes Shopify manquants : ${status.scopes.missing.join(", ")}.`,
+    );
+  }
+  if (status.status === "granted") {
+    throw new ConvexError("Les accès Shopify sont déjà à jour pour cette boutique.");
+  }
+
+  const state = createShopifyOAuthState();
+  const stateHash = await hashShopifyOAuthState(state);
+  const expiresAt = Date.now() + SHOPIFY_OAUTH_ATTEMPT_TTL_MS;
+  const attemptId: Id<"shopifyOauthAttempts"> = await ctx.runMutation(
+    internal.shopify.createShopifyOauthAttempt,
+    {
+      stateHash,
+      shopId: credentials.shopId,
+      userId,
+      shopDomain: credentials.domain,
+      expiresAt,
+    },
+  );
+  if (!attemptId) {
+    throw new Error("Shopify OAuth attempt could not be created.");
+  }
+  return {
+    authorizationUrl: buildShopifyOAuthAuthorizationUrl(
+      credentials,
+      state,
+      shopifyOAuthCallbackUrl(),
+      REQUIRED_SHOPIFY_ADMIN_SCOPES,
+    ),
+  };
+}
 
 function generatedImageAssetUrls(image: Doc<"generatedImages">) {
   return Array.from(
