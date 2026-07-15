@@ -62,7 +62,6 @@ export type ShopAuthorizationState =
       status: "awaiting_approval";
       shop: ShopRow;
       authorization: ShopifyAuthorizationStatus;
-      safeAuthorizationUrl: string;
     }
   | {
       status: "granted";

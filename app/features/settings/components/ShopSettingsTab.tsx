@@ -67,7 +67,8 @@ export function ShopSettingsTab({
         open={shopAuthorization.isOpen}
         onOpenChange={shopAuthorization.handleOpenChange}
         onClose={shopAuthorization.close}
-        onAuthorizationOpened={shopAuthorization.markAuthorizationOpened}
+        isAuthorizing={shopAuthorization.isAuthorizing}
+        onAuthorize={() => void shopAuthorization.authorize()}
         onVerify={shopAuthorization.verify}
       />
     </SettingsPanel>

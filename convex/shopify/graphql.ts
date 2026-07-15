@@ -69,9 +69,7 @@ export const PRODUCT_UPDATE_MEDIA_MUTATION = `#graphql
 export const SHOPIFY_AUTHORIZATION_STATUS_QUERY = `#graphql
   query ShopifyAuthorizationStatus {
     currentAppInstallation {
-      launchUrl
       app {
-        installUrl
         requestedAccessScopes { handle }
       }
       accessScopes { handle }

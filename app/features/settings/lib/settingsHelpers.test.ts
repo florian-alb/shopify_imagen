@@ -69,6 +69,29 @@ describe("Shopify settings helpers", () => {
     );
   });
 
+  it("accepts only a complete OAuth authorization URL for the expected shop", () => {
+    const state = "a".repeat(64);
+    const url = new URL(
+      "https://ajcna0-3c.myshopify.com/admin/oauth/authorize",
+    );
+    url.searchParams.set("client_id", "public-id");
+    url.searchParams.set("scope", "write_products,write_files");
+    url.searchParams.set(
+      "redirect_uri",
+      "https://example.convex.site/shopify/oauth/callback",
+    );
+    url.searchParams.set("state", state);
+
+    expect(
+      safeShopifyAuthorizationUrl(url.toString(), "ajcna0-3c.myshopify.com"),
+    ).toBe(url.toString());
+
+    url.hostname = "other-shop.myshopify.com";
+    expect(
+      safeShopifyAuthorizationUrl(url.toString(), "ajcna0-3c.myshopify.com"),
+    ).toBeNull();
+  });
+
   it("rejects unsafe authorization URLs", () => {
     const shop = "ajcna0-3c.myshopify.com";
     expect(

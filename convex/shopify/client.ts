@@ -15,6 +15,8 @@ function env(name: string, fallback = "") {
 }
 
 export async function getAccessToken(credentials?: ShopifyCredentials) {
+  if (credentials?.accessToken) return credentials.accessToken;
+
   const domain = normalizeShopDomain(
     credentials?.domain ?? env("SHOPIFY_SHOP_DOMAIN"),
   );

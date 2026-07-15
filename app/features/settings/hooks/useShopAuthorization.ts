@@ -1,5 +1,5 @@
 import { useAction } from "convex/react";
-import { useCallback, useEffect, useReducer, useRef } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { api } from "@/lib/convex";
 import {
   authorizationMatchesShop,
@@ -19,12 +19,14 @@ function authorizationErrorMessage(error: unknown) {
 
 export function useShopAuthorization() {
   const fetchAuthorizationStatus = useAction(api.shopify.authorizationStatus);
+  const beginAuthorization = useAction(api.shopify.beginAuthorization);
   const [state, dispatch] = useReducer(
     shopAuthorizationReducer,
     CLOSED_SHOP_AUTHORIZATION_STATE,
   );
   const selectedShopRef = useRef<ShopRow | null>(null);
   const requestSequenceRef = useRef(0);
+  const [isAuthorizing, setIsAuthorizing] = useState(false);
 
   useEffect(
     () => () => {
@@ -63,11 +65,6 @@ export function useShopAuthorization() {
           authorization.authorizationUrl,
           authorization.shopDomain,
         );
-        if (authorization.status === "requested" && !safeAuthorizationUrl) {
-          throw new Error(
-            "Shopify n'a pas fourni de lien d'autorisation sûr pour cette boutique.",
-          );
-        }
 
         dispatch({
           type: "check_succeeded",
@@ -112,9 +109,34 @@ export function useShopAuthorization() {
     if (shop) void check(shop);
   }, [check]);
 
-  const markAuthorizationOpened = useCallback(() => {
-    dispatch({ type: "authorization_opened" });
-  }, []);
+  const authorize = useCallback(async () => {
+    const shop = selectedShopRef.current;
+    if (!shop || isAuthorizing) return;
+    setIsAuthorizing(true);
+    try {
+      const result = await beginAuthorization(
+        shop._id ? { shopId: shop._id } : {},
+      );
+      const safeUrl = safeShopifyAuthorizationUrl(
+        result.authorizationUrl,
+        shop.domain,
+      );
+      if (!safeUrl) {
+        throw new Error(
+          "Shopify n'a pas fourni de lien OAuth sûr pour cette boutique.",
+        );
+      }
+      dispatch({ type: "authorization_opened" });
+      window.location.assign(safeUrl);
+    } catch (error) {
+      dispatch({
+        type: "check_failed",
+        shop,
+        message: authorizationErrorMessage(error),
+      });
+      setIsAuthorizing(false);
+    }
+  }, [beginAuthorization, isAuthorizing]);
 
   const handleOpenChange = useCallback(
     (open: boolean) => {
@@ -125,11 +147,12 @@ export function useShopAuthorization() {
 
   return {
     state,
+    isAuthorizing,
     isOpen: state.status !== "closed",
     open,
     close,
     verify,
-    markAuthorizationOpened,
+    authorize,
     handleOpenChange,
   };
 }

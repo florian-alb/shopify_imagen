@@ -48,8 +48,7 @@ export function shopAuthorizationReducer(
     case "authorization_opened":
       if (
         state.status !== "authorization_required" ||
-        state.authorization.status !== "requested" ||
-        !state.safeAuthorizationUrl
+        state.authorization.status !== "requested"
       ) {
         return state;
       }
@@ -57,7 +56,6 @@ export function shopAuthorizationReducer(
         status: "awaiting_approval",
         shop: state.shop,
         authorization: state.authorization,
-        safeAuthorizationUrl: state.safeAuthorizationUrl,
       };
     case "check_failed":
       return {
@@ -123,8 +121,9 @@ export function parseShopifyAuthorizationStatus(
   const authorizationUrl = candidate.authorizationUrl;
   const hasExpectedAuthorizationUrl =
     status === "requested"
-      ? typeof authorizationUrl === "string" &&
-        authorizationUrl.trim().length > 0
+      ? authorizationUrl === null ||
+        (typeof authorizationUrl === "string" &&
+          authorizationUrl.trim().length > 0)
       : authorizationUrl === null;
   const scopeGroups = [missingScopes, requestedScopes, grantedScopes];
   const flatScopes = scopeGroups.every(isStringArray)
