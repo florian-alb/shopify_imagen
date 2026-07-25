@@ -98,6 +98,31 @@ export const PRODUCT_VARIANT_APPEND_MEDIA_MUTATION = `#graphql
   }
 `;
 
+export const PRODUCT_VARIANT_DETACH_MEDIA_MUTATION = `#graphql
+  mutation ProductVariantDetachGeneratedMedia(
+    $productId: ID!
+    $variantMedia: [ProductVariantDetachMediaInput!]!
+  ) {
+    productVariantDetachMedia(
+      productId: $productId
+      variantMedia: $variantMedia
+    ) {
+      productVariants {
+        id
+        media(first: 20) {
+          nodes {
+            id
+          }
+        }
+      }
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+`;
+
 export const SHOPIFY_AUTHORIZATION_STATUS_QUERY = `#graphql
   query ShopifyAuthorizationStatus {
     currentAppInstallation {
@@ -128,13 +153,14 @@ export const PRODUCT_DUPLICATE_MUTATION = `#graphql
         id
         title
         handle
-        variants(first: 250) {
-          nodes {
-            id
-            title
-            selectedOptions { name value }
-          }
+      variants(first: 250) {
+        nodes {
+          id
+          title
+          selectedOptions { name value }
+          media(first: 20) { nodes { id } }
         }
+      }
       }
       userErrors { field message }
     }

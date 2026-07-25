@@ -20,11 +20,13 @@ export function useProductImagePublish({
     Set<Id<"generatedImages">>
   >(new Set());
   const [replaceExisting, setReplaceExisting] = useState(false);
+  const [replaceVariantMedia, setReplaceVariantMedia] = useState(true);
   const [busy, setBusy] = useState(false);
 
   function openPush() {
     setSelectedPushIds(new Set(readyImages.map((image) => image._id)));
     setReplaceExisting(false);
+    setReplaceVariantMedia(true);
     setOpen(true);
   }
 
@@ -39,6 +41,7 @@ export function useProductImagePublish({
           .filter((image) => selectedPushIds.has(image._id))
           .map((image) => image._id),
         replaceExisting,
+        replaceVariantMedia,
       });
       setOpen(false);
       if (result.publishMode === "separate_products") {
@@ -71,6 +74,8 @@ export function useProductImagePublish({
     setSelectedPushIds,
     replaceExisting,
     setReplaceExisting,
+    replaceVariantMedia,
+    setReplaceVariantMedia,
     publishMode,
     busy,
     openPush,

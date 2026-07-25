@@ -191,6 +191,8 @@ export function ProductDetailPage({
         setSelectedPushIds={publish.setSelectedPushIds}
         replaceExisting={publish.replaceExisting}
         setReplaceExisting={publish.setReplaceExisting}
+        replaceVariantMedia={publish.replaceVariantMedia}
+        setReplaceVariantMedia={publish.setReplaceVariantMedia}
         publishMode={visualGroupsData?.config?.publishMode ?? null}
         busy={publish.busy}
         onPush={() => void publish.push()}
