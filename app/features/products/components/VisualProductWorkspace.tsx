@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils";
 import type { GeneratedImagesGallery } from "./GeneratedImagesGallery";
 import { GeneratedImagesGallery as GeneratedGallery } from "./GeneratedImagesGallery";
 import type { VisualProductViewModel } from "../lib/visualProductWorkspace";
+import { orderVisualReferences } from "../lib/visualReferenceOrder";
 import {
   visualProductStatusLabels,
   visualProductStatusTones,
@@ -241,9 +242,9 @@ function VisualProductDetail({
       !image.storageUrl &&
       (image.status === "queued" || image.status === "generating"),
   );
-  const referenceImages = visualProduct.group.references
-    .filter((reference) => reference.confirmed)
-    .sort((left, right) => left.position - right.position);
+  const referenceImages = orderVisualReferences(
+    visualProduct.group.references.filter((reference) => reference.confirmed),
+  );
   const referenceLightboxItems = referenceImages.map((reference, index) => ({
     url: reference.referenceUrl,
     label: `Référence ${index + 1} · ${visualProduct.group.label}`,

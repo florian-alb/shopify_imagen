@@ -18,6 +18,8 @@ import {
   buildVisualGroupDrafts,
   defaultVisualOptionNames,
   inferReferenceAssignment,
+  nextVisualReferencePosition,
+  visualReferencePosition,
   type ShopifyImageLike,
   type ShopifyOptionLike,
   type ShopifyVariantLike,
@@ -169,7 +171,10 @@ export const getForProduct = query({
         );
         const groupReferences = references
           .filter((reference) => reference.groupId === group._id)
-          .sort((left, right) => left.position - right.position);
+          .sort(
+            (left, right) =>
+              visualReferencePosition(left) - visualReferencePosition(right),
+          );
         return {
           ...group,
           variants: groupVariants,
@@ -444,6 +449,7 @@ async function assignReferenceToGroup(
       (reference.mediaId && reference.mediaId === source.mediaId),
   );
   const now = Date.now();
+  const groupPosition = nextVisualReferencePosition(current);
 
   if (existing) {
     await ctx.db.patch(existing._id, {
@@ -463,6 +469,7 @@ async function assignReferenceToGroup(
       confirmed: true,
       referenceUrl: source.sourceUrl,
       crop: undefined,
+      groupPosition,
       updatedAt: now,
     });
     return source._id;
@@ -482,6 +489,7 @@ async function assignReferenceToGroup(
     confirmed: true,
     sourceReferenceId: source.sourceReferenceId ?? source._id,
     position: source.position,
+    groupPosition,
     createdAt: now,
     updatedAt: now,
   });
@@ -502,6 +510,52 @@ export const setPrimaryReference = mutation({
     mediaId: v.string(),
   },
   handler: assignReferenceToGroup,
+});
+
+export const reorderReferences = mutation({
+  args: {
+    groupId: v.id("visualGroups"),
+    referenceIds: v.array(v.id("visualGroupReferences")),
+  },
+  handler: async (ctx, args) => {
+    const userId = await requireUserId(ctx);
+    const scope = await getActiveShopScope(ctx, userId);
+    const group = await ctx.db.get(args.groupId);
+    if (!group || !shopMatchesScope(group, scope)) {
+      throw new Error("Visual group not found.");
+    }
+    if (args.referenceIds.length > 50) {
+      throw new Error("A visual group cannot contain more than 50 references.");
+    }
+
+    const references = await ctx.db
+      .query("visualGroupReferences")
+      .withIndex("by_group", (q) => q.eq("groupId", group._id))
+      .take(51);
+    const uniqueIds = new Set(args.referenceIds);
+    const referenceById = new Map(
+      references.map((reference) => [reference._id, reference]),
+    );
+    if (
+      references.length > 50 ||
+      uniqueIds.size !== args.referenceIds.length ||
+      references.length !== args.referenceIds.length ||
+      args.referenceIds.some((referenceId) => !referenceById.has(referenceId))
+    ) {
+      throw new Error("Reference order is out of date. Please try again.");
+    }
+
+    const now = Date.now();
+    await Promise.all(
+      args.referenceIds.map((referenceId, groupPosition) =>
+        ctx.db.patch(referenceId, {
+          groupPosition,
+          updatedAt: now,
+        }),
+      ),
+    );
+    return args.referenceIds;
+  },
 });
 
 export const confirmReference = mutation({
@@ -586,6 +640,7 @@ export const removeReference = mutation({
       confidence: 0,
       referenceUrl: reference.sourceUrl,
       crop: undefined,
+      groupPosition: undefined,
       updatedAt: Date.now(),
     });
     return reference._id;
@@ -644,20 +699,30 @@ export const applyAnalysis = internalMutation({
     const config = await ctx.db.get(args.configId);
     if (!config) throw new Error("Visual configuration not found.");
     const { groups, references } = await rowsForConfig(ctx, config._id);
+    const staleSuggestions = references.filter(
+      (reference) =>
+        reference.sourceReferenceId &&
+        !reference.confirmed &&
+        (reference.assignmentSource === "ai" ||
+          reference.assignmentSource === "ai_crop"),
+    );
     await Promise.all(
-      references
-        .filter(
-          (reference) =>
-            reference.sourceReferenceId &&
-            !reference.confirmed &&
-            (reference.assignmentSource === "ai" ||
-              reference.assignmentSource === "ai_crop"),
-        )
-        .map((reference) => ctx.db.delete(reference._id)),
+      staleSuggestions.map((reference) => ctx.db.delete(reference._id)),
     );
     const groupByKey = new Map(groups.map((group) => [group.key, group]));
     const referenceById = new Map(
       references.map((reference) => [reference._id, reference]),
+    );
+    const nextPositionByGroupId = new Map(
+      groups.map((group) => [
+        group._id,
+        nextVisualReferencePosition(
+          references.filter(
+            (reference) =>
+              reference.groupId === group._id && reference.confirmed,
+          ),
+        ),
+      ]),
     );
     const seen = new Map<Id<"visualGroupReferences">, number>();
     let suggested = 0;
@@ -671,6 +736,12 @@ export const applyAnalysis = internalMutation({
       const occurrence = seen.get(source._id) ?? 0;
       seen.set(source._id, occurrence + 1);
       const now = Date.now();
+      const groupPosition = group
+        ? (nextPositionByGroupId.get(group._id) ?? 0)
+        : undefined;
+      if (group && groupPosition !== undefined) {
+        nextPositionByGroupId.set(group._id, groupPosition + 1);
+      }
 
       if (occurrence === 0) {
         await ctx.db.patch(source._id, {
@@ -680,6 +751,7 @@ export const applyAnalysis = internalMutation({
           confirmed: false,
           referenceUrl: assignment.referenceUrl,
           ...(assignment.crop ? { crop: assignment.crop } : { crop: undefined }),
+          groupPosition,
           updatedAt: now,
         });
       } else if (group) {
@@ -698,6 +770,7 @@ export const applyAnalysis = internalMutation({
           ...(assignment.crop ? { crop: assignment.crop } : {}),
           sourceReferenceId: source._id,
           position: source.position,
+          groupPosition,
           createdAt: now,
           updatedAt: now,
         });

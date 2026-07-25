@@ -1,10 +1,13 @@
 import { useAction, useMutation } from "convex/react";
 import {
+  ArrowDown,
+  ArrowUp,
   Check,
   ExternalLink,
   ImageIcon,
   LockKeyhole,
   Sparkles,
+  X,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -28,6 +31,10 @@ import { errorMessage } from "@/lib/errors";
 import { cn } from "@/lib/utils";
 
 import type { VisualGroupsData } from "../types";
+import {
+  moveReferenceId,
+  orderVisualReferences,
+} from "../lib/visualReferenceOrder";
 
 type PublishMode = "variant_media" | "separate_products";
 
@@ -93,6 +100,7 @@ export function VisualGroupsSection({
   const setPublishMode = useMutation(api.visualGroups.setPublishMode);
   const assignReference = useMutation(api.visualGroups.assignReference);
   const removeReference = useMutation(api.visualGroups.removeReference);
+  const reorderReferences = useMutation(api.visualGroups.reorderReferences);
   const confirmGroupReferences = useMutation(
     api.visualGroups.confirmGroupReferences,
   );
@@ -263,6 +271,29 @@ export function VisualGroupsSection({
       }
     } catch (error) {
       toast.error("Modification des références impossible", {
+        description: errorMessage(error),
+      });
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleReferenceMove = async (
+    groupId: Id<"visualGroups">,
+    groupReferences: Doc<"visualGroupReferences">[],
+    referenceId: Id<"visualGroupReferences">,
+    direction: -1 | 1,
+  ) => {
+    const referenceIds = moveReferenceId(
+      groupReferences.map((reference) => reference._id),
+      referenceId,
+      direction,
+    );
+    setBusyAction(`order:${groupId}`);
+    try {
+      await reorderReferences({ groupId, referenceIds });
+    } catch (error) {
+      toast.error("Réorganisation impossible", {
         description: errorMessage(error),
       });
     } finally {
@@ -484,19 +515,27 @@ export function VisualGroupsSection({
 
           <div className="divide-y">
             {data.groups.map((group) => {
-              const groupReferences = [...group.references].sort(
-                (left, right) =>
-                  Number(right.confirmed) - Number(left.confirmed) ||
-                  left.position - right.position,
-              );
+              const groupReferences = orderVisualReferences(group.references);
               const confirmedCount = groupReferences.filter(
                 (reference) => reference.confirmed,
               ).length;
               const pendingCount = groupReferences.length - confirmedCount;
               const previewReferences = groupReferences.slice(0, 3);
+              const selectedMediaIds = new Set(
+                groupReferences
+                  .map((reference) => reference.mediaId)
+                  .filter((mediaId): mediaId is string => Boolean(mediaId)),
+              );
+              const availableReferences = references.filter(
+                (reference) =>
+                  !reference.mediaId ||
+                  !selectedMediaIds.has(reference.mediaId),
+              );
               const picking = referencePickerGroupId === group._id;
               const confirming = busyAction === `confirm:${group._id}`;
               const changing = busyAction === `reference:${group._id}`;
+              const reordering = busyAction === `order:${group._id}`;
+              const referencesBusy = changing || reordering;
 
               return (
                 <div key={group._id}>
@@ -579,7 +618,7 @@ export function VisualGroupsSection({
                         <Button
                           size="sm"
                           className="min-h-11 sm:min-h-8"
-                          disabled={confirming}
+                          disabled={confirming || referencesBusy}
                           onClick={() =>
                             void handleConfirmGroup(group._id, pendingCount)
                           }
@@ -595,7 +634,7 @@ export function VisualGroupsSection({
                         size="sm"
                         className="min-h-11 sm:min-h-8"
                         variant="outline"
-                        disabled={changing}
+                        disabled={referencesBusy}
                         aria-expanded={picking}
                         onClick={() =>
                           setReferencePickerGroupId((current) =>
@@ -610,42 +649,153 @@ export function VisualGroupsSection({
 
                   {picking ? (
                     <div className="border-t bg-muted/30 px-4 py-3">
-                      <p className="text-xs font-medium">
-                        Images de référence pour {group.label}
+                      <p className="text-sm font-medium">
+                        Ordre des références — {group.label}
                       </p>
-                      <p className="mb-3 mt-0.5 text-xs text-muted-foreground">
-                        Sélectionnez toutes les vues utiles de cette
-                        déclinaison.
+                      <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
+                        L’IA utilise les images de haut en bas. La n° 1 est
+                        prioritaire ; le nombre d’images envoyé dépend du
+                        prompt.
                       </p>
-                      {references.length ? (
-                        <div className="flex flex-wrap gap-2">
-                          {references.map((reference, index) => {
-                            const selectedReference = group.references.find(
-                              (groupReference) =>
-                                groupReference.mediaId === reference.mediaId,
-                            );
-                            const selected = Boolean(selectedReference);
-                            return (
+
+                      {groupReferences.length ? (
+                        <ol className="mt-3 divide-y border-y">
+                          {groupReferences.map((reference, index) => (
+                            <li
+                              key={reference._id}
+                              className="flex min-w-0 flex-wrap items-center gap-3 py-2"
+                            >
+                              <span
+                                className={cn(
+                                  "grid size-7 shrink-0 place-items-center rounded-full text-xs font-semibold tabular-nums",
+                                  index === 0
+                                    ? "bg-primary text-primary-foreground"
+                                    : "bg-muted text-muted-foreground",
+                                )}
+                                aria-label={`Position ${index + 1}`}
+                              >
+                                {index + 1}
+                              </span>
+                              <img
+                                src={reference.referenceUrl}
+                                alt=""
+                                className="size-14 shrink-0 rounded-md bg-muted object-cover"
+                              />
+                              <div className="min-w-32 flex-1">
+                                <p className="truncate text-sm font-medium">
+                                  {index === 0
+                                    ? "Prioritaire pour l’IA"
+                                    : `Référence ${index + 1}`}
+                                </p>
+                                <p className="truncate text-xs text-muted-foreground">
+                                  {reference.confirmed
+                                    ? "Confirmée"
+                                    : "À confirmer"}{" "}
+                                  · {sourceLabel(reference)}
+                                </p>
+                              </div>
+                              <div className="ml-auto flex shrink-0 items-center gap-0.5">
+                                <Button
+                                  type="button"
+                                  size="icon"
+                                  variant="ghost"
+                                  className="size-11 sm:size-8"
+                                  disabled={index === 0 || referencesBusy}
+                                  aria-label={`Monter l’image ${index + 1}`}
+                                  title="Monter"
+                                  onClick={() =>
+                                    void handleReferenceMove(
+                                      group._id,
+                                      groupReferences,
+                                      reference._id,
+                                      -1,
+                                    )
+                                  }
+                                >
+                                  <ArrowUp />
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="icon"
+                                  variant="ghost"
+                                  className="size-11 sm:size-8"
+                                  disabled={
+                                    index === groupReferences.length - 1 ||
+                                    referencesBusy
+                                  }
+                                  aria-label={`Descendre l’image ${index + 1}`}
+                                  title="Descendre"
+                                  onClick={() =>
+                                    void handleReferenceMove(
+                                      group._id,
+                                      groupReferences,
+                                      reference._id,
+                                      1,
+                                    )
+                                  }
+                                >
+                                  <ArrowDown />
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="icon"
+                                  variant="ghost"
+                                  className="size-11 text-destructive hover:text-destructive sm:size-8"
+                                  disabled={referencesBusy}
+                                  aria-label={`Retirer l’image ${index + 1}`}
+                                  title="Retirer"
+                                  onClick={() =>
+                                    void handleReferenceToggle(
+                                      group._id,
+                                      reference,
+                                      reference,
+                                    )
+                                  }
+                                >
+                                  <X />
+                                </Button>
+                              </div>
+                            </li>
+                          ))}
+                        </ol>
+                      ) : (
+                        <p className="mt-3 text-sm text-muted-foreground">
+                          Aucune image sélectionnée pour cette déclinaison.
+                        </p>
+                      )}
+
+                      <div
+                        className={cn(
+                          "mt-4",
+                          groupReferences.length && "border-t pt-4",
+                        )}
+                      >
+                        <p className="text-xs font-medium">
+                          Ajouter des images Shopify
+                        </p>
+                        <p className="mb-3 mt-0.5 text-xs text-muted-foreground">
+                          Elles seront ajoutées à la fin, dans l’ordre de
+                          sélection.
+                        </p>
+                        {!references.length ? (
+                          <p className="text-sm text-muted-foreground">
+                            Synchronisez d’abord des images depuis Shopify.
+                          </p>
+                        ) : availableReferences.length ? (
+                          <div className="flex flex-wrap gap-2">
+                            {availableReferences.map((reference, index) => (
                               <button
                                 key={reference._id}
                                 type="button"
-                                disabled={!reference.mediaId || changing}
-                                className={cn(
-                                  "group relative size-16 overflow-hidden rounded-md border bg-background outline-none transition-colors hover:border-primary focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
-                                  selected &&
-                                    "border-primary ring-2 ring-primary/20",
-                                )}
-                                aria-label={`${
-                                  selected ? "Retirer" : "Ajouter"
-                                } l’image Shopify ${index + 1} ${
-                                  selected ? "des" : "aux"
-                                } références de ${group.label}`}
-                                aria-pressed={selected}
+                                disabled={!reference.mediaId || referencesBusy}
+                                className="relative size-16 overflow-hidden rounded-md border bg-background outline-none transition-colors hover:border-primary focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                                aria-label={`Ajouter l’image Shopify ${
+                                  index + 1
+                                } aux références de ${group.label}`}
                                 onClick={() =>
                                   void handleReferenceToggle(
                                     group._id,
                                     reference,
-                                    selectedReference,
                                   )
                                 }
                               >
@@ -654,20 +804,15 @@ export function VisualGroupsSection({
                                   alt=""
                                   className="size-full object-cover"
                                 />
-                                {selected ? (
-                                  <span className="absolute right-1 top-1 grid size-5 place-items-center rounded-full bg-primary text-primary-foreground">
-                                    <Check className="size-3" />
-                                  </span>
-                                ) : null}
                               </button>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <p className="text-sm text-muted-foreground">
-                          Synchronisez d’abord des images depuis Shopify.
-                        </p>
-                      )}
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-muted-foreground">
+                            Toutes les images Shopify sont déjà sélectionnées.
+                          </p>
+                        )}
+                      </div>
                     </div>
                   ) : null}
                 </div>
