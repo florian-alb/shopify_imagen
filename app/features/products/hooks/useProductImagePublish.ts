@@ -21,13 +21,30 @@ export function useProductImagePublish({
   >(new Set());
   const [replaceExisting, setReplaceExisting] = useState(false);
   const [replaceVariantMedia, setReplaceVariantMedia] = useState(true);
+  const [focusedGroupId, setFocusedGroupId] =
+    useState<Id<"visualGroups"> | null>(null);
   const [busy, setBusy] = useState(false);
 
-  function openPush() {
-    setSelectedPushIds(new Set(readyImages.map((image) => image._id)));
+  function openWithImages(
+    images: Doc<"generatedImages">[],
+    focusGroupId: Id<"visualGroups"> | null,
+  ) {
+    setSelectedPushIds(new Set(images.map((image) => image._id)));
+    setFocusedGroupId(focusGroupId);
     setReplaceExisting(false);
     setReplaceVariantMedia(true);
     setOpen(true);
+  }
+
+  function openPush() {
+    openWithImages(readyImages, null);
+  }
+
+  function openPushForGroup(groupId: Id<"visualGroups">) {
+    openWithImages(
+      readyImages.filter((image) => image.visualGroupId === groupId),
+      groupId,
+    );
   }
 
   async function push() {
@@ -76,9 +93,11 @@ export function useProductImagePublish({
     setReplaceExisting,
     replaceVariantMedia,
     setReplaceVariantMedia,
+    focusedGroupId,
     publishMode,
     busy,
     openPush,
+    openPushForGroup,
     push,
   };
 }

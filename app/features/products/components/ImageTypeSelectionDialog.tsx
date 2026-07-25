@@ -23,6 +23,7 @@ export function ImageTypeSelectionDialog({
   selectedTypes,
   visualGroupsData,
   selectedGroupIds,
+  focusedGroupId,
   onToggleGroup,
   busy,
   title,
@@ -37,6 +38,7 @@ export function ImageTypeSelectionDialog({
   selectedTypes: Set<string>;
   visualGroupsData?: VisualGroupsData | null;
   selectedGroupIds?: Set<Id<"visualGroups">>;
+  focusedGroupId?: Id<"visualGroups"> | null;
   onToggleGroup?: (groupId: Id<"visualGroups">) => void;
   busy: boolean;
   title: string;
@@ -46,6 +48,9 @@ export function ImageTypeSelectionDialog({
   onGenerate: () => void;
 }) {
   const usesVisualGroups = Boolean(visualGroupsData?.config);
+  const focusedGroup = visualGroupsData?.groups.find(
+    (group) => group._id === focusedGroupId,
+  );
   const totalImages =
     selectedTypes.size * (usesVisualGroups ? (selectedGroupIds?.size ?? 0) : 1);
 
@@ -57,7 +62,25 @@ export function ImageTypeSelectionDialog({
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
-          {usesVisualGroups ? (
+          {focusedGroup ? (
+            <div className="flex items-center gap-3 rounded-lg border bg-muted/30 p-3">
+              <span
+                className="size-5 shrink-0 rounded-full border"
+                style={{
+                  background: focusedGroup.swatchCss ?? "var(--muted)",
+                }}
+                aria-hidden="true"
+              />
+              <span className="min-w-0">
+                <span className="block text-xs text-muted-foreground">
+                  Déclinaison sélectionnée
+                </span>
+                <span className="block truncate text-sm font-medium">
+                  {focusedGroup.label}
+                </span>
+              </span>
+            </div>
+          ) : usesVisualGroups ? (
             <fieldset>
               <legend className="mb-2 text-sm font-medium">
                 Groupes visuels

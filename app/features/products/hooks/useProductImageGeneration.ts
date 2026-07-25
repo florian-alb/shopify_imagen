@@ -23,24 +23,44 @@ export function useProductImageGeneration({
   const [selectedGroupIds, setSelectedGroupIds] = useState<
     Set<Id<"visualGroups">>
   >(new Set());
+  const [focusedGroupId, setFocusedGroupId] =
+    useState<Id<"visualGroups"> | null>(null);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const imageTypeSelection = useImageTypeSelection(availableTypes);
 
-  function openGenerate() {
+  function openWithGroups(
+    groupIds: Id<"visualGroups">[],
+    focusGroupId: Id<"visualGroups"> | null,
+  ) {
     if (visualGroupsData === undefined) {
       toast.info("Chargement de la configuration des variantes");
       return;
     }
     imageTypeSelection.resetSelection();
-    setSelectedGroupIds(
-      new Set(
-        (visualGroupsData?.groups ?? [])
-          .filter((group) => group.ready)
-          .map((group) => group._id),
-      ),
-    );
+    setSelectedGroupIds(new Set(groupIds));
+    setFocusedGroupId(focusGroupId);
     setOpen(true);
+  }
+
+  function openGenerate() {
+    openWithGroups(
+      (visualGroupsData?.groups ?? [])
+        .filter((group) => group.ready)
+        .map((group) => group._id),
+      null,
+    );
+  }
+
+  function openGenerateForGroup(groupId: Id<"visualGroups">) {
+    const group = visualGroupsData?.groups.find(
+      (candidate) => candidate._id === groupId,
+    );
+    if (!group?.ready) {
+      toast.info("Confirmez d’abord l’image de référence");
+      return;
+    }
+    openWithGroups([groupId], groupId);
   }
 
   function toggleGroup(groupId: Id<"visualGroups">) {
@@ -86,10 +106,12 @@ export function useProductImageGeneration({
   return {
     selectedTypes: imageTypeSelection.selectedTypes,
     selectedGroupIds,
+    focusedGroupId,
     open,
     setOpen,
     busy,
     openGenerate,
+    openGenerateForGroup,
     toggleType: imageTypeSelection.toggleType,
     toggleGroup,
     generate,
