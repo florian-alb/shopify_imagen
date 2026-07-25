@@ -37,7 +37,7 @@ export function PublishImagesDialog({
   setReplaceExisting,
   replaceVariantMedia,
   setReplaceVariantMedia,
-  publishMode,
+  hasVisualGroups,
   visualGroupsData,
   focusedGroupId,
   busy,
@@ -52,14 +52,12 @@ export function PublishImagesDialog({
   setReplaceExisting: Dispatch<SetStateAction<boolean>>;
   replaceVariantMedia: boolean;
   setReplaceVariantMedia: Dispatch<SetStateAction<boolean>>;
-  publishMode: "variant_media" | "separate_products" | null;
+  hasVisualGroups: boolean;
   visualGroupsData: VisualGroupsData | null | undefined;
   focusedGroupId?: Id<"visualGroups"> | null;
   busy: boolean;
   onPush: () => void;
 }) {
-  const separateProducts = publishMode === "separate_products";
-  const hasVisualGroups = publishMode !== null;
   const productGroups = buildPublishProductGroups(
     readyImages,
     visualGroupsData,
@@ -86,18 +84,14 @@ export function PublishImagesDialog({
           <AlertDialogTitle>
             {focusedProductGroup
               ? `Publier · ${focusedProductGroup.label}`
-              : separateProducts
-                ? "Publier les déclinaisons sur Shopify ?"
-                : "Publier les images sur Shopify ?"}
+              : "Publier les images sur Shopify ?"}
           </AlertDialogTitle>
           <AlertDialogDescription>
             {focusedProductGroup
               ? "Les images et les variantes Shopify de cette déclinaison uniquement seront mises à jour."
-              : separateProducts
-                ? "Chaque bloc deviendra un produit enfant. Sa première image sélectionnée sera l’image de ses variantes Shopify."
-                : publishMode === "variant_media"
-                  ? "Chaque bloc correspond à une déclinaison du produit mère. La première image sélectionnée sera assignée à ses variantes."
-                  : "Choisissez les images approuvées à envoyer sur Shopify."}
+              : hasVisualGroups
+                ? "Chaque bloc correspond à une déclinaison du produit mère. La première image sélectionnée sera assignée à ses variantes."
+                : "Choisissez les images approuvées à envoyer sur Shopify."}
           </AlertDialogDescription>
         </AlertDialogHeader>
 
@@ -146,7 +140,6 @@ export function PublishImagesDialog({
 
             <PublishImagesOptions
               hasVisualGroups={hasVisualGroups}
-              separateProducts={separateProducts}
               replaceExisting={replaceExisting}
               setReplaceExisting={setReplaceExisting}
               replaceVariantMedia={replaceVariantMedia}
@@ -165,9 +158,7 @@ export function PublishImagesDialog({
             onClick={onPush}
           >
             <BusyIcon busy={busy} />
-            {separateProducts
-              ? `Publier ${selectedProductCount} produit${selectedProductCount === 1 ? "" : "s"}`
-              : `Publier ${selectedPushIds.size} image${selectedPushIds.size === 1 ? "" : "s"}`}
+            {`Publier ${selectedPushIds.size} image${selectedPushIds.size === 1 ? "" : "s"}`}
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>

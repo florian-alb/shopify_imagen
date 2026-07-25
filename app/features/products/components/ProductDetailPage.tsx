@@ -64,7 +64,6 @@ export function ProductDetailPage({
   const publish = useProductImagePublish({
     product: detail.product,
     readyImages: publishableImages,
-    publishMode: visualGroupsData?.config?.publishMode ?? null,
   });
   const deletion = useProductImageDelete();
   const visualProducts = useMemo(
@@ -84,8 +83,7 @@ export function ProductDetailPage({
   );
   const activeVisualProduct =
     visualProducts.find(
-      (visualProduct) =>
-        visualProduct.group._id === activeVisualGroupId,
+      (visualProduct) => visualProduct.group._id === activeVisualGroupId,
     ) ?? null;
   const usesVisualProductWorkspace = Boolean(
     visualGroupsData?.config && visualProducts.length,
@@ -175,15 +173,12 @@ export function ProductDetailPage({
         onGenerate={
           activeVisualProduct
             ? () =>
-                generation.openGenerateForGroup(
-                  activeVisualProduct.group._id,
-                )
+                generation.openGenerateForGroup(activeVisualProduct.group._id)
             : generation.openGenerate
         }
         onPublish={
           activeVisualProduct
-            ? () =>
-                publish.openPushForGroup(activeVisualProduct.group._id)
+            ? () => publish.openPushForGroup(activeVisualProduct.group._id)
             : publish.openPush
         }
       />
@@ -212,6 +207,7 @@ export function ProductDetailPage({
               productId={typedProductId}
               storeHandle={detail.shopInfo?.storeHandle}
               data={visualGroupsData}
+              onZoom={lightbox.open}
             />
           ) : null}
 
@@ -281,7 +277,7 @@ export function ProductDetailPage({
         setReplaceExisting={publish.setReplaceExisting}
         replaceVariantMedia={publish.replaceVariantMedia}
         setReplaceVariantMedia={publish.setReplaceVariantMedia}
-        publishMode={visualGroupsData?.config?.publishMode ?? null}
+        hasVisualGroups={Boolean(visualGroupsData?.config)}
         visualGroupsData={visualGroupsData}
         focusedGroupId={publish.focusedGroupId}
         busy={publish.busy}

@@ -13,6 +13,7 @@ import { uniqueStorageToken, uploadToR2 } from "./generation/storage";
 import { geminiUsage } from "./generation/formats";
 import { slugify } from "./lib";
 import { estimateCostUsd } from "./pricing";
+import { parseIndexedAssignments } from "./visualGroupAnalysis/model";
 
 type AnalysisContext = {
   product: Doc<"products">;
@@ -21,43 +22,12 @@ type AnalysisContext = {
   references: Doc<"visualGroupReferences">[];
 };
 
-type ModelMatch = {
-  groupKey: string;
-  confidence: number;
-  box2d?: number[];
-};
-
-type ModelAssignment = {
-  referenceId: string;
-  matches: ModelMatch[];
-};
-
 type PreparedReference = {
   reference: Doc<"visualGroupReferences">;
   bytes: Buffer;
 };
 
 const ANALYSIS_BATCH_SIZE = 8;
-
-function parseAssignments(payload: any): ModelAssignment[] {
-  const text = (payload?.candidates?.[0]?.content?.parts ?? [])
-    .map((part: any) => part?.text)
-    .filter(Boolean)
-    .join("")
-    .trim();
-  if (!text) return [];
-  const parsed = JSON.parse(text) as { assignments?: unknown };
-  if (!Array.isArray(parsed.assignments)) return [];
-  return parsed.assignments.filter(
-    (assignment): assignment is ModelAssignment =>
-      Boolean(
-        assignment &&
-          typeof assignment === "object" &&
-          typeof (assignment as ModelAssignment).referenceId === "string" &&
-          Array.isArray((assignment as ModelAssignment).matches),
-      ),
-  );
-}
 
 function normalizedCrop(box2d: number[] | undefined) {
   if (!box2d || box2d.length !== 4) return null;
@@ -124,29 +94,32 @@ async function analyzeBatch(args: {
   }
 
   const groupLines = args.groups.map(
-    (group) =>
-      `- ${group.key}: ${group.label} (${group.optionValues
+    (group, groupIndex) =>
+      `- groupIndex ${groupIndex}: ${group.label} (${group.optionValues
         .map((option) => `${option.name}=${option.value}`)
         .join(", ")})`,
   );
   const instruction = [
     "Classify Shopify product reference images into the known visual groups.",
-    "Return one assignment per reference id.",
-    "Evaluate every reference independently. Multiple different reference ids may and often should match the same group when they show the same variant.",
+    "Classify the product itself by its visible variant, not the whole image.",
+    "Ignore skin, people, clothing, backgrounds, shadows, props, packaging, and product components shared by every variant.",
+    "Return exactly one assignment for every referenceIndex, in the same order as the images.",
+    "When the product variant is visible, choose the closest known group even if the match is not perfectly certain.",
+    "Evaluate every reference independently. Multiple reference indexes may and often should match the same group when they show the same variant.",
     "Do not select only one best image per group and do not limit the number of references assigned to a group.",
-    "A reference may match multiple groups only when several distinct variants are visibly present in the same image.",
-    "For every visible match, return confidence from 0 to 1.",
+    "A reference may match multiple groups only when several distinct product variants are visibly present in the same image.",
+    "For every visible match, return a numeric groupIndex and confidence from 0 to 1.",
     "When an image contains multiple groups, return box2d as [y_min, x_min, y_max, x_max] normalized from 0 to 1000 for each product region.",
-    "If no group can be identified reliably, return an empty matches array.",
-    "Never invent a group key.",
+    "Return an empty matches array only when the product itself is absent or its variant is genuinely impossible to identify.",
+    "Return only a numeric groupIndex from the known list. Never return a group label or group key.",
     "",
     "Known groups:",
     ...groupLines,
   ].join("\n");
 
   const parts: Array<Record<string, unknown>> = [{ text: instruction }];
-  for (const prepared of args.references) {
-    parts.push({ text: `Reference id: ${prepared.reference._id}` });
+  for (const [referenceIndex, prepared] of args.references.entries()) {
+    parts.push({ text: `Reference index: ${referenceIndex}` });
     parts.push({
       inline_data: {
         mime_type: "image/jpeg",
@@ -176,24 +149,24 @@ async function analyzeBatch(args: {
                 items: {
                   type: "OBJECT",
                   properties: {
-                    referenceId: { type: "STRING" },
+                    referenceIndex: { type: "INTEGER" },
                     matches: {
                       type: "ARRAY",
                       items: {
                         type: "OBJECT",
                         properties: {
-                          groupKey: { type: "STRING" },
+                          groupIndex: { type: "INTEGER" },
                           confidence: { type: "NUMBER" },
                           box2d: {
                             type: "ARRAY",
                             items: { type: "NUMBER" },
                           },
                         },
-                        required: ["groupKey", "confidence"],
+                        required: ["groupIndex", "confidence"],
                       },
                     },
                   },
-                  required: ["referenceId", "matches"],
+                  required: ["referenceIndex", "matches"],
                 },
               },
             },
@@ -212,7 +185,11 @@ async function analyzeBatch(args: {
     );
   }
   return {
-    assignments: parseAssignments(payload),
+    assignments: parseIndexedAssignments(
+      payload,
+      args.references.length,
+      args.groups.length,
+    ),
     usage: geminiUsage(payload?.usageMetadata),
   };
 }
@@ -222,15 +199,17 @@ export const analyze = action({
   handler: async (
     ctx,
     args,
-  ): Promise<{ analyzed: number; suggested: number; costUsd: number }> => {
+  ): Promise<{
+    analyzed: number;
+    suggested: number;
+    unmatched: number;
+    costUsd: number;
+  }> => {
     const userId = await requireUserId(ctx);
-    const context = (await ctx.runQuery(
-      internal.visualGroups.analysisContext,
-      {
-        productId: args.productId,
-        userId,
-      },
-    )) as AnalysisContext | null;
+    const context = (await ctx.runQuery(internal.visualGroups.analysisContext, {
+      productId: args.productId,
+      userId,
+    })) as AnalysisContext | null;
     if (!context) throw new Error("Configure visual groups first.");
 
     const settings = (await ctx.runQuery(internal.settings.internalList, {
@@ -252,7 +231,7 @@ export const analyze = action({
         costUsd: context.config.analysisCostUsd ?? 0,
         error: null,
       });
-      return { analyzed: 0, suggested: 0, costUsd: 0 };
+      return { analyzed: 0, suggested: 0, unmatched: 0, costUsd: 0 };
     }
 
     await ctx.runMutation(internal.visualGroups.setAnalysisStatus, {
@@ -271,12 +250,6 @@ export const analyze = action({
         });
       }
 
-      const groupByKey = new Map(
-        context.groups.map((group) => [group.key, group]),
-      );
-      const preparedById = new Map(
-        prepared.map((item) => [String(item.reference._id), item]),
-      );
       const applied: Array<{
         sourceReferenceId: Id<"visualGroupReferences">;
         groupKey: string | null;
@@ -300,11 +273,11 @@ export const analyze = action({
         totalCostUsd += estimateCostUsd(model, result.usage);
 
         for (const assignment of result.assignments) {
-          const source = preparedById.get(assignment.referenceId);
+          const source = batch[assignment.referenceIndex];
           if (!source) continue;
           const matches = assignment.matches.filter(
             (match) =>
-              groupByKey.has(match.groupKey) &&
+              Boolean(context.groups[match.groupIndex]) &&
               Number.isFinite(match.confidence) &&
               match.confidence >= 0.5,
           );
@@ -319,7 +292,7 @@ export const analyze = action({
           }
 
           for (const match of matches) {
-            const group = groupByKey.get(match.groupKey)!;
+            const group = context.groups[match.groupIndex];
             const crop =
               matches.length > 1 ? normalizedCrop(match.box2d) : null;
             const referenceUrl = crop
@@ -341,18 +314,17 @@ export const analyze = action({
         }
       }
 
-      const result: { suggested: number } = await ctx.runMutation(
-        internal.visualGroups.applyAnalysis,
-        {
+      const result: { suggested: number; unmatched: number } =
+        await ctx.runMutation(internal.visualGroups.applyAnalysis, {
           configId: context.config._id,
           assignments: applied,
           model,
           costUsd: totalCostUsd,
-        },
-      );
+        });
       return {
         analyzed: sourceReferences.length,
         suggested: result.suggested,
+        unmatched: result.unmatched,
         costUsd: totalCostUsd,
       };
     } catch (error) {
