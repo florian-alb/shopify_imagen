@@ -6,6 +6,7 @@ import {
   internalQuery,
   mutation,
   query,
+  type MutationCtx,
 } from "./_generated/server";
 import { requireUserId } from "./authz";
 import {
@@ -405,82 +406,102 @@ export const setGroupSwatch = mutation({
   },
 });
 
+async function assignReferenceToGroup(
+  ctx: MutationCtx,
+  args: {
+    groupId: Id<"visualGroups">;
+    mediaId: string;
+  },
+) {
+  const userId = await requireUserId(ctx);
+  const scope = await getActiveShopScope(ctx, userId);
+  const group = await ctx.db.get(args.groupId);
+  if (!group || !shopMatchesScope(group, scope)) {
+    throw new Error("Visual group not found.");
+  }
+
+  const candidates = await ctx.db
+    .query("visualGroupReferences")
+    .withIndex("by_product_and_media_id", (q) =>
+      q.eq("productId", group.productId).eq("mediaId", args.mediaId),
+    )
+    .take(20);
+  const source =
+    candidates.find((reference) => !reference.sourceReferenceId) ??
+    candidates[0];
+  if (!source || source.configId !== group.configId) {
+    throw new Error("Reference image not found.");
+  }
+
+  const current = await ctx.db
+    .query("visualGroupReferences")
+    .withIndex("by_group", (q) => q.eq("groupId", group._id))
+    .take(50);
+  const existing = current.find(
+    (reference) =>
+      reference._id === source._id ||
+      reference.sourceReferenceId === source._id ||
+      (reference.mediaId && reference.mediaId === source.mediaId),
+  );
+  const now = Date.now();
+
+  if (existing) {
+    await ctx.db.patch(existing._id, {
+      assignmentSource: "manual",
+      confidence: 1,
+      confirmed: true,
+      updatedAt: now,
+    });
+    return existing._id;
+  }
+
+  if (!source.groupId) {
+    await ctx.db.patch(source._id, {
+      groupId: group._id,
+      assignmentSource: "manual",
+      confidence: 1,
+      confirmed: true,
+      referenceUrl: source.sourceUrl,
+      crop: undefined,
+      updatedAt: now,
+    });
+    return source._id;
+  }
+
+  return ctx.db.insert("visualGroupReferences", {
+    shopId: source.shopId,
+    configId: source.configId,
+    productId: source.productId,
+    groupId: group._id,
+    mediaId: source.mediaId ?? null,
+    sourceUrl: source.sourceUrl,
+    referenceUrl: source.sourceUrl,
+    altText: source.altText ?? null,
+    assignmentSource: "manual",
+    confidence: 1,
+    confirmed: true,
+    sourceReferenceId: source.sourceReferenceId ?? source._id,
+    position: source.position,
+    createdAt: now,
+    updatedAt: now,
+  });
+}
+
+export const assignReference = mutation({
+  args: {
+    groupId: v.id("visualGroups"),
+    mediaId: v.string(),
+  },
+  handler: assignReferenceToGroup,
+});
+
+// Kept for clients loaded before multi-reference selection was introduced.
 export const setPrimaryReference = mutation({
   args: {
     groupId: v.id("visualGroups"),
     mediaId: v.string(),
   },
-  handler: async (ctx, args) => {
-    const userId = await requireUserId(ctx);
-    const scope = await getActiveShopScope(ctx, userId);
-    const group = await ctx.db.get(args.groupId);
-    if (!group || !shopMatchesScope(group, scope)) {
-      throw new Error("Visual group not found.");
-    }
-
-    const candidates = await ctx.db
-      .query("visualGroupReferences")
-      .withIndex("by_product_and_media_id", (q) =>
-        q.eq("productId", group.productId).eq("mediaId", args.mediaId),
-      )
-      .take(20);
-    const source =
-      candidates.find((reference) => !reference.sourceReferenceId) ??
-      candidates[0];
-    if (!source || source.configId !== group.configId) {
-      throw new Error("Reference image not found.");
-    }
-
-    const current = await ctx.db
-      .query("visualGroupReferences")
-      .withIndex("by_group", (q) => q.eq("groupId", group._id))
-      .take(20);
-    for (const reference of current) {
-      if (reference._id === source._id) continue;
-      if (reference.sourceReferenceId) {
-        await ctx.db.delete(reference._id);
-      } else {
-        await ctx.db.patch(reference._id, {
-          groupId: null,
-          confirmed: false,
-          assignmentSource: "rule",
-          confidence: 0,
-          updatedAt: Date.now(),
-        });
-      }
-    }
-
-    const now = Date.now();
-    if (!source.groupId || source.groupId === group._id) {
-      await ctx.db.patch(source._id, {
-        groupId: group._id,
-        assignmentSource: "manual",
-        confidence: 1,
-        confirmed: true,
-        referenceUrl: source.sourceUrl,
-        updatedAt: now,
-      });
-      return source._id;
-    }
-
-    return ctx.db.insert("visualGroupReferences", {
-      shopId: source.shopId,
-      configId: source.configId,
-      productId: source.productId,
-      groupId: group._id,
-      mediaId: source.mediaId ?? null,
-      sourceUrl: source.sourceUrl,
-      referenceUrl: source.sourceUrl,
-      altText: source.altText ?? null,
-      assignmentSource: "manual",
-      confidence: 1,
-      confirmed: true,
-      sourceReferenceId: source.sourceReferenceId ?? source._id,
-      position: source.position,
-      createdAt: now,
-      updatedAt: now,
-    });
-  },
+  handler: assignReferenceToGroup,
 });
 
 export const confirmReference = mutation({
@@ -497,6 +518,51 @@ export const confirmReference = mutation({
       updatedAt: Date.now(),
     });
     return reference._id;
+  },
+});
+
+export const confirmGroupReferences = mutation({
+  args: { groupId: v.id("visualGroups") },
+  handler: async (ctx, args) => {
+    const userId = await requireUserId(ctx);
+    const scope = await getActiveShopScope(ctx, userId);
+    const group = await ctx.db.get(args.groupId);
+    if (!group || !shopMatchesScope(group, scope)) {
+      throw new Error("Visual group not found.");
+    }
+
+    const references = await ctx.db
+      .query("visualGroupReferences")
+      .withIndex("by_group", (q) => q.eq("groupId", group._id))
+      .take(50);
+    const pending = references.filter((reference) => !reference.confirmed);
+    const now = Date.now();
+    await Promise.all(
+      pending.map((reference) =>
+        ctx.db.patch(reference._id, {
+          confirmed: true,
+          updatedAt: now,
+        }),
+      ),
+    );
+    const configReferences = await ctx.db
+      .query("visualGroupReferences")
+      .withIndex("by_config", (q) => q.eq("configId", group.configId))
+      .take(MAX_CONFIG_ROWS);
+    const confirmedIds = new Set(pending.map((reference) => reference._id));
+    const hasPendingAssignments = configReferences.some(
+      (reference) =>
+        reference.groupId &&
+        !reference.confirmed &&
+        !confirmedIds.has(reference._id),
+    );
+    if (!hasPendingAssignments) {
+      await ctx.db.patch(group.configId, {
+        analysisStatus: "ready",
+        updatedAt: now,
+      });
+    }
+    return { confirmed: pending.length };
   },
 });
 
@@ -578,6 +644,17 @@ export const applyAnalysis = internalMutation({
     const config = await ctx.db.get(args.configId);
     if (!config) throw new Error("Visual configuration not found.");
     const { groups, references } = await rowsForConfig(ctx, config._id);
+    await Promise.all(
+      references
+        .filter(
+          (reference) =>
+            reference.sourceReferenceId &&
+            !reference.confirmed &&
+            (reference.assignmentSource === "ai" ||
+              reference.assignmentSource === "ai_crop"),
+        )
+        .map((reference) => ctx.db.delete(reference._id)),
+    );
     const groupByKey = new Map(groups.map((group) => [group.key, group]));
     const referenceById = new Map(
       references.map((reference) => [reference._id, reference]),

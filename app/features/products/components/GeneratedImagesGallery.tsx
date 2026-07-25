@@ -8,6 +8,7 @@ import {
 import type { Doc, Id } from "@/lib/convex";
 
 export function GeneratedImagesGallery({
+  title = "Images générées",
   generatedGalleryImages,
   generatingGalleryImages,
   approvedCount,
@@ -19,6 +20,7 @@ export function GeneratedImagesGallery({
   onDelete,
   onZoom,
 }: {
+  title?: string;
   generatedGalleryImages: Doc<"generatedImages">[];
   generatingGalleryImages: Doc<"generatedImages">[];
   approvedCount: number;
@@ -46,13 +48,14 @@ export function GeneratedImagesGallery({
   return (
     <Card className="min-h-72 rounded-lg">
       <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle className="text-lg">Images generees</CardTitle>
+        <CardTitle className="text-lg">{title}</CardTitle>
         <StateBadge>{itemCount}</StateBadge>
       </CardHeader>
       <CardContent>
         <p className="mb-3 text-xs text-muted-foreground">
-          {approvedCount} approved · {pendingCount} to review · {rejectedCount}{" "}
-          rejected
+          {approvedCount} approuvée{approvedCount === 1 ? "" : "s"} ·{" "}
+          {pendingCount} à valider · {rejectedCount} rejetée
+          {rejectedCount === 1 ? "" : "s"}
         </p>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
           {itemCount ? (
@@ -90,7 +93,7 @@ export function GeneratedImagesGallery({
             </>
           ) : (
             <p className="col-span-2 text-sm text-muted-foreground">
-              Aucune image generee.
+              Aucune image générée.
             </p>
           )}
         </div>
