@@ -58,6 +58,9 @@ export function GeneratedImageTile({
     !retryActive && image.retryError && image.retryError !== image.error
       ? image.retryError
       : null;
+  const imageLabel = [image.visualGroupLabel, image.imageType]
+    .filter(Boolean)
+    .join(" · ");
   const reviewable = isReviewable(image);
   const showReviewActions = reviewable && Boolean(onReview);
   const showRegenerateAction = reviewable && Boolean(onRegenerate);
@@ -81,7 +84,7 @@ export function GeneratedImageTile({
       >
         {image.storageUrl ? (
           <>
-            <img src={image.storageUrl} alt={image.imageType} />
+            <img src={image.storageUrl} alt={imageLabel} />
             {onPreview ? (
               <span className="absolute top-2 right-2 rounded-full bg-black/55 p-1.5 text-white opacity-0 transition group-hover:opacity-100">
                 <Eye className="size-3.5" />
@@ -128,7 +131,9 @@ export function GeneratedImageTile({
       ) : null}
       <div className="grid gap-2 p-2">
         <div className="flex min-w-0 items-center justify-between gap-2">
-          <p className="truncate text-sm font-medium">{image.imageType}</p>
+          <p className="truncate text-sm font-medium" title={imageLabel}>
+            {imageLabel}
+          </p>
           <ImageStateBadge image={image} />
         </div>
         {image.retouchSourceImageId ? (

@@ -28,17 +28,18 @@ import {
   hashShopifyOAuthState,
   shopifyOAuthCallbackUrl,
 } from "./shopify/oauth";
-import {
-  buildMediaMoves,
-  sameIds,
-  throwUserErrors,
-} from "./shopify/media";
+import { buildMediaMoves, sameIds, throwUserErrors } from "./shopify/media";
 import { mapProductForUpsert } from "./shopify/productMapping";
+import { buildVariantMediaPlan } from "./shopify/variantMedia";
 import {
   PRODUCT_DELETE_MEDIA_MUTATION,
+  PRODUCT_DUPLICATE_MUTATION,
   PRODUCT_QUERY,
   PRODUCT_REORDER_MEDIA_MUTATION,
   PRODUCT_UPDATE_MEDIA_MUTATION,
+  PRODUCT_VARIANT_APPEND_MEDIA_MUTATION,
+  PRODUCT_VARIANT_DETACH_MEDIA_MUTATION,
+  PRODUCT_VARIANTS_BULK_DELETE_MUTATION,
   PRODUCTS_QUERY,
   SHOPIFY_JOB_QUERY,
 } from "./shopify/graphql";
@@ -206,7 +207,9 @@ async function createAuthorizationAttempt(
   credentials: ShopifyCredentials,
 ) {
   if (!credentials.shopId) {
-    throw new ConvexError("La boutique doit être enregistrée avant l'autorisation Shopify.");
+    throw new ConvexError(
+      "La boutique doit être enregistrée avant l'autorisation Shopify.",
+    );
   }
   const status = await fetchShopifyAuthorizationStatus(credentials);
   if (status.status === "missing") {
@@ -215,7 +218,9 @@ async function createAuthorizationAttempt(
     );
   }
   if (status.status === "granted") {
-    throw new ConvexError("Les accès Shopify sont déjà à jour pour cette boutique.");
+    throw new ConvexError(
+      "Les accès Shopify sont déjà à jour pour cette boutique.",
+    );
   }
 
   const state = createShopifyOAuthState();
@@ -261,7 +266,10 @@ export const syncProducts = action({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
-    const credentials = (await ctx.runMutation(internal.shops.ensureActiveForAction, { userId })) as ShopifyCredentials;
+    const credentials = (await ctx.runMutation(
+      internal.shops.ensureActiveForAction,
+      { userId },
+    )) as ShopifyCredentials;
     const limit = Math.max(1, Math.min(args.limit ?? 100, 250));
     const syncedIds: Id<"products">[] = [];
     let after: string | null = null;
@@ -273,53 +281,69 @@ export const syncProducts = action({
         {
           first,
           after,
-          query: credentials.productQuery
+          query: credentials.productQuery,
         },
         undefined,
-        credentials
+        credentials,
       );
       for (const product of data.products.nodes) {
-        const id = await ctx.runMutation(internal.products.upsertSynced, mapProductForUpsert(product, credentials));
+        const id = await ctx.runMutation(
+          internal.products.upsertSynced,
+          mapProductForUpsert(product, credentials),
+        );
         syncedIds.push(id);
       }
       if (!data.products.pageInfo.hasNextPage) break;
       after = data.products.pageInfo.endCursor;
     }
 
-    await ctx.runMutation(internal.products.refreshFacets, { shopId: credentials.shopId ?? null });
+    await ctx.runMutation(internal.products.refreshFacets, {
+      shopId: credentials.shopId ?? null,
+    });
     return { synced: syncedIds.length };
-  }
+  },
 });
 
 export const syncProduct = action({
   args: { productId: v.id("products") },
   handler: async (ctx, args): Promise<{ productId: Id<"products"> }> => {
     const userId = await requireUserId(ctx);
-    const product = (await ctx.runQuery(internal.products.internalGet, { productId: args.productId })) as Doc<"products"> | null;
+    const product = (await ctx.runQuery(internal.products.internalGet, {
+      productId: args.productId,
+    })) as Doc<"products"> | null;
     if (!product) throw new Error("Product not found.");
-    const credentials = (await ctx.runQuery(internal.shops.getShopifyCredentials, {
-      shopId: product.shopId ?? null,
-      userId
-    })) as ShopifyCredentials;
+    const credentials = (await ctx.runQuery(
+      internal.shops.getShopifyCredentials,
+      {
+        shopId: product.shopId ?? null,
+        userId,
+      },
+    )) as ShopifyCredentials;
     const data = await shopifyGraphql<{ product: any | null }>(
       PRODUCT_QUERY,
       { id: product.shopifyProductId },
       undefined,
-      credentials
+      credentials,
     );
     if (!data.product) throw new Error("Product no longer exists in Shopify.");
     const id: Id<"products"> = await ctx.runMutation(
       internal.products.upsertSynced,
-      mapProductForUpsert(data.product, credentials)
+      mapProductForUpsert(data.product, credentials),
     );
-    await ctx.runMutation(internal.products.refreshFacets, { shopId: credentials.shopId ?? null });
+    await ctx.runMutation(internal.products.refreshFacets, {
+      shopId: credentials.shopId ?? null,
+    });
     return { productId: id };
-  }
+  },
 });
 
 async function waitForShopifyJob(jobId: string, accessToken: string) {
   for (let attempt = 0; attempt < 20; attempt += 1) {
-    const data = await shopifyGraphql<{ job: { done: boolean } | null }>(SHOPIFY_JOB_QUERY, { id: jobId }, accessToken);
+    const data = await shopifyGraphql<{ job: { done: boolean } | null }>(
+      SHOPIFY_JOB_QUERY,
+      { id: jobId },
+      accessToken,
+    );
     if (data.job?.done) return true;
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
@@ -332,29 +356,45 @@ async function waitForShopifyJob(jobId: string, accessToken: string) {
 export const reorderProductImages = action({
   args: {
     productId: v.id("products"),
-    orderedMediaIds: v.array(v.string())
+    orderedMediaIds: v.array(v.string()),
   },
-  handler: async (ctx, args): Promise<{ reordered: number; pending: boolean }> => {
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ reordered: number; pending: boolean }> => {
     const userId = await requireUserId(ctx);
-    const product = (await ctx.runQuery(internal.products.internalGet, { productId: args.productId })) as Doc<"products"> | null;
+    const product = (await ctx.runQuery(internal.products.internalGet, {
+      productId: args.productId,
+    })) as Doc<"products"> | null;
     if (!product) throw new Error("Product not found.");
 
-    const credentials = (await ctx.runQuery(internal.shops.getShopifyCredentials, {
-      shopId: product.shopId ?? null,
-      userId
-    })) as ShopifyCredentials;
+    const credentials = (await ctx.runQuery(
+      internal.shops.getShopifyCredentials,
+      {
+        shopId: product.shopId ?? null,
+        userId,
+      },
+    )) as ShopifyCredentials;
     const accessToken = await getAccessToken(credentials);
     const before = await shopifyGraphql<{ product: any | null }>(
       PRODUCT_QUERY,
       { id: product.shopifyProductId },
       accessToken,
-      credentials
+      credentials,
     );
-    if (!before.product) throw new Error("Product no longer exists in Shopify.");
-    const mediaNodes = (before.product.media?.nodes ?? []) as Array<{ id: string; mediaContentType: string }>;
-    const currentImageIds = mediaNodes.filter((media) => media.mediaContentType === "IMAGE").map((media) => media.id);
+    if (!before.product)
+      throw new Error("Product no longer exists in Shopify.");
+    const mediaNodes = (before.product.media?.nodes ?? []) as Array<{
+      id: string;
+      mediaContentType: string;
+    }>;
+    const currentImageIds = mediaNodes
+      .filter((media) => media.mediaContentType === "IMAGE")
+      .map((media) => media.id);
     if (!sameIds(currentImageIds, args.orderedMediaIds)) {
-      throw new Error("The Shopify gallery changed since the last sync. Sync the product and try again.");
+      throw new Error(
+        "The Shopify gallery changed since the last sync. Sync the product and try again.",
+      );
     }
 
     const moves = buildMediaMoves(mediaNodes, args.orderedMediaIds);
@@ -364,74 +404,409 @@ export const reorderProductImages = action({
       PRODUCT_REORDER_MEDIA_MUTATION,
       {
         id: product.shopifyProductId,
-        moves
+        moves,
       },
       accessToken,
-      credentials
+      credentials,
     );
-    throwUserErrors(data.productReorderMedia.mediaUserErrors, "Shopify product media reorder failed");
+    throwUserErrors(
+      data.productReorderMedia.mediaUserErrors,
+      "Shopify product media reorder failed",
+    );
 
     await ctx.runMutation(internal.shopify.cacheProductImageOrder, {
       productId: product._id,
-      orderedMediaIds: args.orderedMediaIds
+      orderedMediaIds: args.orderedMediaIds,
     });
 
     const jobId = data.productReorderMedia.job?.id as string | undefined;
-    const completed = jobId ? await waitForShopifyJob(jobId, accessToken) : true;
+    const completed = jobId
+      ? await waitForShopifyJob(jobId, accessToken)
+      : true;
     if (completed) {
       const after = await shopifyGraphql<{ product: any | null }>(
         PRODUCT_QUERY,
         { id: product.shopifyProductId },
         accessToken,
-        credentials
+        credentials,
       );
       if (after.product) {
-        await ctx.runMutation(internal.products.upsertSynced, mapProductForUpsert(after.product, credentials));
-        await ctx.runMutation(internal.products.refreshFacets, { shopId: credentials.shopId ?? null });
+        await ctx.runMutation(
+          internal.products.upsertSynced,
+          mapProductForUpsert(after.product, credentials),
+        );
+        await ctx.runMutation(internal.products.refreshFacets, {
+          shopId: credentials.shopId ?? null,
+        });
       }
     }
 
     return { reordered: moves.length, pending: !completed };
-  }
+  },
 });
+
+type VisualGroupTarget = {
+  group: Doc<"visualGroups">;
+  variants: Doc<"visualGroupVariants">[];
+  references: Doc<"visualGroupReferences">[];
+};
+
+type VisualAnalysisContext = {
+  config: Doc<"visualGroupConfigs">;
+  groups: Doc<"visualGroups">[];
+};
+
+function generatedImageAlt(
+  productTitle: string,
+  image: Doc<"generatedImages">,
+) {
+  return [productTitle, image.visualGroupLabel, image.imageType]
+    .filter(Boolean)
+    .join(" - ");
+}
+
+async function createGeneratedMedia(args: {
+  productId: string;
+  productTitle: string;
+  images: Doc<"generatedImages">[];
+  credentials: ShopifyCredentials;
+  existingMediaIds?: Set<string>;
+}) {
+  const inputs = args.images.map((image) => ({
+    image,
+    originalSource: image.storageUrl!,
+    alt: generatedImageAlt(args.productTitle, image),
+  }));
+  const data = await shopifyGraphql<any>(
+    PRODUCT_UPDATE_MEDIA_MUTATION,
+    {
+      product: { id: args.productId },
+      media: inputs.map((input) => ({
+        originalSource: input.originalSource,
+        alt: input.alt,
+        mediaContentType: "IMAGE",
+      })),
+    },
+    undefined,
+    args.credentials,
+  );
+  const productUpdate = data.productUpdate;
+  if (!productUpdate) {
+    throw new ConvexError(
+      "Shopify product media update failed: Shopify returned no product update payload.",
+    );
+  }
+  throwUserErrors(
+    productUpdate.userErrors,
+    "Shopify product media update failed",
+  );
+
+  const createdNodes = (productUpdate.product?.media?.nodes ?? []).filter(
+    (node: any) => !args.existingMediaIds?.has(String(node.id)),
+  );
+  const nodesByAlt = new Map<string, any[]>();
+  for (const node of createdNodes) {
+    const alt = String(node.alt ?? "");
+    nodesByAlt.set(alt, [...(nodesByAlt.get(alt) ?? []), node]);
+  }
+
+  const mediaIdByImageId = new Map<Id<"generatedImages">, string>();
+  for (const input of inputs) {
+    const media = nodesByAlt.get(input.alt)?.shift();
+    if (!media?.id) {
+      throw new Error(
+        `Shopify uploaded "${input.alt}" but did not return its media id.`,
+      );
+    }
+    mediaIdByImageId.set(input.image._id, String(media.id));
+  }
+  return {
+    mediaIdByImageId,
+    mediaNodes: productUpdate.product?.media?.nodes ?? [],
+  };
+}
+
+async function setPrimaryMediaOnVariants(args: {
+  productId: string;
+  variants: Array<{ id: string; mediaIds: string[] }>;
+  primaryMediaId: string;
+  replaceExisting: boolean;
+  credentials: ShopifyCredentials;
+}) {
+  if (!args.variants.length || !args.primaryMediaId) return;
+
+  const plan = buildVariantMediaPlan({
+    variants: args.variants,
+    primaryMediaId: args.primaryMediaId,
+    replaceExisting: args.replaceExisting,
+  });
+
+  if (plan.detach.length) {
+    const detached = await shopifyGraphql<any>(
+      PRODUCT_VARIANT_DETACH_MEDIA_MUTATION,
+      {
+        productId: args.productId,
+        variantMedia: plan.detach,
+      },
+      undefined,
+      args.credentials,
+    );
+    throwUserErrors(
+      detached.productVariantDetachMedia?.userErrors,
+      "Shopify variant media replacement failed",
+    );
+  }
+
+  if (plan.append.length) {
+    const appended = await shopifyGraphql<any>(
+      PRODUCT_VARIANT_APPEND_MEDIA_MUTATION,
+      {
+        productId: args.productId,
+        variantMedia: plan.append,
+      },
+      undefined,
+      args.credentials,
+    );
+    throwUserErrors(
+      appended.productVariantAppendMedia?.userErrors,
+      "Shopify variant media association failed",
+    );
+  }
+}
+
+function shopifyVariantMediaIds(variant: {
+  media?: { nodes?: Array<{ id?: string | null }> };
+}) {
+  return (variant.media?.nodes ?? [])
+    .map((media) => media.id)
+    .filter((mediaId): mediaId is string => Boolean(mediaId));
+}
+
+function variantMatchesGroup(
+  variant: { selectedOptions?: Array<{ name: string; value: string }> },
+  group: Doc<"visualGroups">,
+) {
+  return group.optionValues.every((expected) =>
+    variant.selectedOptions?.some(
+      (option) =>
+        option.name === expected.name && option.value === expected.value,
+    ),
+  );
+}
+
+async function publishAsSeparateProducts(args: {
+  ctx: Pick<ActionCtx, "runMutation" | "runQuery">;
+  product: Doc<"products">;
+  ready: Doc<"generatedImages">[];
+  targets: VisualGroupTarget[];
+  replaceVariantMedia: boolean;
+  credentials: ShopifyCredentials;
+}) {
+  const existingFamily = (await args.ctx.runQuery(
+    internal.visualGroups.familyForSource,
+    { sourceProductId: args.product._id },
+  )) as {
+    family: Doc<"visualProductFamilies">;
+    members: Doc<"visualProductFamilyMembers">[];
+  } | null;
+  const members = (existingFamily?.members ?? []).map((member) => ({
+    groupId: member.groupId,
+    shopifyProductId: member.shopifyProductId,
+    title: member.title,
+    handle: member.handle ?? null,
+  }));
+  const memberGroupIds = new Set(members.map((member) => member.groupId));
+
+  for (const target of args.targets) {
+    const groupImages = args.ready.filter(
+      (image) => image.visualGroupId === target.group._id,
+    );
+    if (!groupImages.length) continue;
+
+    const existingMember = existingFamily?.members.find(
+      (member) => member.groupId === target.group._id,
+    );
+    let publishedProduct: any;
+    let isNewProduct = false;
+    if (existingMember) {
+      const existing = await shopifyGraphql<{ product: any | null }>(
+        PRODUCT_QUERY,
+        { id: existingMember.shopifyProductId },
+        undefined,
+        args.credentials,
+      );
+      if (!existing.product) {
+        throw new Error(
+          `The Shopify sibling product for ${target.group.label} no longer exists.`,
+        );
+      }
+      publishedProduct = existing.product;
+    } else {
+      const duplicated = await shopifyGraphql<any>(
+        PRODUCT_DUPLICATE_MUTATION,
+        {
+          productId: args.product.shopifyProductId,
+          newTitle: `${args.product.title} — ${target.group.label}`,
+          newStatus: "DRAFT",
+          includeImages: false,
+          synchronous: true,
+        },
+        undefined,
+        args.credentials,
+      );
+      throwUserErrors(
+        duplicated.productDuplicate?.userErrors,
+        "Shopify sibling product creation failed",
+      );
+      publishedProduct = duplicated.productDuplicate?.newProduct;
+      isNewProduct = true;
+      if (!publishedProduct?.id) {
+        throw new Error(
+          `Shopify did not return the sibling product for ${target.group.label}.`,
+        );
+      }
+    }
+
+    const publishedVariants = (publishedProduct.variants?.nodes ??
+      []) as Array<{
+      id: string;
+      selectedOptions?: Array<{ name: string; value: string }>;
+      media?: { nodes?: Array<{ id?: string | null }> };
+    }>;
+    const keptVariants = publishedVariants.filter((variant) =>
+      variantMatchesGroup(variant, target.group),
+    );
+    if (!keptVariants.length) {
+      throw new Error(
+        `The Shopify sibling product has no variants for ${target.group.label}.`,
+      );
+    }
+    const deletedVariantIds = isNewProduct
+      ? publishedVariants
+          .filter((variant) => !variantMatchesGroup(variant, target.group))
+          .map((variant) => variant.id)
+      : [];
+    if (isNewProduct && deletedVariantIds.length) {
+      const deleted = await shopifyGraphql<any>(
+        PRODUCT_VARIANTS_BULK_DELETE_MUTATION,
+        {
+          productId: publishedProduct.id,
+          variantsIds: deletedVariantIds,
+        },
+        undefined,
+        args.credentials,
+      );
+      throwUserErrors(
+        deleted.productVariantsBulkDelete?.userErrors,
+        "Shopify sibling variant cleanup failed",
+      );
+    }
+
+    const created = await createGeneratedMedia({
+      productId: publishedProduct.id,
+      productTitle: publishedProduct.title,
+      images: groupImages,
+      credentials: args.credentials,
+      existingMediaIds: isNewProduct
+        ? undefined
+        : new Set(
+            (publishedProduct.media?.nodes ?? [])
+              .map((media: any) => media?.id)
+              .filter(Boolean)
+              .map(String),
+          ),
+    });
+    const primaryMediaId = created.mediaIdByImageId.get(groupImages[0]._id)!;
+    await setPrimaryMediaOnVariants({
+      productId: publishedProduct.id,
+      variants: keptVariants.map((variant) => ({
+        id: variant.id,
+        mediaIds: shopifyVariantMediaIds(variant),
+      })),
+      primaryMediaId,
+      replaceExisting: isNewProduct || args.replaceVariantMedia,
+      credentials: args.credentials,
+    });
+
+    for (const image of groupImages) {
+      await args.ctx.runMutation(internal.shopify.markImagePushed, {
+        imageId: image._id,
+        shopifyMediaId: created.mediaIdByImageId.get(image._id)!,
+        publishedShopifyProductId: publishedProduct.id,
+      });
+    }
+    if (!memberGroupIds.has(target.group._id)) {
+      members.push({
+        groupId: target.group._id,
+        shopifyProductId: publishedProduct.id,
+        title: publishedProduct.title,
+        handle: publishedProduct.handle ?? null,
+      });
+      memberGroupIds.add(target.group._id);
+    }
+    await args.ctx.runMutation(internal.visualGroups.createFamily, {
+      sourceProductId: args.product._id,
+      members,
+    });
+  }
+
+  return members;
+}
 
 export const pushProductImages = action({
   args: {
     productId: v.id("products"),
     imageIds: v.optional(v.array(v.id("generatedImages"))),
-    replaceExisting: v.boolean()
+    replaceExisting: v.boolean(),
+    replaceVariantMedia: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
-    const product = (await ctx.runQuery(internal.products.internalGet, { productId: args.productId })) as Doc<"products"> | null;
+    const replaceVariantMedia =
+      args.replaceExisting || (args.replaceVariantMedia ?? true);
+    const product = (await ctx.runQuery(internal.products.internalGet, {
+      productId: args.productId,
+    })) as Doc<"products"> | null;
     if (!product) throw new Error("Product not found.");
-    const credentials = (await ctx.runQuery(internal.shops.getShopifyCredentials, {
-      shopId: product.shopId ?? null,
-      userId
-    })) as ShopifyCredentials;
-    const allImages = (await ctx.runQuery(internal.shopify.generatedImagesForPush, { productId: args.productId })) as Doc<"generatedImages">[];
-    const selected = args.imageIds?.length ? allImages.filter((image) => args.imageIds!.includes(image._id)) : allImages;
+    const credentials = (await ctx.runQuery(
+      internal.shops.getShopifyCredentials,
+      {
+        shopId: product.shopId ?? null,
+        userId,
+      },
+    )) as ShopifyCredentials;
+    const allImages = (await ctx.runQuery(
+      internal.shopify.generatedImagesForPush,
+      { productId: args.productId },
+    )) as Doc<"generatedImages">[];
+    const selected = args.imageIds?.length
+      ? allImages.filter((image) => args.imageIds!.includes(image._id))
+      : allImages;
     // Allow re-pushing images already marked "uploaded" (e.g. after a WebP
     // re-generation), not just freshly "generated" ones.
     const ready = selected.filter(
       (image) =>
         image.storageUrl &&
         (image.status === "generated" || image.status === "uploaded") &&
-        image.reviewStatus === "approved"
+        image.reviewStatus === "approved",
     );
-    if (!ready.length) throw new Error("No approved generated images are ready to push.");
+    if (!ready.length)
+      throw new Error("No approved generated images are ready to push.");
 
     // Publish in the order defined by the prompt templates in settings/prompts,
     // so the Shopify gallery mirrors that sequence. Images whose imageType has no
     // matching template fall back to the end, ordered by their original index.
-    const promptOrderEntries = (await ctx.runQuery(internal.shopify.promptOrder, {
-      shopId: product.shopId ?? null
-    })) as Array<{ imageType: string; position: number | null }>;
+    const promptOrderEntries = (await ctx.runQuery(
+      internal.shopify.promptOrder,
+      {
+        shopId: product.shopId ?? null,
+      },
+    )) as Array<{ imageType: string; position: number | null }>;
     const promptOrder = new Map(
       promptOrderEntries.map((entry) => [
         entry.imageType,
-        entry.position ?? Number.POSITIVE_INFINITY
-      ])
+        entry.position ?? Number.POSITIVE_INFINITY,
+      ]),
     );
     ready.sort((a, b) => {
       const oa = promptOrder.get(a.imageType) ?? Number.POSITIVE_INFINITY;
@@ -439,62 +814,150 @@ export const pushProductImages = action({
       return oa - ob;
     });
 
-    const mediaInputs = ready.map((image) => ({
-      originalSource: image.storageUrl!,
-      alt: `${product.title} - ${image.imageType}`
-    }));
-    const data = await shopifyGraphql<any>(
-      PRODUCT_UPDATE_MEDIA_MUTATION,
-      {
-        product: { id: product.shopifyProductId },
-        media: mediaInputs.map((item) => ({
-          originalSource: item.originalSource,
-          alt: item.alt,
-          mediaContentType: "IMAGE"
-        }))
-      },
-      undefined,
-      credentials
+    const visualGroupIds = Array.from(
+      new Set(
+        ready
+          .map((image) => image.visualGroupId)
+          .filter((groupId): groupId is Id<"visualGroups"> => Boolean(groupId)),
+      ),
     );
-    const productUpdate = data.productUpdate;
-    if (!productUpdate) throw new ConvexError("Shopify product media update failed: Shopify returned no product update payload.");
-    throwUserErrors(productUpdate.userErrors, "Shopify product media update failed");
-    const mediaNodes = productUpdate.product?.media?.nodes ?? [];
+    const targets = visualGroupIds.length
+      ? ((await ctx.runQuery(internal.visualGroups.groupTargets, {
+          groupIds: visualGroupIds,
+        })) as VisualGroupTarget[])
+      : [];
+    const visualContext = (await ctx.runQuery(
+      internal.visualGroups.analysisContext,
+      {
+        productId: product._id,
+        userId,
+      },
+    )) as VisualAnalysisContext | null;
+
+    if (
+      visualContext?.config.publishMode === "separate_products" &&
+      targets.length
+    ) {
+      const members = await publishAsSeparateProducts({
+        ctx,
+        product,
+        ready,
+        targets,
+        replaceVariantMedia,
+        credentials,
+      });
+      await ctx.runMutation(internal.shopify.markProductPushed, {
+        productId: product._id,
+      });
+      return {
+        pushed: ready.length,
+        replaced: false,
+        publishMode: "separate_products" as const,
+        createdProducts: members,
+      };
+    }
+
+    const existingMediaIds = new Set(
+      product.currentShopifyImages
+        .map((image: any) => image.mediaId ?? image.id)
+        .filter(Boolean)
+        .map(String),
+    );
+    const created = await createGeneratedMedia({
+      productId: product.shopifyProductId,
+      productTitle: product.title,
+      images: ready,
+      credentials,
+      existingMediaIds,
+    });
+
+    const currentVariants = (product.variants ?? []) as Array<{
+      id: string;
+      media?: { nodes?: Array<{ id?: string | null }> };
+    }>;
+    const currentVariantById = new Map(
+      currentVariants.map((variant) => [variant.id, variant]),
+    );
+
+    for (const target of targets) {
+      const groupImages = ready.filter(
+        (image) => image.visualGroupId === target.group._id,
+      );
+      const primaryMediaId = groupImages[0]
+        ? created.mediaIdByImageId.get(groupImages[0]._id)
+        : undefined;
+      if (!primaryMediaId) continue;
+
+      await setPrimaryMediaOnVariants({
+        productId: product.shopifyProductId,
+        variants: target.variants.map((variant) => ({
+          id: variant.shopifyVariantId,
+          mediaIds: shopifyVariantMediaIds(
+            currentVariantById.get(variant.shopifyVariantId) ?? {},
+          ),
+        })),
+        primaryMediaId,
+        replaceExisting: replaceVariantMedia,
+        credentials,
+      });
+    }
 
     for (const image of ready) {
-      const alt = `${product.title} - ${image.imageType}`;
-      const media = mediaNodes.find((node: any) => node.alt === alt);
       await ctx.runMutation(internal.shopify.markImagePushed, {
         imageId: image._id,
-        shopifyMediaId: media?.id ?? image.storageUrl!
+        shopifyMediaId: created.mediaIdByImageId.get(image._id)!,
+        publishedShopifyProductId: product.shopifyProductId,
       });
     }
 
     if (args.replaceExisting) {
-      const createdIds = new Set(mediaNodes.filter((node: any) => mediaInputs.some((input) => input.alt === node.alt)).map((node: any) => node.id));
-      const existingMediaIds = product.currentShopifyImages
-        .map((image: any) => image.mediaId ?? image.id)
-        .filter(Boolean)
-        .map(String)
-        .filter((id: string) => !createdIds.has(id));
-      if (existingMediaIds.length) {
+      const createdIds = new Set(created.mediaIdByImageId.values());
+      const mediaIdsToDelete = Array.from(existingMediaIds).filter(
+        (id) => !createdIds.has(id),
+      );
+      if (mediaIdsToDelete.length) {
         const deleted = await shopifyGraphql<any>(
           PRODUCT_DELETE_MEDIA_MUTATION,
           {
             productId: product.shopifyProductId,
-            mediaIds: existingMediaIds
+            mediaIds: mediaIdsToDelete,
           },
           undefined,
-          credentials
+          credentials,
         );
-      if (!deleted.productDeleteMedia) throw new ConvexError("Shopify product media deletion failed: Shopify returned no media deletion payload.");
-      throwUserErrors(deleted.productDeleteMedia.mediaUserErrors, "Shopify product media deletion failed");
-    }
+        if (!deleted.productDeleteMedia)
+          throw new ConvexError(
+            "Shopify product media deletion failed: Shopify returned no media deletion payload.",
+          );
+        throwUserErrors(
+          deleted.productDeleteMedia.mediaUserErrors,
+          "Shopify product media deletion failed",
+        );
+      }
     }
 
-    await ctx.runMutation(internal.shopify.markProductPushed, { productId: product._id });
-    return { pushed: ready.length, replaced: args.replaceExisting };
-  }
+    await ctx.runMutation(internal.shopify.markProductPushed, {
+      productId: product._id,
+    });
+    const synced = await shopifyGraphql<{ product: any | null }>(
+      PRODUCT_QUERY,
+      { id: product.shopifyProductId },
+      undefined,
+      credentials,
+    );
+    if (synced.product) {
+      await ctx.runMutation(
+        internal.products.upsertSynced,
+        mapProductForUpsert(synced.product, credentials),
+      );
+    }
+    return {
+      pushed: ready.length,
+      replaced: args.replaceExisting,
+      publishMode: "variant_media" as const,
+      createdProducts: [],
+    };
+  },
 });
 
 export const generatedImagesForPush = internalQuery({
@@ -504,7 +967,7 @@ export const generatedImagesForPush = internalQuery({
       .query("generatedImages")
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
       .collect();
-  }
+  },
 });
 
 // Lists each prompt template's imageType and display/publish position so
@@ -514,69 +977,79 @@ export const generatedImagesForPush = internalQuery({
 export const promptOrder = internalQuery({
   args: { shopId: v.optional(v.union(v.id("shops"), v.null())) },
   handler: async (ctx, args) => {
-    const prompts = (await ctx.db.query("promptTemplates").collect()).filter((prompt: Doc<"promptTemplates">) =>
-      args.shopId ? prompt.shopId === args.shopId : prompt.shopId == null
+    const prompts = (await ctx.db.query("promptTemplates").collect()).filter(
+      (prompt: Doc<"promptTemplates">) =>
+        args.shopId ? prompt.shopId === args.shopId : prompt.shopId == null,
     );
     return prompts.map((prompt) => ({
       imageType: prompt.imageType,
-      position: prompt.position ?? null
+      position: prompt.position ?? null,
     }));
-  }
+  },
 });
 
 export const markImagePushed = internalMutation({
   args: {
     imageId: v.id("generatedImages"),
-    shopifyMediaId: v.string()
+    shopifyMediaId: v.string(),
+    publishedShopifyProductId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     await ctx.db.patch(args.imageId, {
       status: "uploaded",
       shopifyMediaId: args.shopifyMediaId,
-      updatedAt: Date.now()
+      ...(args.publishedShopifyProductId
+        ? { publishedShopifyProductId: args.publishedShopifyProductId }
+        : {}),
+      updatedAt: Date.now(),
     });
     const image = await ctx.db.get(args.imageId);
     if (image) {
       await refreshJobSummary(ctx, image.jobId);
       await refreshProductSummary(ctx, image.productId);
     }
-  }
+  },
 });
 
 export const markProductPushed = internalMutation({
   args: { productId: v.id("products") },
   handler: async (ctx, args) => {
     await refreshProductSummary(ctx, args.productId);
-  }
+  },
 });
 
 export const cacheProductImageOrder = internalMutation({
   args: {
     productId: v.id("products"),
-    orderedMediaIds: v.array(v.string())
+    orderedMediaIds: v.array(v.string()),
   },
   handler: async (ctx, args) => {
     const product = await ctx.db.get(args.productId);
     if (!product) return;
     const imagesById = new Map(
-      product.currentShopifyImages.map((image: any) => [String(image.mediaId ?? image.id), image])
+      product.currentShopifyImages.map((image: any) => [
+        String(image.mediaId ?? image.id),
+        image,
+      ]),
     );
-    const orderedImages = args.orderedMediaIds.map((mediaId) => imagesById.get(mediaId)).filter(Boolean);
+    const orderedImages = args.orderedMediaIds
+      .map((mediaId) => imagesById.get(mediaId))
+      .filter(Boolean);
     if (orderedImages.length !== product.currentShopifyImages.length) return;
     await ctx.db.patch(product._id, {
       currentShopifyImages: orderedImages,
       featuredImageUrl: (orderedImages[0] as any)?.url ?? null,
       shopifyImageCount: orderedImages.length,
-      updatedAt: Date.now()
+      updatedAt: Date.now(),
     });
-  }
+  },
 });
 
 export const internalGetImage = internalQuery({
   args: { imageId: v.id("generatedImages") },
   handler: async (ctx, args) => {
     return ctx.db.get(args.imageId);
-  }
+  },
 });
 
 // Removes the image record and, if it was pushed to Shopify, drops the matching
@@ -587,26 +1060,31 @@ export const deleteImageRecord = internalMutation({
   handler: async (ctx, args) => {
     const image = await ctx.db.get(args.imageId);
     if (!image) return;
-    if (image.shopifyMediaId) {
-      const product = await ctx.db.get(image.productId);
-      if (product) {
-        const remaining = product.currentShopifyImages.filter(
-          (entry: any) => (entry.mediaId ?? entry.id) !== image.shopifyMediaId
-        );
-        if (remaining.length !== product.currentShopifyImages.length) {
-          await ctx.db.patch(product._id, {
-            currentShopifyImages: remaining,
-            featuredImageUrl: (remaining[0] as any)?.url ?? null,
-            shopifyImageCount: remaining.length,
-            updatedAt: Date.now()
-          });
-        }
+    const product = image.shopifyMediaId
+      ? await ctx.db.get(image.productId)
+      : null;
+    if (
+      image.shopifyMediaId &&
+      product &&
+      (!image.publishedShopifyProductId ||
+        image.publishedShopifyProductId === product.shopifyProductId)
+    ) {
+      const remaining = product.currentShopifyImages.filter(
+        (entry: any) => (entry.mediaId ?? entry.id) !== image.shopifyMediaId,
+      );
+      if (remaining.length !== product.currentShopifyImages.length) {
+        await ctx.db.patch(product._id, {
+          currentShopifyImages: remaining,
+          featuredImageUrl: (remaining[0] as any)?.url ?? null,
+          shopifyImageCount: remaining.length,
+          updatedAt: Date.now(),
+        });
       }
     }
     await ctx.db.delete(args.imageId);
     await refreshJobSummary(ctx, image.jobId);
     await refreshProductSummary(ctx, image.productId);
-  }
+  },
 });
 
 export const staleRejectedImagesForCleanup = internalQuery({
@@ -617,7 +1095,10 @@ export const staleRejectedImagesForCleanup = internalQuery({
   handler: async (ctx, args) => {
     const limit = Math.max(
       1,
-      Math.min(args.limit ?? REJECTED_IMAGE_CLEANUP_BATCH_SIZE, REJECTED_IMAGE_CLEANUP_BATCH_SIZE),
+      Math.min(
+        args.limit ?? REJECTED_IMAGE_CLEANUP_BATCH_SIZE,
+        REJECTED_IMAGE_CLEANUP_BATCH_SIZE,
+      ),
     );
     const images = await ctx.db
       .query("generatedImages")
@@ -626,33 +1107,52 @@ export const staleRejectedImagesForCleanup = internalQuery({
       )
       .take(limit);
 
-    return images.filter((image) => (image.reviewedAt ?? image.updatedAt) <= args.cutoff);
+    return images.filter(
+      (image) => (image.reviewedAt ?? image.updatedAt) <= args.cutoff,
+    );
   },
 });
 
 export const cleanupStaleRejectedImages = internalAction({
   args: {},
-  handler: async (ctx): Promise<{ scanned: number; deleted: number; failed: number; cutoff: number }> => {
+  handler: async (
+    ctx,
+  ): Promise<{
+    scanned: number;
+    deleted: number;
+    failed: number;
+    cutoff: number;
+  }> => {
     const cutoff = Date.now() - REJECTED_IMAGE_RETENTION_MS;
-    const images = (await ctx.runQuery(internal.shopify.staleRejectedImagesForCleanup, {
-      cutoff,
-      limit: REJECTED_IMAGE_CLEANUP_BATCH_SIZE,
-    })) as Doc<"generatedImages">[];
+    const images = (await ctx.runQuery(
+      internal.shopify.staleRejectedImagesForCleanup,
+      {
+        cutoff,
+        limit: REJECTED_IMAGE_CLEANUP_BATCH_SIZE,
+      },
+    )) as Doc<"generatedImages">[];
     let deleted = 0;
     let failed = 0;
 
     for (const image of images) {
       try {
-        if (image.reviewStatus !== "rejected" || (image.reviewedAt ?? image.updatedAt) > cutoff) {
+        if (
+          image.reviewStatus !== "rejected" ||
+          (image.reviewedAt ?? image.updatedAt) > cutoff
+        ) {
           continue;
         }
 
         for (const storageUrl of generatedImageAssetUrls(image)) {
-          await ctx.runAction(internal.generation.deleteFromStorage, { storageUrl });
+          await ctx.runAction(internal.generation.deleteFromStorage, {
+            storageUrl,
+          });
         }
 
         // Retention cleanup must not delete the merchant's Shopify media.
-        await ctx.runMutation(internal.shopify.deleteImageRecord, { imageId: image._id });
+        await ctx.runMutation(internal.shopify.deleteImageRecord, {
+          imageId: image._id,
+        });
         deleted += 1;
       } catch (error) {
         failed += 1;
@@ -665,7 +1165,11 @@ export const cleanupStaleRejectedImages = internalAction({
     }
 
     if (images.length === REJECTED_IMAGE_CLEANUP_BATCH_SIZE && failed === 0) {
-      await ctx.scheduler.runAfter(0, internal.shopify.cleanupStaleRejectedImages, {});
+      await ctx.scheduler.runAfter(
+        0,
+        internal.shopify.cleanupStaleRejectedImages,
+        {},
+      );
     }
 
     return { scanned: images.length, deleted, failed, cutoff };
@@ -678,34 +1182,49 @@ export const deleteImage = action({
   args: { imageId: v.id("generatedImages") },
   handler: async (ctx, args): Promise<{ deleted: true }> => {
     const userId = await requireUserId(ctx);
-    const image = (await ctx.runQuery(internal.shopify.internalGetImage, { imageId: args.imageId })) as Doc<"generatedImages"> | null;
+    const image = (await ctx.runQuery(internal.shopify.internalGetImage, {
+      imageId: args.imageId,
+    })) as Doc<"generatedImages"> | null;
     if (!image) throw new Error("Image not found.");
 
     if (image.shopifyMediaId && image.shopifyMediaId.startsWith("gid://")) {
-      const product = (await ctx.runQuery(internal.products.internalGet, { productId: image.productId })) as Doc<"products"> | null;
+      const product = (await ctx.runQuery(internal.products.internalGet, {
+        productId: image.productId,
+      })) as Doc<"products"> | null;
       if (product) {
-        const credentials = (await ctx.runQuery(internal.shops.getShopifyCredentials, {
-          shopId: product.shopId ?? null,
-          userId
-        })) as ShopifyCredentials;
+        const credentials = (await ctx.runQuery(
+          internal.shops.getShopifyCredentials,
+          {
+            shopId: product.shopId ?? null,
+            userId,
+          },
+        )) as ShopifyCredentials;
         const deleted = await shopifyGraphql<any>(
           PRODUCT_DELETE_MEDIA_MUTATION,
           {
-            productId: product.shopifyProductId,
-            mediaIds: [image.shopifyMediaId]
+            productId:
+              image.publishedShopifyProductId ?? product.shopifyProductId,
+            mediaIds: [image.shopifyMediaId],
           },
           undefined,
-          credentials
+          credentials,
         );
-        throwUserErrors(deleted.productDeleteMedia.mediaUserErrors, "Shopify product media deletion failed");
+        throwUserErrors(
+          deleted.productDeleteMedia.mediaUserErrors,
+          "Shopify product media deletion failed",
+        );
       }
     }
 
     for (const storageUrl of generatedImageAssetUrls(image)) {
-      await ctx.runAction(internal.generation.deleteFromStorage, { storageUrl });
+      await ctx.runAction(internal.generation.deleteFromStorage, {
+        storageUrl,
+      });
     }
 
-    await ctx.runMutation(internal.shopify.deleteImageRecord, { imageId: args.imageId });
+    await ctx.runMutation(internal.shopify.deleteImageRecord, {
+      imageId: args.imageId,
+    });
     return { deleted: true };
-  }
+  },
 });
