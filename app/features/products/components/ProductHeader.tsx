@@ -50,6 +50,9 @@ export function ProductHeader({
   hasProductJobs,
   shopifyAdminUrl,
   readyImagesCount,
+  visualProductCount = 0,
+  generateLabel = "Générer",
+  publishLabel = "Publier",
   syncing,
   onSync,
   onGenerate,
@@ -66,6 +69,9 @@ export function ProductHeader({
   hasProductJobs: boolean;
   shopifyAdminUrl: string | null;
   readyImagesCount: number;
+  visualProductCount?: number;
+  generateLabel?: string;
+  publishLabel?: string;
   syncing: boolean;
   onSync: () => void;
   onGenerate: () => void;
@@ -95,18 +101,30 @@ export function ProductHeader({
               </BreadcrumbItem>
             </BreadcrumbList>
           </Breadcrumb>
-          <StateBadge state={primaryActionTone(primaryAction)}>
-            {productPrimaryActionLabels[primaryAction]}
-          </StateBadge>
-          <StateBadge state={generationStateTone(generationState)}>
-            {productGenerationStateLabels[generationState]}
-          </StateBadge>
-          <StateBadge state={reviewStateTone(reviewState)}>
-            {productReviewStateLabels[reviewState]}
-          </StateBadge>
-          <StateBadge state={publishStateTone(publishState)}>
-            {productPublishStateLabels[publishState]}
-          </StateBadge>
+          {visualProductCount ? (
+            <>
+              <Badge variant="secondary">Produit mère</Badge>
+              <Badge variant="outline">
+                {visualProductCount} déclinaison
+                {visualProductCount === 1 ? "" : "s"}
+              </Badge>
+            </>
+          ) : (
+            <>
+              <StateBadge state={primaryActionTone(primaryAction)}>
+                {productPrimaryActionLabels[primaryAction]}
+              </StateBadge>
+              <StateBadge state={generationStateTone(generationState)}>
+                {productGenerationStateLabels[generationState]}
+              </StateBadge>
+              <StateBadge state={reviewStateTone(reviewState)}>
+                {productReviewStateLabels[reviewState]}
+              </StateBadge>
+              <StateBadge state={publishStateTone(publishState)}>
+                {productPublishStateLabels[publishState]}
+              </StateBadge>
+            </>
+          )}
           <Badge variant="outline">
             {product.productType || "Sans categorie"}
           </Badge>
@@ -169,12 +187,12 @@ export function ProductHeader({
         ) : null}
         <Button size="lg" onClick={onGenerate}>
           <WandSparkles data-icon="inline-start" />
-          Generer
+          {generateLabel}
         </Button>
         {readyImagesCount ? (
           <Button size="lg" disabled={!readyImagesCount} onClick={onPublish}>
             <Send data-icon="inline-start" />
-            Publier
+            {publishLabel}
           </Button>
         ) : null}
       </div>

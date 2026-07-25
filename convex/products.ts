@@ -1,5 +1,12 @@
 import { v } from "convex/values";
-import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
+import {
+  internalMutation,
+  internalQuery,
+  mutation,
+  query,
+  type MutationCtx,
+  type QueryCtx,
+} from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireUserId } from "./authz";
 import { getActiveShopScope, shopMatchesScope, type ShopScope } from "./shopScope";
@@ -67,6 +74,22 @@ function visibleGeneratedImages(images: Doc<"generatedImages">[]) {
   return images.filter((image) => !image.retrySourceImageId);
 }
 
+async function isVisualProductFamilyMember(
+  ctx: Pick<QueryCtx, "db"> | Pick<MutationCtx, "db">,
+  product: Doc<"products">,
+) {
+  if (!product.shopId) return false;
+  const member = await ctx.db
+    .query("visualProductFamilyMembers")
+    .withIndex("by_shop_and_shopify_product_id", (q) =>
+      q
+        .eq("shopId", product.shopId!)
+        .eq("shopifyProductId", product.shopifyProductId),
+    )
+    .unique();
+  return Boolean(member);
+}
+
 async function productWithVisibleWorkflow(
   ctx: { db: any },
   product: Doc<"products">,
@@ -125,6 +148,7 @@ async function filteredProducts(ctx: { db: any }, args: ProductFilters, scope: S
   const filtered: Doc<"products">[] = [];
   for (const product of products) {
     if (!shopMatchesScope(product, scope)) continue;
+    if (await isVisualProductFamilyMember(ctx, product)) continue;
     const currentProduct = await productWithVisibleWorkflow(ctx, product);
     if (!productMatches(currentProduct, args, needle)) continue;
     filtered.push(currentProduct);
@@ -164,9 +188,10 @@ export const list = query({
 
   const page: Doc<"products">[] = [];
   let matched = 0;
-  for await (const product of queryBuilder) {
-    if (!shopMatchesScope(product, scope)) continue;
-    const currentProduct = await productWithVisibleWorkflow(ctx, product);
+    for await (const product of queryBuilder) {
+      if (!shopMatchesScope(product, scope)) continue;
+      if (await isVisualProductFamilyMember(ctx, product)) continue;
+      const currentProduct = await productWithVisibleWorkflow(ctx, product);
     if (!productMatches(currentProduct, args, needle)) continue;
     if (matched >= offset && page.length < limit + 1) page.push(currentProduct);
     matched += 1;
@@ -345,7 +370,13 @@ export const refreshFacets = internalMutation({
     const products = (await ctx.db.query("products").collect()).filter((product: Doc<"products">) =>
       shopId ? product.shopId === shopId : product.shopId == null
     );
-    const facets = buildFacets(products);
+    const rootProducts: Doc<"products">[] = [];
+    for (const product of products) {
+      if (!(await isVisualProductFamilyMember(ctx, product))) {
+        rootProducts.push(product);
+      }
+    }
+    const facets = buildFacets(rootProducts);
     const existing = shopId
       ? await ctx.db
         .query("appSettings")
@@ -420,13 +451,17 @@ export const backfillProductSummaries = mutation({
   handler: async (ctx) => {
     await requireUserId(ctx);
     const products = await ctx.db.query("products").collect();
+    const rootProducts: Doc<"products">[] = [];
     for (const product of products) {
       await refreshProductSummary(ctx, product._id);
       await ctx.db.patch(product._id, {
         shopifyImageCount: product.currentShopifyImages.length
       });
+      if (!(await isVisualProductFamilyMember(ctx, product))) {
+        rootProducts.push(product);
+      }
     }
-    const facets = buildFacets(products);
+    const facets = buildFacets(rootProducts);
     const existing = await ctx.db.query("appSettings").withIndex("by_key", (q) => q.eq("key", PRODUCT_FACETS_KEY)).unique();
     if (existing) await ctx.db.patch(existing._id, { value: facets, updatedAt: Date.now() });
     else await ctx.db.insert("appSettings", { key: PRODUCT_FACETS_KEY, value: facets, updatedAt: Date.now() });

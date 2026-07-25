@@ -132,6 +132,8 @@ async function analyzeBatch(args: {
   const instruction = [
     "Classify Shopify product reference images into the known visual groups.",
     "Return one assignment per reference id.",
+    "Evaluate every reference independently. Multiple different reference ids may and often should match the same group when they show the same variant.",
+    "Do not select only one best image per group and do not limit the number of references assigned to a group.",
     "A reference may match multiple groups only when several distinct variants are visibly present in the same image.",
     "For every visible match, return confidence from 0 to 1.",
     "When an image contains multiple groups, return box2d as [y_min, x_min, y_max, x_max] normalized from 0 to 1000 for each product region.",

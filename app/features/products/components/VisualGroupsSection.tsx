@@ -6,7 +6,7 @@ import {
   LockKeyhole,
   Sparkles,
 } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { BusyIcon } from "@/components/page";
@@ -25,6 +25,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, type Doc, type Id } from "@/lib/convex";
 import { errorMessage } from "@/lib/errors";
+import { cn } from "@/lib/utils";
 
 import type { VisualGroupsData } from "../types";
 
@@ -64,14 +65,6 @@ function sourceLabel(reference: Doc<"visualGroupReferences">) {
   return "Détection automatique";
 }
 
-function primaryReference(
-  references: Doc<"visualGroupReferences">[],
-): Doc<"visualGroupReferences"> | undefined {
-  return (
-    references.find((reference) => reference.confirmed) ?? references[0]
-  );
-}
-
 function canonicalReferences(data: VisualGroupsData) {
   const references = [
     ...data.groups.flatMap((group) => group.references),
@@ -98,10 +91,11 @@ export function VisualGroupsSection({
 }) {
   const configure = useMutation(api.visualGroups.configure);
   const setPublishMode = useMutation(api.visualGroups.setPublishMode);
-  const setPrimaryReference = useMutation(
-    api.visualGroups.setPrimaryReference,
+  const assignReference = useMutation(api.visualGroups.assignReference);
+  const removeReference = useMutation(api.visualGroups.removeReference);
+  const confirmGroupReferences = useMutation(
+    api.visualGroups.confirmGroupReferences,
   );
-  const confirmReference = useMutation(api.visualGroups.confirmReference);
   const analyze = useAction(api.visualGroupAnalysis.analyze);
 
   const [optionSelection, setOptionSelection] = useState<{
@@ -115,9 +109,6 @@ export function VisualGroupsSection({
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [referencePickerGroupId, setReferencePickerGroupId] =
     useState<Id<"visualGroups"> | null>(null);
-  const referencePickerTriggers = useRef(
-    new Map<Id<"visualGroups">, HTMLButtonElement>(),
-  );
 
   const references = useMemo(
     () => (data ? canonicalReferences(data) : []),
@@ -148,7 +139,7 @@ export function VisualGroupsSection({
   const draftPublishMode =
     draftMode?.productId === productId
       ? draftMode.value
-      : (data.config?.publishMode ?? "variant_media");
+      : (data.config?.publishMode ?? "separate_products");
   const meaningfulOptions = data.options.filter(
     (option) =>
       !(
@@ -231,13 +222,18 @@ export function VisualGroupsSection({
     }
   };
 
-  const handleConfirm = async (
-    referenceId: Id<"visualGroupReferences">,
+  const handleConfirmGroup = async (
+    groupId: Id<"visualGroups">,
+    pendingCount: number,
   ) => {
-    setBusyAction(`confirm:${referenceId}`);
+    setBusyAction(`confirm:${groupId}`);
     try {
-      await confirmReference({ referenceId });
-      toast.success("Référence confirmée");
+      await confirmGroupReferences({ groupId });
+      toast.success(
+        `${pendingCount} référence${pendingCount === 1 ? "" : "s"} confirmée${
+          pendingCount === 1 ? "" : "s"
+        }`,
+      );
     } catch (error) {
       toast.error("Confirmation impossible", {
         description: errorMessage(error),
@@ -247,22 +243,26 @@ export function VisualGroupsSection({
     }
   };
 
-  const handleReferenceChange = async (
+  const handleReferenceToggle = async (
     groupId: Id<"visualGroups">,
     reference: Doc<"visualGroupReferences">,
+    selectedReference?: Doc<"visualGroupReferences">,
   ) => {
-    if (!reference.mediaId) return;
+    if (!reference.mediaId && !selectedReference) return;
     setBusyAction(`reference:${groupId}`);
     try {
-      await setPrimaryReference({
-        groupId,
-        mediaId: reference.mediaId,
-      });
-      setReferencePickerGroupId(null);
-      referencePickerTriggers.current.get(groupId)?.focus();
-      toast.success("Référence du groupe mise à jour");
+      if (selectedReference) {
+        await removeReference({ referenceId: selectedReference._id });
+        toast.success("Référence retirée");
+      } else if (reference.mediaId) {
+        await assignReference({
+          groupId,
+          mediaId: reference.mediaId,
+        });
+        toast.success("Référence ajoutée");
+      }
     } catch (error) {
-      toast.error("Référence impossible à assigner", {
+      toast.error("Modification des références impossible", {
         description: errorMessage(error),
       });
     } finally {
@@ -279,7 +279,7 @@ export function VisualGroupsSection({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h2 id="visual-groups-title" className="font-semibold">
-              Variantes visuelles
+              Organisation des déclinaisons
             </h2>
             {data.config ? (
               <Badge variant="outline" className="bg-muted">
@@ -294,8 +294,8 @@ export function VisualGroupsSection({
             ) : null}
           </div>
           <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">
-            Une référence confirmée par couleur, matière, taille ou combinaison
-            d’options. Les images sont générées une seule fois par groupe.
+            Chaque groupe visuel devient une déclinaison produit avec ses
+            références, ses images et ses variantes Shopify.
           </p>
         </div>
         {data.config ? (
@@ -323,11 +323,11 @@ export function VisualGroupsSection({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="variant_media">
-                  Images par variante
-                </SelectItem>
                 <SelectItem value="separate_products">
-                  Produits brouillons séparés
+                  Une déclinaison = un produit
+                </SelectItem>
+                <SelectItem value="variant_media">
+                  Conserver un seul produit
                 </SelectItem>
               </SelectContent>
             </Select>
@@ -385,27 +385,30 @@ export function VisualGroupsSection({
                   }
                 >
                   <Label className="flex min-h-14 items-start gap-3 rounded-lg border bg-background p-3 has-data-[state=checked]:border-primary">
-                    <RadioGroupItem value="variant_media" className="mt-0.5" />
-                    <span>
-                      <span className="block text-sm font-medium">
-                        Un produit, images par variante
-                      </span>
-                      <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">
-                        Associe chaque galerie aux variantes correspondantes.
-                      </span>
-                    </span>
-                  </Label>
-                  <Label className="flex min-h-14 items-start gap-3 rounded-lg border bg-background p-3 has-data-[state=checked]:border-primary">
                     <RadioGroupItem
                       value="separate_products"
                       className="mt-0.5"
                     />
                     <span>
                       <span className="block text-sm font-medium">
-                        Un brouillon par groupe
+                        Une déclinaison = un produit
                       </span>
                       <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">
-                        Conserve le produit source et crée des produits séparés.
+                        Crée un produit Shopify enfant par groupe visuel.
+                      </span>
+                    </span>
+                  </Label>
+                  <Label className="flex min-h-14 items-start gap-3 rounded-lg border bg-background p-3 has-data-[state=checked]:border-primary">
+                    <RadioGroupItem
+                      value="variant_media"
+                      className="mt-0.5"
+                    />
+                    <span>
+                      <span className="block text-sm font-medium">
+                        Conserver un seul produit
+                      </span>
+                      <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">
+                        Associe une galerie à chaque groupe de variantes.
                       </span>
                     </span>
                   </Label>
@@ -420,7 +423,7 @@ export function VisualGroupsSection({
                   onClick={() => void handleConfigure()}
                 >
                   <BusyIcon busy={busyAction === "configure"} />
-                  Créer les groupes
+                  Créer les déclinaisons
                 </Button>
               </div>
             </div>
@@ -481,11 +484,18 @@ export function VisualGroupsSection({
 
           <div className="divide-y">
             {data.groups.map((group) => {
-              const primary = primaryReference(group.references);
+              const groupReferences = [...group.references].sort(
+                (left, right) =>
+                  Number(right.confirmed) - Number(left.confirmed) ||
+                  left.position - right.position,
+              );
+              const confirmedCount = groupReferences.filter(
+                (reference) => reference.confirmed,
+              ).length;
+              const pendingCount = groupReferences.length - confirmedCount;
+              const previewReferences = groupReferences.slice(0, 3);
               const picking = referencePickerGroupId === group._id;
-              const confirming =
-                primary &&
-                busyAction === `confirm:${primary._id}`;
+              const confirming = busyAction === `confirm:${group._id}`;
               const changing = busyAction === `reference:${group._id}`;
 
               return (
@@ -511,52 +521,77 @@ export function VisualGroupsSection({
                     </div>
 
                     <div className="flex min-w-0 items-center gap-3">
-                      <div className="grid size-14 shrink-0 place-items-center overflow-hidden rounded-md border bg-muted">
-                        {primary ? (
-                          <img
-                            src={primary.referenceUrl}
-                            alt={`Référence ${group.label}`}
-                            className="size-full object-cover"
-                          />
-                        ) : (
+                      {previewReferences.length ? (
+                        <div className="flex shrink-0 -space-x-3">
+                          {previewReferences.map((reference) => (
+                            <img
+                              key={reference._id}
+                              src={reference.referenceUrl}
+                              alt=""
+                              title={`${confidenceLabel(reference)} · ${sourceLabel(
+                                reference,
+                              )}`}
+                              className="size-12 rounded-md border-2 border-card bg-muted object-cover"
+                            />
+                          ))}
+                          {groupReferences.length > previewReferences.length ? (
+                            <span className="grid size-12 place-items-center rounded-md border-2 border-card bg-muted text-xs font-medium">
+                              +{groupReferences.length - previewReferences.length}
+                            </span>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <div className="grid size-12 shrink-0 place-items-center rounded-md border bg-muted">
                           <ImageIcon className="size-5 text-muted-foreground" />
-                        )}
-                      </div>
+                        </div>
+                      )}
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-medium">
-                          {confidenceLabel(primary)}
-                        </p>
-                        <p className="truncate text-xs text-muted-foreground">
-                          {primary
-                            ? sourceLabel(primary)
-                            : "Choisissez une image Shopify"}
-                        </p>
+                        {groupReferences.length ? (
+                          <>
+                            <p className="truncate text-sm font-medium">
+                              {groupReferences.length} image
+                              {groupReferences.length === 1 ? "" : "s"} de
+                              référence
+                            </p>
+                            <p className="truncate text-xs text-muted-foreground">
+                              {confirmedCount} confirmée
+                              {confirmedCount === 1 ? "" : "s"}
+                              {pendingCount
+                                ? ` · ${pendingCount} à confirmer`
+                                : ""}
+                            </p>
+                          </>
+                        ) : (
+                          <>
+                            <p className="truncate text-sm font-medium">
+                              Références manquantes
+                            </p>
+                            <p className="truncate text-xs text-muted-foreground">
+                              Choisissez une ou plusieurs images Shopify
+                            </p>
+                          </>
+                        )}
                       </div>
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2 md:justify-end">
-                      {primary && !primary.confirmed ? (
+                      {pendingCount ? (
                         <Button
                           size="sm"
                           className="min-h-11 sm:min-h-8"
-                          disabled={Boolean(confirming)}
-                          onClick={() => void handleConfirm(primary._id)}
+                          disabled={confirming}
+                          onClick={() =>
+                            void handleConfirmGroup(group._id, pendingCount)
+                          }
                         >
-                          <BusyIcon busy={Boolean(confirming)} />
+                          <BusyIcon busy={confirming} />
                           {!confirming ? (
                             <Check data-icon="inline-start" />
                           ) : null}
-                          Confirmer
+                          Tout confirmer
                         </Button>
                       ) : null}
                       <Button
-                        ref={(node) => {
-                          if (node) {
-                            referencePickerTriggers.current.set(group._id, node);
-                          } else {
-                            referencePickerTriggers.current.delete(group._id);
-                          }
-                        }}
                         size="sm"
                         className="min-h-11 sm:min-h-8"
                         variant="outline"
@@ -568,33 +603,50 @@ export function VisualGroupsSection({
                           )
                         }
                       >
-                        {primary ? "Changer" : "Choisir"}
+                        {groupReferences.length ? "Gérer" : "Choisir"}
                       </Button>
                     </div>
                   </div>
 
                   {picking ? (
                     <div className="border-t bg-muted/30 px-4 py-3">
-                      <p className="mb-2 text-xs font-medium">
-                        Image de référence pour {group.label}
+                      <p className="text-xs font-medium">
+                        Images de référence pour {group.label}
+                      </p>
+                      <p className="mb-3 mt-0.5 text-xs text-muted-foreground">
+                        Sélectionnez toutes les vues utiles de cette
+                        déclinaison.
                       </p>
                       {references.length ? (
                         <div className="flex flex-wrap gap-2">
                           {references.map((reference, index) => {
-                            const selected =
-                              primary?.mediaId === reference.mediaId;
+                            const selectedReference = group.references.find(
+                              (groupReference) =>
+                                groupReference.mediaId === reference.mediaId,
+                            );
+                            const selected = Boolean(selectedReference);
                             return (
                               <button
                                 key={reference._id}
                                 type="button"
                                 disabled={!reference.mediaId || changing}
-                                className="group relative size-16 overflow-hidden rounded-md border bg-background outline-none transition-colors hover:border-primary focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                                aria-label={`Utiliser l’image Shopify ${
-                                  index + 1
-                                } pour ${group.label}`}
+                                className={cn(
+                                  "group relative size-16 overflow-hidden rounded-md border bg-background outline-none transition-colors hover:border-primary focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
+                                  selected &&
+                                    "border-primary ring-2 ring-primary/20",
+                                )}
+                                aria-label={`${
+                                  selected ? "Retirer" : "Ajouter"
+                                } l’image Shopify ${index + 1} ${
+                                  selected ? "des" : "aux"
+                                } références de ${group.label}`}
                                 aria-pressed={selected}
                                 onClick={() =>
-                                  void handleReferenceChange(group._id, reference)
+                                  void handleReferenceToggle(
+                                    group._id,
+                                    reference,
+                                    selectedReference,
+                                  )
                                 }
                               >
                                 <img
@@ -634,7 +686,7 @@ export function VisualGroupsSection({
           {data.family ? (
             <div className="border-t bg-muted/40 px-4 py-3">
               <p className="text-sm font-medium">
-                Produits brouillons créés dans Shopify
+              Produits enfants créés dans Shopify
               </p>
               <div className="mt-2 flex flex-wrap gap-2">
                 {data.family.members.map((member) => {

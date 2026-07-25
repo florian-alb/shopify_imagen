@@ -4,6 +4,7 @@ import { EmptyState, pageContentClass } from "@/components/page";
 import { useGeneratedImageRetouch } from "@/features/images/hooks/useGeneratedImageRetouch";
 import { api, type Id } from "@/lib/convex";
 import { useQuery } from "convex/react";
+import { useMemo, useState } from "react";
 
 import { DeleteImageDialog } from "./DeleteImageDialog";
 import { ImageTypeSelectionDialog } from "./ImageTypeSelectionDialog";
@@ -13,6 +14,7 @@ import { ProductImageHistory } from "./ProductImageHistory";
 import { ProductImagesSection } from "./ProductImagesSection";
 import { PublishImagesDialog } from "./PublishImagesDialog";
 import { VisualGroupsSection } from "./VisualGroupsSection";
+import { VisualProductWorkspace } from "./VisualProductWorkspace";
 import { useProductDetail } from "../hooks/useProductDetail";
 import { useProductImageDelete } from "../hooks/useProductImageDelete";
 import { useProductImageGeneration } from "../hooks/useProductImageGeneration";
@@ -20,6 +22,7 @@ import { useProductImagePublish } from "../hooks/useProductImagePublish";
 import { useProductImageReview } from "../hooks/useProductImageReview";
 import { useProductImagesViewModel } from "../hooks/useProductImagesViewModel";
 import { useShopifyImageReorder } from "../hooks/useShopifyImageReorder";
+import { createVisualProductViewModels } from "../lib/visualProductWorkspace";
 import type { ProductDetailPageProps, VisualGroupsData } from "../types";
 
 export function ProductDetailPage({
@@ -31,6 +34,8 @@ export function ProductDetailPage({
   const visualGroupsData = useQuery(api.visualGroups.getForProduct, {
     productId: typedProductId,
   }) as VisualGroupsData | null | undefined;
+  const [activeVisualGroupId, setActiveVisualGroupId] =
+    useState<Id<"visualGroups"> | null>(null);
   const lightbox = useLightbox();
   const viewModel = useProductImagesViewModel({
     product: detail.product,
@@ -62,6 +67,29 @@ export function ProductDetailPage({
     publishMode: visualGroupsData?.config?.publishMode ?? null,
   });
   const deletion = useProductImageDelete();
+  const visualProducts = useMemo(
+    () =>
+      createVisualProductViewModels({
+        parentTitle: detail.product?.title ?? "",
+        groups: visualGroupsData?.groups ?? [],
+        members: visualGroupsData?.family?.members ?? [],
+        images: detail.images,
+      }),
+    [
+      detail.images,
+      detail.product?.title,
+      visualGroupsData?.family?.members,
+      visualGroupsData?.groups,
+    ],
+  );
+  const activeVisualProduct =
+    visualProducts.find(
+      (visualProduct) =>
+        visualProduct.group._id === activeVisualGroupId,
+    ) ?? null;
+  const usesVisualProductWorkspace = Boolean(
+    visualGroupsData?.config && visualProducts.length,
+  );
 
   if (detail.data === undefined) {
     return (
@@ -95,6 +123,23 @@ export function ProductDetailPage({
         onCommit: shopifyReorder.commitShopifyImageReorder,
       }
     : undefined;
+  const productImagesSection = (
+    <ProductImagesSection
+      readyImagesCount={publishableImages.length}
+      shopifyImages={shopifyReorder.shopifyImages}
+      shopifyReorder={shopifyReorderProps}
+      generatedGalleryImages={viewModel.generatedGalleryImages}
+      generatingGalleryImages={viewModel.generatingGalleryImages}
+      approvedCount={viewModel.approvedImages.length}
+      pendingCount={viewModel.pendingImages.length}
+      rejectedCount={viewModel.rejectedImages.length}
+      reviewingImageId={review.reviewingImageId}
+      onReview={review.setImageReview}
+      onRetouch={retouch.openRetouch}
+      onDelete={deletion.setTarget}
+      onZoom={lightbox.open}
+    />
+  );
 
   return (
     <main className={pageContentClass}>
@@ -109,49 +154,83 @@ export function ProductDetailPage({
         publishState={viewModel.publishState}
         hasProductJobs={viewModel.hasProductJobs}
         shopifyAdminUrl={viewModel.shopifyAdminUrl}
-        readyImagesCount={publishableImages.length}
+        readyImagesCount={
+          activeVisualProduct?.publishableCount ?? publishableImages.length
+        }
+        visualProductCount={
+          usesVisualProductWorkspace ? visualProducts.length : 0
+        }
+        generateLabel={
+          activeVisualProduct
+            ? `Générer · ${activeVisualProduct.group.label}`
+            : "Générer"
+        }
+        publishLabel={
+          activeVisualProduct
+            ? `Publier · ${activeVisualProduct.group.label}`
+            : "Publier"
+        }
         syncing={detail.syncing}
         onSync={detail.sync}
-        onGenerate={generation.openGenerate}
-        onPublish={publish.openPush}
+        onGenerate={
+          activeVisualProduct
+            ? () =>
+                generation.openGenerateForGroup(
+                  activeVisualProduct.group._id,
+                )
+            : generation.openGenerate
+        }
+        onPublish={
+          activeVisualProduct
+            ? () =>
+                publish.openPushForGroup(activeVisualProduct.group._id)
+            : publish.openPush
+        }
       />
 
       <div className="grid gap-4">
         <div className="min-w-0 space-y-4">
-          <VisualGroupsSection
-            productId={typedProductId}
-            storeHandle={detail.shopInfo?.storeHandle}
-            data={visualGroupsData}
-          />
+          {usesVisualProductWorkspace && visualGroupsData?.config ? (
+            <VisualProductWorkspace
+              visualProducts={visualProducts}
+              activeGroupId={activeVisualProduct?.group._id ?? null}
+              overview={productImagesSection}
+              storeHandle={detail.shopInfo?.storeHandle}
+              reviewingImageId={review.reviewingImageId}
+              onSelect={setActiveVisualGroupId}
+              onGenerate={generation.openGenerateForGroup}
+              onPublish={publish.openPushForGroup}
+              onReview={review.setImageReview}
+              onRetouch={retouch.openRetouch}
+              onDelete={deletion.setTarget}
+              onZoom={lightbox.open}
+            />
+          ) : null}
 
-          <ProductImagesSection
-            readyImagesCount={publishableImages.length}
-            shopifyImages={shopifyReorder.shopifyImages}
-            shopifyReorder={shopifyReorderProps}
-            generatedGalleryImages={viewModel.generatedGalleryImages}
-            generatingGalleryImages={viewModel.generatingGalleryImages}
-            approvedCount={viewModel.approvedImages.length}
-            pendingCount={viewModel.pendingImages.length}
-            rejectedCount={viewModel.rejectedImages.length}
-            reviewingImageId={review.reviewingImageId}
-            onReview={review.setImageReview}
-            onRetouch={retouch.openRetouch}
-            onDelete={deletion.setTarget}
-            onZoom={lightbox.open}
-          />
+          {!activeVisualProduct ? (
+            <VisualGroupsSection
+              productId={typedProductId}
+              storeHandle={detail.shopInfo?.storeHandle}
+              data={visualGroupsData}
+            />
+          ) : null}
+
+          {!usesVisualProductWorkspace ? productImagesSection : null}
 
           <ProductImageHistory
             productId={productId}
-            images={detail.images}
+            images={activeVisualProduct?.images ?? detail.images}
             hasProductJobs={viewModel.hasProductJobs}
             onDelete={deletion.setTarget}
           />
 
-          <ProductFacts
-            product={detail.product}
-            productCollections={viewModel.productCollections}
-            imageCount={detail.images.length}
-          />
+          {!activeVisualProduct ? (
+            <ProductFacts
+              product={detail.product}
+              productCollections={viewModel.productCollections}
+              imageCount={detail.images.length}
+            />
+          ) : null}
         </div>
       </div>
 
@@ -162,12 +241,21 @@ export function ProductDetailPage({
         selectedTypes={generation.selectedTypes}
         visualGroupsData={visualGroupsData}
         selectedGroupIds={generation.selectedGroupIds}
+        focusedGroupId={generation.focusedGroupId}
         onToggleGroup={generation.toggleGroup}
         busy={generation.busy}
         onGenerate={() => void generation.generate()}
-        title="Generate images"
-        description="Select image types for this product. Each type maps to a prompt template."
-        submitLabel="Start background job"
+        title={
+          activeVisualProduct
+            ? `Générer · ${activeVisualProduct.group.label}`
+            : "Générer les images"
+        }
+        description={
+          activeVisualProduct
+            ? "Choisissez les types d’image à générer pour cette déclinaison."
+            : "Choisissez les déclinaisons et les types d’image à générer."
+        }
+        submitLabel="Lancer la génération"
         onToggleType={generation.toggleType}
       />
 
@@ -194,6 +282,8 @@ export function ProductDetailPage({
         replaceVariantMedia={publish.replaceVariantMedia}
         setReplaceVariantMedia={publish.setReplaceVariantMedia}
         publishMode={visualGroupsData?.config?.publishMode ?? null}
+        visualGroupsData={visualGroupsData}
+        focusedGroupId={publish.focusedGroupId}
         busy={publish.busy}
         onPush={() => void publish.push()}
       />
