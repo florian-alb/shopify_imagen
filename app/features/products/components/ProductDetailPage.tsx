@@ -22,7 +22,10 @@ import { useProductImagePublish } from "../hooks/useProductImagePublish";
 import { useProductImageReview } from "../hooks/useProductImageReview";
 import { useProductImagesViewModel } from "../hooks/useProductImagesViewModel";
 import { useShopifyImageReorder } from "../hooks/useShopifyImageReorder";
-import { createVisualProductViewModels } from "../lib/visualProductWorkspace";
+import {
+  createVisualProductViewModels,
+  shopifyImagesForVisualProduct,
+} from "../lib/visualProductWorkspace";
 import type { ProductDetailPageProps, VisualGroupsData } from "../types";
 
 export function ProductDetailPage({
@@ -88,6 +91,20 @@ export function ProductDetailPage({
   const usesVisualProductWorkspace = Boolean(
     visualGroupsData?.config && visualProducts.length,
   );
+  const displayedViewModel = useProductImagesViewModel({
+    product: detail.product,
+    images: activeVisualProduct?.images ?? detail.images,
+    prompts: detail.prompts,
+    storeHandle: detail.shopInfo?.storeHandle,
+  });
+  const displayedShopifyImages = useMemo(
+    () =>
+      shopifyImagesForVisualProduct(
+        activeVisualProduct,
+        shopifyReorder.shopifyImages,
+      ),
+    [activeVisualProduct, shopifyReorder.shopifyImages],
+  );
 
   if (detail.data === undefined) {
     return (
@@ -123,14 +140,19 @@ export function ProductDetailPage({
     : undefined;
   const productImagesSection = (
     <ProductImagesSection
-      readyImagesCount={publishableImages.length}
-      shopifyImages={shopifyReorder.shopifyImages}
-      shopifyReorder={shopifyReorderProps}
-      generatedGalleryImages={viewModel.generatedGalleryImages}
-      generatingGalleryImages={viewModel.generatingGalleryImages}
-      approvedCount={viewModel.approvedImages.length}
-      pendingCount={viewModel.pendingImages.length}
-      rejectedCount={viewModel.rejectedImages.length}
+      readyImagesCount={displayedViewModel.readyImages.length}
+      shopifyImages={displayedShopifyImages}
+      shopifyDescription={
+        activeVisualProduct
+          ? `Images de référence associées à ${activeVisualProduct.group.label}.`
+          : undefined
+      }
+      shopifyReorder={activeVisualProduct ? undefined : shopifyReorderProps}
+      generatedGalleryImages={displayedViewModel.generatedGalleryImages}
+      generatingGalleryImages={displayedViewModel.generatingGalleryImages}
+      approvedCount={displayedViewModel.approvedImages.length}
+      pendingCount={displayedViewModel.pendingImages.length}
+      rejectedCount={displayedViewModel.rejectedImages.length}
       reviewingImageId={review.reviewingImageId}
       onReview={review.setImageReview}
       onRetouch={retouch.openRetouch}
@@ -189,17 +211,10 @@ export function ProductDetailPage({
             <VisualProductWorkspace
               visualProducts={visualProducts}
               activeGroupId={activeVisualProduct?.group._id ?? null}
-              overview={productImagesSection}
-              storeHandle={detail.shopInfo?.storeHandle}
-              reviewingImageId={review.reviewingImageId}
               onSelect={setActiveVisualGroupId}
-              onGenerate={generation.openGenerateForGroup}
-              onPublish={publish.openPushForGroup}
-              onReview={review.setImageReview}
-              onRetouch={retouch.openRetouch}
-              onDelete={deletion.setTarget}
-              onZoom={lightbox.open}
-            />
+            >
+              {productImagesSection}
+            </VisualProductWorkspace>
           ) : null}
 
           {!activeVisualProduct ? (

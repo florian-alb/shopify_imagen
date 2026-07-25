@@ -1,6 +1,8 @@
 import { getReviewStatus, isPushReady } from "../../images/lib/review";
+import { shopifyMediaId } from "../../shopify/lib/media";
 import type { Doc } from "../../../lib/convex";
-import type { VisualGroupWithRows } from "../types";
+import type { ShopifyGalleryImage, VisualGroupWithRows } from "../types";
+import { orderVisualReferences } from "./visualReferenceOrder";
 
 export type VisualProductStatus =
   | "needs_reference"
@@ -32,17 +34,49 @@ export const visualProductStatusLabels: Record<VisualProductStatus, string> = {
   published: "Publiée",
 };
 
-export const visualProductStatusTones: Record<
-  VisualProductStatus,
-  "neutral" | "success" | "warning" | "danger"
-> = {
-  needs_reference: "warning",
-  ready_to_generate: "neutral",
-  generating: "warning",
-  needs_review: "warning",
-  ready_to_publish: "success",
-  published: "success",
-};
+export function shopifyImagesForVisualProduct(
+  visualProduct: VisualProductViewModel | null,
+  shopifyImages: ShopifyGalleryImage[],
+) {
+  if (!visualProduct) return shopifyImages;
+
+  const imageByMediaId = new Map(
+    shopifyImages.flatMap((image) => {
+      const mediaId = shopifyMediaId(image);
+      return mediaId ? [[mediaId, image] as const] : [];
+    }),
+  );
+  const imageByUrl = new Map(
+    shopifyImages.flatMap((image) => [
+      [image.url, image] as const,
+      ...(image.displayUrl ? ([[image.displayUrl, image]] as const) : []),
+    ]),
+  );
+  const seen = new Set<string>();
+  const result: ShopifyGalleryImage[] = [];
+
+  for (const [index, reference] of orderVisualReferences(
+    visualProduct.group.references.filter((item) => item.confirmed),
+  ).entries()) {
+    const matched =
+      (reference.mediaId ? imageByMediaId.get(reference.mediaId) : undefined) ??
+      imageByUrl.get(reference.sourceUrl) ??
+      imageByUrl.get(reference.referenceUrl);
+    const image: ShopifyGalleryImage = matched ?? {
+      id: reference.mediaId ?? reference._id,
+      mediaId: reference.mediaId,
+      url: reference.sourceUrl,
+      displayUrl: reference.referenceUrl,
+      altText: `${visualProduct.group.label} · Référence ${index + 1}`,
+    };
+    const key = shopifyMediaId(image) ?? image.url;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(image);
+  }
+
+  return result;
+}
 
 export function createVisualProductViewModels(args: {
   parentTitle: string;

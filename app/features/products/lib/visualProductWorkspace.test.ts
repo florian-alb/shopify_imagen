@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { Doc, Id } from "@/lib/convex";
-import type { VisualGroupWithRows } from "../types";
-import { createVisualProductViewModels } from "./visualProductWorkspace";
+import type { ShopifyGalleryImage, VisualGroupWithRows } from "../types";
+import {
+  createVisualProductViewModels,
+  shopifyImagesForVisualProduct,
+} from "./visualProductWorkspace";
 
 function group(
   overrides: Partial<VisualGroupWithRows> = {},
@@ -98,5 +101,65 @@ describe("createVisualProductViewModels", () => {
 
     expect(result.status).toBe("published");
     expect(result.uploadedCount).toBe(1);
+  });
+});
+
+describe("shopifyImagesForVisualProduct", () => {
+  it("keeps only confirmed references in their configured order", () => {
+    const references = [
+      {
+        _id: "reference-2",
+        mediaId: "media-2",
+        sourceUrl: "https://example.com/black-2.jpg",
+        referenceUrl: "https://example.com/black-2.jpg",
+        confirmed: true,
+        position: 1,
+        groupPosition: 0,
+      },
+      {
+        _id: "reference-1",
+        mediaId: "media-1",
+        sourceUrl: "https://example.com/black-1.jpg",
+        referenceUrl: "https://example.com/black-1.jpg",
+        confirmed: true,
+        position: 0,
+        groupPosition: 1,
+      },
+      {
+        _id: "reference-pending",
+        mediaId: "media-pending",
+        sourceUrl: "https://example.com/pending.jpg",
+        referenceUrl: "https://example.com/pending.jpg",
+        confirmed: false,
+        position: 2,
+        groupPosition: 2,
+      },
+    ] as Doc<"visualGroupReferences">[];
+    const [visualProduct] = createVisualProductViewModels({
+      parentTitle: "Mocassins",
+      groups: [group({ ready: true, references })],
+      members: [],
+      images: [],
+    });
+    const shopifyImages: ShopifyGalleryImage[] = [
+      {
+        mediaId: "media-blue",
+        url: "https://example.com/blue.jpg",
+      },
+      {
+        mediaId: "media-1",
+        url: "https://example.com/black-1.jpg",
+      },
+      {
+        mediaId: "media-2",
+        url: "https://example.com/black-2.jpg",
+      },
+    ];
+
+    expect(
+      shopifyImagesForVisualProduct(visualProduct, shopifyImages).map(
+        (item) => item.mediaId,
+      ),
+    ).toEqual(["media-2", "media-1"]);
   });
 });
