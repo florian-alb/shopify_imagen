@@ -1,13 +1,29 @@
 import { envShopDomain, type ShopifyCredentials } from "../shopScope";
 
 function mapImages(product: any) {
+  const variantIdsByMediaId = new Map<string, string[]>();
+  for (const variant of product.variants?.nodes ?? []) {
+    for (const media of variant.media?.nodes ?? []) {
+      if (!media?.id || !variant?.id) continue;
+      variantIdsByMediaId.set(media.id, [
+        ...(variantIdsByMediaId.get(media.id) ?? []),
+        variant.id,
+      ]);
+    }
+  }
+
   const images = (product.media?.nodes ?? [])
     .filter((media: any) => media.mediaContentType === "IMAGE")
     .map((media: any) => ({
       id: media.id,
       mediaId: media.id,
       url: media.image?.url ?? media.preview?.image?.url ?? null,
-      altText: media.image?.altText ?? media.preview?.image?.altText ?? media.alt ?? null
+      altText:
+        media.image?.altText ??
+        media.preview?.image?.altText ??
+        media.alt ??
+        null,
+      variantIds: variantIdsByMediaId.get(media.id) ?? [],
     }))
     .filter((image: { url: string | null }) => image.url);
   const featuredUrl = product.featuredMedia?.preview?.image?.url;
@@ -16,7 +32,8 @@ function mapImages(product: any) {
       id: null,
       mediaId: null,
       url: featuredUrl,
-      altText: product.featuredMedia?.preview?.image?.altText ?? null
+      altText: product.featuredMedia?.preview?.image?.altText ?? null,
+      variantIds: [],
     });
   }
   return images;

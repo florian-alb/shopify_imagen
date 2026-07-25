@@ -1,6 +1,8 @@
 import { Lightbox, useLightbox } from "@/components/common/Lightbox";
 import { ImageRetouchDialog } from "@/components/image-retouch-dialog";
 import { EmptyState } from "@/components/page";
+import { api, type Id } from "@/lib/convex";
+import { useQuery } from "convex/react";
 
 import { DeleteImageDialog } from "./DeleteImageDialog";
 import { GenerateImagesDialog } from "./GenerateImagesDialog";
@@ -9,6 +11,7 @@ import { ProductHeader } from "./ProductHeader";
 import { ProductImageHistory } from "./ProductImageHistory";
 import { ProductImagesSection } from "./ProductImagesSection";
 import { PublishImagesDialog } from "./PublishImagesDialog";
+import { VisualGroupsSection } from "./VisualGroupsSection";
 import { useProductDetail } from "../hooks/useProductDetail";
 import { useProductImageDelete } from "../hooks/useProductImageDelete";
 import { useProductImageGeneration } from "../hooks/useProductImageGeneration";
@@ -17,13 +20,17 @@ import { useProductImageRetouch } from "../hooks/useProductImageRetouch";
 import { useProductImageReview } from "../hooks/useProductImageReview";
 import { useProductImagesViewModel } from "../hooks/useProductImagesViewModel";
 import { useShopifyImageReorder } from "../hooks/useShopifyImageReorder";
-import type { ProductDetailPageProps } from "../types";
+import type { ProductDetailPageProps, VisualGroupsData } from "../types";
 
 export function ProductDetailPage({
   productId,
   search,
 }: ProductDetailPageProps) {
+  const typedProductId = productId as Id<"products">;
   const detail = useProductDetail({ productId, search });
+  const visualGroupsData = useQuery(api.visualGroups.getForProduct, {
+    productId: typedProductId,
+  }) as VisualGroupsData | null | undefined;
   const lightbox = useLightbox();
   const viewModel = useProductImagesViewModel({
     product: detail.product,
@@ -39,12 +46,20 @@ export function ProductDetailPage({
   const generation = useProductImageGeneration({
     product: detail.product,
     availableTypes: viewModel.availableTypes,
+    visualGroupsData,
   });
   const review = useProductImageReview();
   const retouch = useProductImageRetouch();
+  const publishableImages =
+    visualGroupsData === undefined
+      ? []
+      : visualGroupsData?.config
+        ? viewModel.readyImages.filter((image) => image.visualGroupId)
+        : viewModel.readyImages;
   const publish = useProductImagePublish({
     product: detail.product,
-    readyImages: viewModel.readyImages,
+    readyImages: publishableImages,
+    publishMode: visualGroupsData?.config?.publishMode ?? null,
   });
   const deletion = useProductImageDelete();
 
@@ -94,7 +109,7 @@ export function ProductDetailPage({
         publishState={viewModel.publishState}
         hasProductJobs={viewModel.hasProductJobs}
         shopifyAdminUrl={viewModel.shopifyAdminUrl}
-        readyImagesCount={viewModel.readyImages.length}
+        readyImagesCount={publishableImages.length}
         syncing={detail.syncing}
         onSync={detail.sync}
         onGenerate={generation.openGenerate}
@@ -103,8 +118,14 @@ export function ProductDetailPage({
 
       <div className="grid gap-4">
         <div className="min-w-0 space-y-4">
+          <VisualGroupsSection
+            productId={typedProductId}
+            storeHandle={detail.shopInfo?.storeHandle}
+            data={visualGroupsData}
+          />
+
           <ProductImagesSection
-            readyImagesCount={viewModel.readyImages.length}
+            readyImagesCount={publishableImages.length}
             shopifyImages={shopifyReorder.shopifyImages}
             shopifyReorder={shopifyReorderProps}
             generatedGalleryImages={viewModel.generatedGalleryImages}
@@ -145,7 +166,10 @@ export function ProductDetailPage({
         onOpenChange={generation.setOpen}
         types={viewModel.availableTypes}
         selectedTypes={generation.selectedTypes}
+        visualGroupsData={visualGroupsData}
+        selectedGroupIds={generation.selectedGroupIds}
         onToggle={generation.toggleType}
+        onToggleGroup={generation.toggleGroup}
         busy={generation.busy}
         onGenerate={() => void generation.generate()}
       />
@@ -165,11 +189,12 @@ export function ProductDetailPage({
       <PublishImagesDialog
         open={publish.open}
         onOpenChange={publish.setOpen}
-        readyImages={viewModel.readyImages}
+        readyImages={publishableImages}
         selectedPushIds={publish.selectedPushIds}
         setSelectedPushIds={publish.setSelectedPushIds}
         replaceExisting={publish.replaceExisting}
         setReplaceExisting={publish.setReplaceExisting}
+        publishMode={visualGroupsData?.config?.publishMode ?? null}
         busy={publish.busy}
         onPush={() => void publish.push()}
       />

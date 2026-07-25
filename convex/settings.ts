@@ -15,6 +15,7 @@ const DEFAULT_SETTINGS: Record<string, unknown> = {
   GENERATION_EXECUTION_MODE: "realtime",
   VIBE_ANALYSIS: "on",
   VIBE_MODEL: "gemini-2.5-flash-lite",
+  VARIANT_CLASSIFIER_MODEL: "gemini-2.5-flash-lite",
   OPENAI_IMAGE_MODEL: "gpt-image-2-2026-04-21",
   OPENAI_IMAGE_SIZE: "1024x1024",
   OPENAI_IMAGE_QUALITY: "medium",

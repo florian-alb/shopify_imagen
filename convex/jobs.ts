@@ -227,6 +227,7 @@ export const get = query({
 export const create = mutation({
   args: {
     productIds: v.array(v.id("products")),
+    visualGroupIds: v.optional(v.array(v.id("visualGroups"))),
     selectedImageTypes: v.array(v.string()),
     forceRegenerate: v.boolean(),
     useVibeAnalysis: v.optional(v.boolean()),
@@ -268,18 +269,58 @@ export const create = mutation({
 
     const { imageProvider, executionMode, imageModel, vibeAnalysisDefault } =
       await currentGenerationEngine(ctx, scope);
-  const vibeAnalysis = args.useVibeAnalysis ?? vibeAnalysisDefault;
-  const prompts = await promptsForScope(ctx, scope);
-  const promptSettings = await promptSettingsForScope(ctx, scope);
-  const modelReferences = sanitizeModelReferences(promptSettings?.modelReferences);
-  const { planned, selectedImageTypes } = buildImageTasks({
-    products,
-    prompts,
-    promptSettings,
-    modelReferences,
-    selectedImageTypes: args.selectedImageTypes,
-    regenerationInstructions: args.regenerationInstructions,
-  });
+    const vibeAnalysis = args.useVibeAnalysis ?? vibeAnalysisDefault;
+    const prompts = await promptsForScope(ctx, scope);
+    const promptSettings = await promptSettingsForScope(ctx, scope);
+    const modelReferences = sanitizeModelReferences(promptSettings?.modelReferences);
+    const groupTargets = (args.visualGroupIds?.length
+      ? await ctx.runQuery(internal.visualGroups.groupTargets, {
+          groupIds: args.visualGroupIds,
+        })
+      : []) as Array<{
+      group: Doc<"visualGroups">;
+      variants: Doc<"visualGroupVariants">[];
+      references: Doc<"visualGroupReferences">[];
+    }>;
+    const selectedProductIds = new Set(products.map((product) => product._id));
+    if (
+      groupTargets.some(
+        (target) => !selectedProductIds.has(target.group.productId),
+      )
+    ) {
+      throw new Error(
+        "Every selected visual group must belong to a selected product.",
+      );
+    }
+    if (
+      args.visualGroupIds?.length &&
+      groupTargets.length !== new Set(args.visualGroupIds).size
+    ) {
+      throw new Error("One or more selected visual groups no longer exist.");
+    }
+    if (groupTargets.some((target) => !target.references.length)) {
+      throw new Error(
+        "Confirm at least one reference image for every selected visual group.",
+      );
+    }
+    const { planned, selectedImageTypes } = buildImageTasks({
+      products,
+      prompts,
+      promptSettings,
+      modelReferences,
+      selectedImageTypes: args.selectedImageTypes,
+      regenerationInstructions: args.regenerationInstructions,
+      visualTargets: groupTargets.map((target) => ({
+        productId: target.group.productId,
+        groupId: target.group._id,
+        key: target.group.key,
+        label: target.group.label,
+        optionValues: target.group.optionValues,
+        referenceUrls: target.references
+          .sort((left, right) => left.position - right.position)
+          .map((reference) => reference.referenceUrl),
+      })),
+    });
     const now = Date.now();
 
     const jobId = await ctx.db.insert("generationJobs", {
@@ -321,6 +362,9 @@ export const create = mutation({
         shopId: shop._id,
         productId: task.product._id,
         jobId,
+        visualGroupId: task.visualGroupId,
+        visualGroupKey: task.visualGroupKey,
+        visualGroupLabel: task.visualGroupLabel,
         imageType: task.imageType,
         imageProvider,
         imageModel,
@@ -829,6 +873,15 @@ export const insertRetouchedImage = internalMutation({
       ...(source.shopId ? { shopId: source.shopId } : {}),
       productId: source.productId,
       jobId: source.jobId,
+      ...(source.visualGroupId !== undefined
+        ? { visualGroupId: source.visualGroupId }
+        : {}),
+      ...(source.visualGroupKey !== undefined
+        ? { visualGroupKey: source.visualGroupKey }
+        : {}),
+      ...(source.visualGroupLabel !== undefined
+        ? { visualGroupLabel: source.visualGroupLabel }
+        : {}),
       imageType: source.imageType,
       ...(source.imageProvider ? { imageProvider: source.imageProvider } : {}),
       ...(source.imageModel !== undefined

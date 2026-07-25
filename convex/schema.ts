@@ -80,6 +80,27 @@ const promptKind = v.union(
   v.literal("lifestyle_model"),
 );
 
+const visualPublishMode = v.union(
+  v.literal("variant_media"),
+  v.literal("separate_products"),
+);
+
+const visualAnalysisStatus = v.union(
+  v.literal("not_started"),
+  v.literal("running"),
+  v.literal("ready"),
+  v.literal("needs_review"),
+  v.literal("failed"),
+);
+
+const visualReferenceSource = v.union(
+  v.literal("shopify"),
+  v.literal("rule"),
+  v.literal("ai"),
+  v.literal("ai_crop"),
+  v.literal("manual"),
+);
+
 const modelReference = v.object({
   storageId: v.id("_storage"),
   fileName: v.optional(v.string()),
@@ -200,6 +221,121 @@ export default defineSchema({
       searchField: "title",
       filterFields: ["shopId", "generationStatus"],
     }),
+  visualGroupConfigs: defineTable({
+    shopId: v.id("shops"),
+    productId: v.id("products"),
+    optionNames: v.array(v.string()),
+    publishMode: visualPublishMode,
+    analysisStatus: visualAnalysisStatus,
+    analysisModel: v.optional(v.union(v.string(), v.null())),
+    analysisCostUsd: v.optional(v.number()),
+    analysisError: v.optional(v.union(v.string(), v.null())),
+    lastAnalyzedAt: v.optional(v.union(v.number(), v.null())),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_product", ["productId"])
+    .index("by_shop_and_product", ["shopId", "productId"]),
+  visualGroups: defineTable({
+    shopId: v.id("shops"),
+    configId: v.id("visualGroupConfigs"),
+    productId: v.id("products"),
+    key: v.string(),
+    label: v.string(),
+    optionValues: v.array(
+      v.object({
+        name: v.string(),
+        value: v.string(),
+      }),
+    ),
+    swatchCss: v.optional(v.union(v.string(), v.null())),
+    position: v.number(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_config", ["configId"])
+    .index("by_config_and_position", ["configId", "position"])
+    .index("by_product", ["productId"])
+    .index("by_shop_and_product", ["shopId", "productId"]),
+  visualGroupVariants: defineTable({
+    shopId: v.id("shops"),
+    configId: v.id("visualGroupConfigs"),
+    groupId: v.id("visualGroups"),
+    productId: v.id("products"),
+    shopifyVariantId: v.string(),
+    title: v.string(),
+    selectedOptions: v.array(
+      v.object({
+        name: v.string(),
+        value: v.string(),
+      }),
+    ),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_config", ["configId"])
+    .index("by_group", ["groupId"])
+    .index("by_product", ["productId"])
+    .index("by_shop_and_shopify_variant_id", [
+      "shopId",
+      "shopifyVariantId",
+    ]),
+  visualGroupReferences: defineTable({
+    shopId: v.id("shops"),
+    configId: v.id("visualGroupConfigs"),
+    productId: v.id("products"),
+    groupId: v.optional(v.union(v.id("visualGroups"), v.null())),
+    mediaId: v.optional(v.union(v.string(), v.null())),
+    sourceUrl: v.string(),
+    referenceUrl: v.string(),
+    altText: v.optional(v.union(v.string(), v.null())),
+    assignmentSource: visualReferenceSource,
+    confidence: v.number(),
+    confirmed: v.boolean(),
+    crop: v.optional(
+      v.object({
+        x: v.number(),
+        y: v.number(),
+        width: v.number(),
+        height: v.number(),
+      }),
+    ),
+    sourceReferenceId: v.optional(v.id("visualGroupReferences")),
+    position: v.number(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_config", ["configId"])
+    .index("by_group", ["groupId"])
+    .index("by_product", ["productId"])
+    .index("by_product_and_media_id", ["productId", "mediaId"]),
+  visualProductFamilies: defineTable({
+    shopId: v.id("shops"),
+    sourceProductId: v.id("products"),
+    sourceShopifyProductId: v.string(),
+    configId: v.id("visualGroupConfigs"),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_source_product", ["sourceProductId"])
+    .index("by_shop_and_source_product", ["shopId", "sourceProductId"]),
+  visualProductFamilyMembers: defineTable({
+    shopId: v.id("shops"),
+    familyId: v.id("visualProductFamilies"),
+    groupId: v.id("visualGroups"),
+    shopifyProductId: v.string(),
+    title: v.string(),
+    handle: v.optional(v.union(v.string(), v.null())),
+    swatchCss: v.optional(v.union(v.string(), v.null())),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_family", ["familyId"])
+    .index("by_group", ["groupId"])
+    .index("by_shop_and_shopify_product_id", [
+      "shopId",
+      "shopifyProductId",
+    ]),
   promptTemplates: defineTable({
   shopId: v.optional(v.id("shops")),
   imageType: v.string(),
@@ -250,6 +386,11 @@ export default defineSchema({
     batchInputFileName: v.optional(v.union(v.string(), v.null())),
     batchIngestionStartedAt: v.optional(v.union(v.number(), v.null())),
     batchResultOffset: v.optional(v.number()),
+    // Legacy batch timing fields retained for existing jobs.
+    batchSubmitStartedAt: v.optional(v.number()),
+    allBatchesSubmittedAt: v.optional(v.number()),
+    firstResultReadyAt: v.optional(v.number()),
+    firstImageStoredAt: v.optional(v.number()),
     vibeAnalysis: v.optional(v.boolean()),
     imageProvider: v.optional(
       v.union(v.literal("openai"), v.literal("gemini")),
@@ -270,6 +411,7 @@ export default defineSchema({
     reviewApproved: v.optional(v.number()),
     reviewRejected: v.optional(v.number()),
     error: v.optional(v.union(v.string(), v.null())),
+    isHidden: v.optional(v.boolean()),
     createdByUserId: v.optional(v.id("users")),
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -284,6 +426,9 @@ export default defineSchema({
     shopId: v.optional(v.id("shops")),
     productId: v.id("products"),
     jobId: v.id("generationJobs"),
+    visualGroupId: v.optional(v.union(v.id("visualGroups"), v.null())),
+    visualGroupKey: v.optional(v.union(v.string(), v.null())),
+    visualGroupLabel: v.optional(v.union(v.string(), v.null())),
     imageType: v.string(),
     imageProvider: v.optional(
       v.union(v.literal("openai"), v.literal("gemini")),
@@ -312,6 +457,16 @@ export default defineSchema({
       v.union(v.string(), v.null()),
     ),
     backgroundRemovalInputExtension: v.optional(v.union(v.string(), v.null())),
+    // Legacy batch/post-processing fields are retained so historical image
+    // rows remain valid while the current generation pipeline no longer writes
+    // them.
+    batchSegmentId: v.optional(v.union(v.string(), v.null())),
+    postProcessingInputUrl: v.optional(v.union(v.string(), v.null())),
+    postProcessingInputContentType: v.optional(
+      v.union(v.string(), v.null()),
+    ),
+    postProcessingInputExtension: v.optional(v.union(v.string(), v.null())),
+    postProcessingStartedAt: v.optional(v.union(v.number(), v.null())),
     transparentCutoutUrl: v.optional(v.union(v.string(), v.null())),
     providerBatchId: v.optional(v.union(v.string(), v.null())),
     providerRequestId: v.optional(v.union(v.string(), v.null())),
@@ -328,6 +483,7 @@ export default defineSchema({
     reviewedAt: v.optional(v.number()),
     reviewedByUserId: v.optional(v.id("users")),
     shopifyMediaId: v.optional(v.union(v.string(), v.null())),
+    publishedShopifyProductId: v.optional(v.union(v.string(), v.null())),
     error: v.optional(v.union(v.string(), v.null())),
     inputTokens: v.optional(v.number()),
     outputTokens: v.optional(v.number()),

@@ -140,7 +140,7 @@ export function ProductHeader({
           />
         </div>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex w-full flex-wrap items-center gap-2 xl:w-auto xl:justify-end">
         {hasProductJobs ? (
           <Button size="lg" variant="outline" asChild>
             <Link to="/jobs" search={{ productId }}>

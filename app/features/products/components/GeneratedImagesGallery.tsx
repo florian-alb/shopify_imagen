@@ -42,8 +42,12 @@ export function GeneratedImagesGallery({
       items={generatedGalleryImages.map((image) => ({
         id: image._id,
         url: image.storageUrl!,
-        label: image.imageType,
-        caption: image.imageType,
+        label: [image.visualGroupLabel, image.imageType]
+          .filter(Boolean)
+          .join(" · "),
+        caption: [image.visualGroupLabel, image.imageType]
+          .filter(Boolean)
+          .join(" · "),
         retouched: Boolean(image.retouchSourceImageId),
         reviewStatus: getReviewStatus(image),
         statusLabel: generatedImageStateLabel(image),
@@ -57,7 +61,9 @@ export function GeneratedImagesGallery({
       }))}
       pendingItems={generatingGalleryImages.map((image) => ({
         id: image._id,
-        caption: image.imageType,
+        caption: [image.visualGroupLabel, image.imageType]
+          .filter(Boolean)
+          .join(" · "),
         statusLabel: "Generation en cours",
       }))}
       emptyText="Aucune image generee."

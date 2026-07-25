@@ -28,3 +28,25 @@ export type ShopifyGalleryImage = {
 export type ShopifyCollection = {
   title?: string | null;
 };
+
+export type VisualGroupWithRows = Doc<"visualGroups"> & {
+  variants: Doc<"visualGroupVariants">[];
+  references: Doc<"visualGroupReferences">[];
+  ready: boolean;
+};
+
+export type VisualGroupsData = {
+  config: Doc<"visualGroupConfigs"> | null;
+  options: Array<{
+    name: string;
+    values?: string[] | null;
+  }>;
+  suggestedOptionNames: string[];
+  groups: VisualGroupWithRows[];
+  unassignedReferences: Doc<"visualGroupReferences">[];
+  family: {
+    family: Doc<"visualProductFamilies">;
+    members: Doc<"visualProductFamilyMembers">[];
+  } | null;
+  publicationLocked: boolean;
+};

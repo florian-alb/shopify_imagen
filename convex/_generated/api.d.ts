@@ -64,6 +64,9 @@ import type * as shopify_productMapping from "../shopify/productMapping.js";
 import type * as shops from "../shops.js";
 import type * as userAccess from "../userAccess.js";
 import type * as users from "../users.js";
+import type * as visualGroupAnalysis from "../visualGroupAnalysis.js";
+import type * as visualGroups from "../visualGroups.js";
+import type * as visualGroups_model from "../visualGroups/model.js";
 
 import type {
   ApiFromModules,
@@ -128,6 +131,9 @@ declare const fullApi: ApiFromModules<{
   shops: typeof shops;
   userAccess: typeof userAccess;
   users: typeof users;
+  visualGroupAnalysis: typeof visualGroupAnalysis;
+  visualGroups: typeof visualGroups;
+  "visualGroups/model": typeof visualGroups_model;
 }>;
 
 /**
