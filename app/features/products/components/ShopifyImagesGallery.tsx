@@ -6,17 +6,19 @@ import type { ShopifyGalleryImage } from "../types";
 
 export function ShopifyImagesGallery({
   shopifyImages,
+  description = "Glissez pour changer l'ordre Shopify. La premiere image sert de reference produit.",
   onZoom,
   reorder,
 }: {
   shopifyImages: ShopifyGalleryImage[];
+  description?: string;
   onZoom: Parameters<typeof Gallery>[0]["onZoom"];
   reorder?: GalleryReorder;
 }) {
   return (
     <Gallery
       title="Images Shopify"
-      description="Glissez pour changer l'ordre Shopify. La premiere image sert de reference produit."
+      description={description}
       items={shopifyImages.map((image) => ({
         id: shopifyMediaId(image),
         url: image.displayUrl ?? image.url,

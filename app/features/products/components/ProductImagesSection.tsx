@@ -8,6 +8,7 @@ import type { ShopifyGalleryImage } from "../types";
 export function ProductImagesSection({
   readyImagesCount,
   shopifyImages,
+  shopifyDescription,
   shopifyReorder,
   generatedGalleryImages,
   generatingGalleryImages,
@@ -22,6 +23,7 @@ export function ProductImagesSection({
 }: {
   readyImagesCount: number;
   shopifyImages: ShopifyGalleryImage[];
+  shopifyDescription?: string;
   shopifyReorder?: GalleryReorder;
   generatedGalleryImages: Doc<"generatedImages">[];
   generatingGalleryImages: Doc<"generatedImages">[];
@@ -53,6 +55,7 @@ export function ProductImagesSection({
       <section className="grid gap-4 lg:grid-cols-2">
         <ShopifyImagesGallery
           shopifyImages={shopifyImages}
+          description={shopifyDescription}
           onZoom={onZoom}
           reorder={shopifyReorder}
         />

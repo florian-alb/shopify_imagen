@@ -32,6 +32,27 @@ export type ShopifyImageLike = {
   variantIds?: string[] | null;
 };
 
+export type PositionedVisualReference = {
+  position: number;
+  groupPosition?: number;
+};
+
+export function visualReferencePosition(
+  reference: PositionedVisualReference,
+) {
+  return reference.groupPosition ?? reference.position;
+}
+
+export function nextVisualReferencePosition(
+  references: PositionedVisualReference[],
+) {
+  return references.reduce(
+    (next, reference) =>
+      Math.max(next, visualReferencePosition(reference) + 1),
+    0,
+  );
+}
+
 const colorOptionNames = new Set([
   "color",
   "colour",
@@ -229,4 +250,3 @@ export function inferReferenceAssignment(args: {
     confirmed: false,
   };
 }
-

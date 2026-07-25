@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 
+import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import {
   internalMutation,
@@ -18,15 +19,12 @@ import {
   buildVisualGroupDrafts,
   defaultVisualOptionNames,
   inferReferenceAssignment,
+  nextVisualReferencePosition,
+  visualReferencePosition,
   type ShopifyImageLike,
   type ShopifyOptionLike,
   type ShopifyVariantLike,
 } from "./visualGroups/model";
-
-const publishModeValidator = v.union(
-  v.literal("variant_media"),
-  v.literal("separate_products"),
-);
 
 const assignmentValidator = v.object({
   sourceReferenceId: v.id("visualGroupReferences"),
@@ -53,6 +51,10 @@ async function configForProduct(
     .query("visualGroupConfigs")
     .withIndex("by_product", (q: any) => q.eq("productId", productId))
     .unique();
+}
+
+function singleProductConfig(config: Doc<"visualGroupConfigs">) {
+  return { ...config, publishMode: "variant_media" as const };
 }
 
 async function rowsForConfig(
@@ -131,24 +133,18 @@ export const getForProduct = query({
         groups: [],
         unassignedReferences: [],
         family: null,
-        publicationLocked: false,
       };
     }
 
-    const [{ groups, variants, references }, family, generatedImages] =
-      await Promise.all([
-        rowsForConfig(ctx, config._id),
-        ctx.db
-          .query("visualProductFamilies")
-          .withIndex("by_source_product", (q) =>
-            q.eq("sourceProductId", product._id),
-          )
-          .unique(),
-        ctx.db
-          .query("generatedImages")
-          .withIndex("by_product", (q) => q.eq("productId", product._id))
-          .take(MAX_CONFIG_ROWS),
-      ]);
+    const [{ groups, variants, references }, family] = await Promise.all([
+      rowsForConfig(ctx, config._id),
+      ctx.db
+        .query("visualProductFamilies")
+        .withIndex("by_source_product", (q) =>
+          q.eq("sourceProductId", product._id),
+        )
+        .unique(),
+    ]);
     const familyMembers = family
       ? await ctx.db
           .query("visualProductFamilyMembers")
@@ -160,7 +156,7 @@ export const getForProduct = query({
     );
 
     return {
-      config,
+      config: singleProductConfig(config),
       options: mapped.options,
       suggestedOptionNames: defaultVisualOptionNames(mapped.options),
       groups: sortedGroups.map((group) => {
@@ -169,7 +165,10 @@ export const getForProduct = query({
         );
         const groupReferences = references
           .filter((reference) => reference.groupId === group._id)
-          .sort((left, right) => left.position - right.position);
+          .sort(
+            (left, right) =>
+              visualReferencePosition(left) - visualReferencePosition(right),
+          );
         return {
           ...group,
           variants: groupVariants,
@@ -181,11 +180,6 @@ export const getForProduct = query({
         .filter((reference) => !reference.groupId)
         .sort((left, right) => left.position - right.position),
       family: family ? { family, members: familyMembers } : null,
-      publicationLocked:
-        Boolean(family) ||
-        generatedImages.some(
-          (image) => image.visualGroupId && image.status === "uploaded",
-        ),
     };
   },
 });
@@ -194,7 +188,6 @@ export const configure = mutation({
   args: {
     productId: v.id("products"),
     optionNames: v.array(v.string()),
-    publishMode: publishModeValidator,
   },
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
@@ -212,9 +205,7 @@ export const configure = mutation({
       optionNames: args.optionNames,
     });
     if (!drafts.length) {
-      throw new Error(
-        "No Shopify variants match the selected visual options.",
-      );
+      throw new Error("No Shopify variants match the selected visual options.");
     }
 
     const family = await ctx.db
@@ -245,7 +236,7 @@ export const configure = mutation({
       await clearConfigRows(ctx, existing._id);
       await ctx.db.patch(existing._id, {
         optionNames: args.optionNames,
-        publishMode: args.publishMode,
+        publishMode: "variant_media",
         analysisStatus: "not_started",
         analysisModel: null,
         analysisCostUsd: 0,
@@ -259,7 +250,7 @@ export const configure = mutation({
         shopId: shop._id,
         productId: product._id,
         optionNames: args.optionNames,
-        publishMode: args.publishMode,
+        publishMode: "variant_media",
         analysisStatus: "not_started",
         analysisModel: null,
         analysisCostUsd: 0,
@@ -312,9 +303,8 @@ export const configure = mutation({
         groups: drafts,
       });
       const mediaId = image.mediaId ?? image.id ?? null;
-      const sourceUrl = (
-        image as ShopifyImageLike & { url?: string | null }
-      ).url;
+      const sourceUrl = (image as ShopifyImageLike & { url?: string | null })
+        .url;
       if (!sourceUrl) continue;
       await ctx.db.insert("visualGroupReferences", {
         shopId: shop._id,
@@ -336,53 +326,16 @@ export const configure = mutation({
       });
     }
 
-    return configId;
-  },
-});
+    await ctx.scheduler.runAfter(
+      0,
+      internal.visualGroupAnalysis.analyzeConfiguredProduct,
+      {
+        productId: product._id,
+        userId,
+      },
+    );
 
-export const setPublishMode = mutation({
-  args: {
-    productId: v.id("products"),
-    publishMode: publishModeValidator,
-  },
-  handler: async (ctx, args) => {
-    const userId = await requireUserId(ctx);
-    const scope = await getActiveShopScope(ctx, userId);
-    const product = await ctx.db.get(args.productId);
-    if (!product || !shopMatchesScope(product, scope)) {
-      throw new Error("Product not found.");
-    }
-    const config = await configForProduct(ctx, product._id);
-    if (!config) throw new Error("Configure visual groups first.");
-    const family = await ctx.db
-      .query("visualProductFamilies")
-      .withIndex("by_source_product", (q) =>
-        q.eq("sourceProductId", product._id),
-      )
-      .unique();
-    if (family) {
-      throw new Error(
-        "The publication mode is locked after sibling products are created.",
-      );
-    }
-    const generatedImages = await ctx.db
-      .query("generatedImages")
-      .withIndex("by_product", (q) => q.eq("productId", product._id))
-      .take(MAX_CONFIG_ROWS);
-    if (
-      generatedImages.some(
-        (image) => image.visualGroupId && image.status === "uploaded",
-      )
-    ) {
-      throw new Error(
-        "The publication mode is locked after grouped images are published.",
-      );
-    }
-    await ctx.db.patch(config._id, {
-      publishMode: args.publishMode,
-      updatedAt: Date.now(),
-    });
-    return config._id;
+    return configId;
   },
 });
 
@@ -444,6 +397,7 @@ async function assignReferenceToGroup(
       (reference.mediaId && reference.mediaId === source.mediaId),
   );
   const now = Date.now();
+  const groupPosition = nextVisualReferencePosition(current);
 
   if (existing) {
     await ctx.db.patch(existing._id, {
@@ -463,6 +417,7 @@ async function assignReferenceToGroup(
       confirmed: true,
       referenceUrl: source.sourceUrl,
       crop: undefined,
+      groupPosition,
       updatedAt: now,
     });
     return source._id;
@@ -482,6 +437,7 @@ async function assignReferenceToGroup(
     confirmed: true,
     sourceReferenceId: source.sourceReferenceId ?? source._id,
     position: source.position,
+    groupPosition,
     createdAt: now,
     updatedAt: now,
   });
@@ -502,6 +458,52 @@ export const setPrimaryReference = mutation({
     mediaId: v.string(),
   },
   handler: assignReferenceToGroup,
+});
+
+export const reorderReferences = mutation({
+  args: {
+    groupId: v.id("visualGroups"),
+    referenceIds: v.array(v.id("visualGroupReferences")),
+  },
+  handler: async (ctx, args) => {
+    const userId = await requireUserId(ctx);
+    const scope = await getActiveShopScope(ctx, userId);
+    const group = await ctx.db.get(args.groupId);
+    if (!group || !shopMatchesScope(group, scope)) {
+      throw new Error("Visual group not found.");
+    }
+    if (args.referenceIds.length > 50) {
+      throw new Error("A visual group cannot contain more than 50 references.");
+    }
+
+    const references = await ctx.db
+      .query("visualGroupReferences")
+      .withIndex("by_group", (q) => q.eq("groupId", group._id))
+      .take(51);
+    const uniqueIds = new Set(args.referenceIds);
+    const referenceById = new Map(
+      references.map((reference) => [reference._id, reference]),
+    );
+    if (
+      references.length > 50 ||
+      uniqueIds.size !== args.referenceIds.length ||
+      references.length !== args.referenceIds.length ||
+      args.referenceIds.some((referenceId) => !referenceById.has(referenceId))
+    ) {
+      throw new Error("Reference order is out of date. Please try again.");
+    }
+
+    const now = Date.now();
+    await Promise.all(
+      args.referenceIds.map((referenceId, groupPosition) =>
+        ctx.db.patch(referenceId, {
+          groupPosition,
+          updatedAt: now,
+        }),
+      ),
+    );
+    return args.referenceIds;
+  },
 });
 
 export const confirmReference = mutation({
@@ -586,6 +588,7 @@ export const removeReference = mutation({
       confidence: 0,
       referenceUrl: reference.sourceUrl,
       crop: undefined,
+      groupPosition: undefined,
       updatedAt: Date.now(),
     });
     return reference._id;
@@ -604,7 +607,7 @@ export const analysisContext = internalQuery({
     const config = await configForProduct(ctx, product._id);
     if (!config) return null;
     const rows = await rowsForConfig(ctx, config._id);
-    return { product, config, ...rows };
+    return { product, config: singleProductConfig(config), ...rows };
   },
 });
 
@@ -644,33 +647,51 @@ export const applyAnalysis = internalMutation({
     const config = await ctx.db.get(args.configId);
     if (!config) throw new Error("Visual configuration not found.");
     const { groups, references } = await rowsForConfig(ctx, config._id);
+    const staleSuggestions = references.filter(
+      (reference) =>
+        reference.sourceReferenceId &&
+        !reference.confirmed &&
+        (reference.assignmentSource === "ai" ||
+          reference.assignmentSource === "ai_crop"),
+    );
     await Promise.all(
-      references
-        .filter(
-          (reference) =>
-            reference.sourceReferenceId &&
-            !reference.confirmed &&
-            (reference.assignmentSource === "ai" ||
-              reference.assignmentSource === "ai_crop"),
-        )
-        .map((reference) => ctx.db.delete(reference._id)),
+      staleSuggestions.map((reference) => ctx.db.delete(reference._id)),
     );
     const groupByKey = new Map(groups.map((group) => [group.key, group]));
     const referenceById = new Map(
       references.map((reference) => [reference._id, reference]),
     );
+    const nextPositionByGroupId = new Map(
+      groups.map((group) => [
+        group._id,
+        nextVisualReferencePosition(
+          references.filter(
+            (reference) =>
+              reference.groupId === group._id && reference.confirmed,
+          ),
+        ),
+      ]),
+    );
     const seen = new Map<Id<"visualGroupReferences">, number>();
     let suggested = 0;
+    let unmatched = 0;
 
     for (const assignment of args.assignments) {
       const source = referenceById.get(assignment.sourceReferenceId);
-      if (!source || source.configId !== config._id || source.confirmed) continue;
+      if (!source || source.configId !== config._id || source.confirmed)
+        continue;
       const group = assignment.groupKey
         ? groupByKey.get(assignment.groupKey)
         : null;
       const occurrence = seen.get(source._id) ?? 0;
       seen.set(source._id, occurrence + 1);
       const now = Date.now();
+      const groupPosition = group
+        ? (nextPositionByGroupId.get(group._id) ?? 0)
+        : undefined;
+      if (group && groupPosition !== undefined) {
+        nextPositionByGroupId.set(group._id, groupPosition + 1);
+      }
 
       if (occurrence === 0) {
         await ctx.db.patch(source._id, {
@@ -679,7 +700,10 @@ export const applyAnalysis = internalMutation({
           confidence: assignment.confidence,
           confirmed: false,
           referenceUrl: assignment.referenceUrl,
-          ...(assignment.crop ? { crop: assignment.crop } : { crop: undefined }),
+          ...(assignment.crop
+            ? { crop: assignment.crop }
+            : { crop: undefined }),
+          groupPosition,
           updatedAt: now,
         });
       } else if (group) {
@@ -698,22 +722,24 @@ export const applyAnalysis = internalMutation({
           ...(assignment.crop ? { crop: assignment.crop } : {}),
           sourceReferenceId: source._id,
           position: source.position,
+          groupPosition,
           createdAt: now,
           updatedAt: now,
         });
       }
       if (group) suggested += 1;
+      else if (occurrence === 0) unmatched += 1;
     }
 
     await ctx.db.patch(config._id, {
-      analysisStatus: suggested ? "needs_review" : "ready",
+      analysisStatus: suggested || unmatched ? "needs_review" : "ready",
       analysisModel: args.model,
       analysisCostUsd: args.costUsd,
       analysisError: null,
       lastAnalyzedAt: Date.now(),
       updatedAt: Date.now(),
     });
-    return { suggested };
+    return { suggested, unmatched };
   },
 });
 

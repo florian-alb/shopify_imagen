@@ -4,6 +4,8 @@ import {
   buildVisualGroupDrafts,
   defaultVisualOptionNames,
   inferReferenceAssignment,
+  nextVisualReferencePosition,
+  visualReferencePosition,
 } from "./model";
 
 const options = [
@@ -129,5 +131,18 @@ describe("visual group model", () => {
       confidence: 0.94,
       confirmed: true,
     });
+  });
+
+  it("keeps a group-specific reference order separate from Shopify order", () => {
+    expect(visualReferencePosition({ position: 8 })).toBe(8);
+    expect(
+      visualReferencePosition({ position: 8, groupPosition: 1 }),
+    ).toBe(1);
+    expect(
+      nextVisualReferencePosition([
+        { position: 8, groupPosition: 1 },
+        { position: 2, groupPosition: 0 },
+      ]),
+    ).toBe(2);
   });
 });

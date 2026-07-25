@@ -370,6 +370,7 @@ export default defineSchema({
     ),
     sourceReferenceId: v.optional(v.id("visualGroupReferences")),
     position: v.number(),
+    groupPosition: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })

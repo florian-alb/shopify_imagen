@@ -20,6 +20,7 @@ import {
 } from "./jobs/lifecycle";
 import { currentGenerationEngine } from "./jobs/engine";
 import { buildImageTasks } from "./jobs/planning";
+import { visualReferencePosition } from "./visualGroups/model";
 import {
   getStoredReviewState,
   jobNeedsImageCostFallback,
@@ -372,7 +373,10 @@ export const create = mutation({
         label: target.group.label,
         optionValues: target.group.optionValues,
         referenceUrls: target.references
-          .sort((left, right) => left.position - right.position)
+          .sort(
+            (left, right) =>
+              visualReferencePosition(left) - visualReferencePosition(right),
+          )
           .map((reference) => reference.referenceUrl),
       })),
     });
