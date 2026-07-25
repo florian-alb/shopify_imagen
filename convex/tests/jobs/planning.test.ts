@@ -94,4 +94,36 @@ describe("buildImageTasks", () => {
       "https://example.com/primary.jpg",
     ]);
   });
+
+  test("keeps the merchant-defined visual reference order", () => {
+    const template = promptTemplate({ referenceImageCount: 2 });
+    const { planned } = buildImageTasks({
+      products: [product()],
+      prompts: [template],
+      promptSettings: null,
+      selectedImageTypes: [template.imageType],
+      visualTargets: [
+        {
+          productId: "product-1" as Id<"products">,
+          groupId: "group-red" as Id<"visualGroups">,
+          key: "Couleur=Rouge",
+          label: "Rouge",
+          optionValues: [{ name: "Couleur", value: "Rouge" }],
+          referenceUrls: [
+            "https://example.com/selected-first.jpg",
+            "https://example.com/selected-second.jpg",
+            "https://example.com/shopify-first.jpg",
+          ],
+        },
+      ],
+    });
+
+    expect(planned[0]?.sourceImageUrls).toEqual([
+      "https://example.com/selected-first.jpg",
+      "https://example.com/selected-second.jpg",
+    ]);
+    expect(planned[0]?.sourceImageUrl).toBe(
+      "https://example.com/selected-first.jpg",
+    );
+  });
 });

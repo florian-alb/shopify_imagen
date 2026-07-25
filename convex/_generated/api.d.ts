@@ -71,6 +71,7 @@ import type * as shops from "../shops.js";
 import type * as userAccess from "../userAccess.js";
 import type * as users from "../users.js";
 import type * as visualGroupAnalysis from "../visualGroupAnalysis.js";
+import type * as visualGroupAnalysis_model from "../visualGroupAnalysis/model.js";
 import type * as visualGroups from "../visualGroups.js";
 import type * as visualGroups_model from "../visualGroups/model.js";
 
@@ -144,6 +145,7 @@ declare const fullApi: ApiFromModules<{
   userAccess: typeof userAccess;
   users: typeof users;
   visualGroupAnalysis: typeof visualGroupAnalysis;
+  "visualGroupAnalysis/model": typeof visualGroupAnalysis_model;
   visualGroups: typeof visualGroups;
   "visualGroups/model": typeof visualGroups_model;
 }>;

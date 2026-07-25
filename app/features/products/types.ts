@@ -97,5 +97,4 @@ export type VisualGroupsData = {
     family: Doc<"visualProductFamilies">;
     members: Doc<"visualProductFamilyMembers">[];
   } | null;
-  publicationLocked: boolean;
 };
