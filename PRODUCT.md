@@ -7,14 +7,14 @@ product
 web
 
 ## Users
-The primary users are Shopify store creators and Shopify merchants who need to produce, review, organize, and publish product imagery at catalogue scale. They may work across many product categories, including curtains, shoes, clothing, accessories, home goods, and other merchant-specific collections.
+The primary users are Shopify store creators and Shopify merchants who need to produce, review, organize, and publish product imagery at catalogue scale. They may work across many product categories, including curtains, shoes, clothing, accessories, home goods, and other merchant-specific collections. Their catalogues may contain visually distinct variants such as colors, materials, sizes, or merchant-defined options.
 
 They use the application in an operational context: selecting products, filtering catalogue subsets, launching bulk image generation or transformation jobs, reviewing generated assets, and publishing only the images they approve.
 
 ## Product Purpose
-This application is a Shopify catalogue image studio. It helps merchants generate accurate, creative product images from Shopify product data, process them in bulk, review results quickly, and publish optimized assets back to Shopify with explicit human control.
+This application is a Shopify catalogue image studio. It helps merchants generate accurate, creative product images from Shopify product data, process them in bulk, review results quickly, and publish optimized assets back to Shopify with explicit human control. Every generated result must remain attached to the correct product, visual group, and Shopify variants without mixing colors, materials, sizes, or custom options.
 
-Success means users can move from catalogue selection to approved images with fewer clicks, less manual repetition, fast bulk actions, precise sorting and filtering, and enough creative control to adapt generated images to different product categories.
+Success means users can move from catalogue selection to approved images with fewer clicks, less manual repetition, predictable generation costs, fast bulk actions, precise sorting and filtering, and enough creative control to adapt generated images to different product categories.
 
 ## Positioning
 A fast, expert, creative Shopify image studio for turning product catalogues into reviewable, publish-ready image sets at bulk scale.
@@ -33,6 +33,8 @@ Avoid workflows that require too many clicks, unclear sorting, slow bulk operati
 - Optimize for the shortest safe path from product selection to generated images.
 - Make bulk workflows first-class, not an afterthought.
 - Keep sorting, filtering, review status, and job progress simple to scan.
+- Show generation scope and cost before starting variant-aware work.
+- Use AI only when Shopify data and deterministic matching are insufficient.
 - Preserve human control before publishing anything to Shopify.
 - Let the product images and operational states carry the interface, not decoration.
 

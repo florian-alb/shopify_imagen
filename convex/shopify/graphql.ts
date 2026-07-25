@@ -13,7 +13,14 @@ export const PRODUCTS_QUERY = `#graphql
         collections(first: 50) { nodes { id title handle } }
         featuredMedia { preview { image { url altText } } }
         options { name values }
-        variants(first: 100) { nodes { id title selectedOptions { name value } } }
+        variants(first: 100) {
+          nodes {
+            id
+            title
+            selectedOptions { name value }
+            media(first: 20) { nodes { id } }
+          }
+        }
         metafields(first: 50) { nodes { id namespace key type value } }
         media(first: 100) {
           nodes {
@@ -42,7 +49,14 @@ export const PRODUCT_QUERY = `#graphql
       collections(first: 50) { nodes { id title handle } }
       featuredMedia { preview { image { url altText } } }
       options { name values }
-      variants(first: 100) { nodes { id title selectedOptions { name value } } }
+      variants(first: 100) {
+        nodes {
+          id
+          title
+          selectedOptions { name value }
+          media(first: 20) { nodes { id } }
+        }
+      }
       metafields(first: 50) { nodes { id namespace key type value } }
       media(first: 100) {
         nodes {
@@ -66,6 +80,49 @@ export const PRODUCT_UPDATE_MEDIA_MUTATION = `#graphql
   }
 `;
 
+export const PRODUCT_VARIANT_APPEND_MEDIA_MUTATION = `#graphql
+  mutation ProductVariantAppendGeneratedMedia(
+    $productId: ID!
+    $variantMedia: [ProductVariantAppendMediaInput!]!
+  ) {
+    productVariantAppendMedia(
+      productId: $productId
+      variantMedia: $variantMedia
+    ) {
+      productVariants {
+        id
+        media(first: 20) { nodes { id } }
+      }
+      userErrors { field message }
+    }
+  }
+`;
+
+export const PRODUCT_VARIANT_DETACH_MEDIA_MUTATION = `#graphql
+  mutation ProductVariantDetachGeneratedMedia(
+    $productId: ID!
+    $variantMedia: [ProductVariantDetachMediaInput!]!
+  ) {
+    productVariantDetachMedia(
+      productId: $productId
+      variantMedia: $variantMedia
+    ) {
+      productVariants {
+        id
+        media(first: 20) {
+          nodes {
+            id
+          }
+        }
+      }
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+`;
+
 export const SHOPIFY_AUTHORIZATION_STATUS_QUERY = `#graphql
   query ShopifyAuthorizationStatus {
     currentAppInstallation {
@@ -73,6 +130,39 @@ export const SHOPIFY_AUTHORIZATION_STATUS_QUERY = `#graphql
         requestedAccessScopes { handle }
       }
       accessScopes { handle }
+    }
+  }
+`;
+
+export const PRODUCT_DUPLICATE_MUTATION = `#graphql
+  mutation DuplicateProductForVisualGroup(
+    $productId: ID!
+    $newTitle: String!
+    $newStatus: ProductStatus
+    $includeImages: Boolean
+    $synchronous: Boolean
+  ) {
+    productDuplicate(
+      productId: $productId
+      newTitle: $newTitle
+      newStatus: $newStatus
+      includeImages: $includeImages
+      synchronous: $synchronous
+    ) {
+      newProduct {
+        id
+        title
+        handle
+      variants(first: 250) {
+        nodes {
+          id
+          title
+          selectedOptions { name value }
+          media(first: 20) { nodes { id } }
+        }
+      }
+      }
+      userErrors { field message }
     }
   }
 `;
@@ -94,6 +184,21 @@ export const PRODUCT_MEDIA_FILE_STATUS_QUERY = `#graphql
           }
         }
       }
+    }
+  }
+`;
+
+export const PRODUCT_VARIANTS_BULK_DELETE_MUTATION = `#graphql
+  mutation DeleteUnmatchedVisualVariants(
+    $productId: ID!
+    $variantsIds: [ID!]!
+  ) {
+    productVariantsBulkDelete(
+      productId: $productId
+      variantsIds: $variantsIds
+    ) {
+      product { id }
+      userErrors { field message }
     }
   }
 `;

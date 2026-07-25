@@ -17,6 +17,9 @@ import type {
 
 export type PlannedImageTask = {
   product: Doc<"products">;
+  visualGroupId: Id<"visualGroups"> | null;
+  visualGroupKey: string | null;
+  visualGroupLabel: string | null;
   imageType: string;
   promptUsed: string;
   promptKind: PromptKind;
@@ -31,6 +34,15 @@ export type PlannedImageTask = {
   background: BackgroundConfig;
 };
 
+export type VisualGroupTaskTarget = {
+  productId: Id<"products">;
+  groupId: Id<"visualGroups">;
+  key: string;
+  label: string;
+  optionValues: Array<{ name: string; value: string }>;
+  referenceUrls: string[];
+};
+
 export function buildImageTasks(args: {
   products: Doc<"products">[];
   prompts: Doc<"promptTemplates">[];
@@ -38,6 +50,7 @@ export function buildImageTasks(args: {
   modelReferences?: Partial<Record<ModelReferenceKey, StoredModelReference>>;
   selectedImageTypes: string[];
   regenerationInstructions?: string;
+  visualTargets?: VisualGroupTaskTarget[];
 }) {
   const masterPrompt = args.promptSettings?.masterPrompt ?? "";
   const promptByType = new Map(
@@ -55,52 +68,100 @@ export function buildImageTasks(args: {
   const planned: PlannedImageTask[] = [];
   for (const product of args.products) {
     const visualContext = inferProductVisualContext(product);
-    for (const imageType of selectedImageTypes) {
-      const template = promptByType.get(imageType);
-      if (!template) {
-        throw new Error(`No active prompt template found for ${imageType}.`);
+    const productVisualTargets = args.visualTargets?.filter(
+      (target) => target.productId === product._id,
+    );
+    const targets = productVisualTargets?.length
+      ? productVisualTargets
+      : [
+          {
+            productId: product._id,
+            groupId: null,
+            key: null,
+            label: null,
+            optionValues: [],
+            referenceUrls: referenceImageUrls(product),
+          },
+        ];
+
+    for (const target of targets) {
+      for (const imageType of selectedImageTypes) {
+        const template = promptByType.get(imageType);
+        if (!template) {
+          throw new Error(`No active prompt template found for ${imageType}.`);
+        }
+        const runtime = resolvePromptRuntime(template);
+        const modelReference = resolveModelReference(
+          args.modelReferences,
+          visualContext,
+          runtime.promptKind,
+        );
+        const compiledPrompt = compilePrompt(masterPrompt, template.content);
+        const promptUsed = appendRegenerationInstructions(
+          appendVisualGroupContract(
+            renderPrompt(compiledPrompt, {
+              PRODUCT_TITLE: product.title,
+              PRODUCT_HANDLE: product.handle,
+              IMAGE_TYPE: imageType,
+              VISUAL_GROUP_LABEL: target.label ?? "",
+              VISUAL_GROUP_VALUES: target.optionValues
+                .map((option) => `${option.name}: ${option.value}`)
+                .join(", "),
+              ...visualContextPromptVariables(
+                visualContext,
+                runtime.promptKind,
+              ),
+            }),
+            target,
+          ),
+          args.regenerationInstructions,
+        );
+        const references = target.referenceUrls.slice(
+          0,
+          runtime.referenceImageCount,
+        );
+        planned.push({
+          product,
+          visualGroupId: target.groupId,
+          visualGroupKey: target.key,
+          visualGroupLabel: target.label,
+          imageType,
+          promptUsed,
+          promptKind: runtime.promptKind,
+          modelReferenceKey: modelReference?.key ?? null,
+          modelReferenceStorageId: modelReference?.storageId ?? null,
+          modelReferenceUrl: null,
+          useVibeAnalysis: runtime.useVibeAnalysis,
+          referenceImageCount: runtime.referenceImageCount,
+          sourceImageUrls: references,
+          sourceImageUrl: references[0] ?? null,
+          sourceImageUrl2: references[1] ?? null,
+          background: backgroundConfigFrom(template),
+        });
       }
-      const runtime = resolvePromptRuntime(template);
-      const modelReference = resolveModelReference(
-        args.modelReferences,
-        visualContext,
-        runtime.promptKind,
-      );
-      const compiledPrompt = compilePrompt(masterPrompt, template.content);
-      const promptUsed = appendRegenerationInstructions(
-        renderPrompt(compiledPrompt, {
-          PRODUCT_TITLE: product.title,
-          PRODUCT_HANDLE: product.handle,
-          IMAGE_TYPE: imageType,
-          ...visualContextPromptVariables(visualContext, runtime.promptKind),
-        }),
-        args.regenerationInstructions,
-      );
-      const references = referenceImageUrls(product).slice(
-        0,
-        runtime.referenceImageCount,
-      );
-      planned.push({
-        product,
-        imageType,
-        promptUsed,
-        promptKind: runtime.promptKind,
-        modelReferenceKey: modelReference?.key ?? null,
-        modelReferenceStorageId: modelReference?.storageId ?? null,
-        modelReferenceUrl: null,
-        useVibeAnalysis: runtime.useVibeAnalysis,
-        referenceImageCount: runtime.referenceImageCount,
-        sourceImageUrls: references,
-        sourceImageUrl: references[0] ?? null,
-        sourceImageUrl2: references[1] ?? null,
-        background: backgroundConfigFrom(template),
-      });
     }
   }
   if (!planned.length) {
     throw new Error("No image tasks could be planned for selected products.");
   }
   return { planned, selectedImageTypes };
+}
+
+function appendVisualGroupContract(
+  prompt: string,
+  target: {
+    label: string | null;
+    optionValues: Array<{ name: string; value: string }>;
+  },
+) {
+  if (!target.label) return prompt;
+  const values = target.optionValues
+    .map((option) => `${option.name}: ${option.value}`)
+    .join(", ");
+  return `${prompt}
+
+VISUAL VARIANT CONTRACT:
+Generate only the "${target.label}" product variant (${values}). Preserve its exact visible color, material, pattern, hardware, and construction from the confirmed reference images. Never borrow visual attributes from another variant.`;
 }
 
 function appendRegenerationInstructions(prompt: string, instructions?: string) {

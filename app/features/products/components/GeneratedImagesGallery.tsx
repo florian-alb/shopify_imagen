@@ -38,7 +38,9 @@ export function GeneratedImagesGallery({
     .filter((image) => image.storageUrl)
     .map((image) => ({
       url: image.storageUrl!,
-      label: image.imageType,
+      label: [image.visualGroupLabel, image.imageType]
+        .filter(Boolean)
+        .join(" · "),
     }));
 
   return (
@@ -79,7 +81,9 @@ export function GeneratedImagesGallery({
               {generatingGalleryImages.map((image) => (
                 <PendingGeneratedImageTile
                   key={image._id}
-                  caption={image.imageType}
+                  caption={[image.visualGroupLabel, image.imageType]
+                    .filter(Boolean)
+                    .join(" · ")}
                   statusLabel="Generation en cours"
                 />
               ))}
