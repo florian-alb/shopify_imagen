@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 
+import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import {
   internalMutation,
@@ -324,6 +325,15 @@ export const configure = mutation({
         updatedAt: now,
       });
     }
+
+    await ctx.scheduler.runAfter(
+      0,
+      internal.visualGroupAnalysis.analyzeConfiguredProduct,
+      {
+        productId: product._id,
+        userId,
+      },
+    );
 
     return configId;
   },

@@ -217,14 +217,12 @@ export function ProductDetailPage({
             </VisualProductWorkspace>
           ) : null}
 
-          {!activeVisualProduct ? (
-            <VisualGroupsSection
-              productId={typedProductId}
-              storeHandle={detail.shopInfo?.storeHandle}
-              data={visualGroupsData}
-              onZoom={lightbox.open}
-            />
-          ) : null}
+          <VisualGroupsSection
+            productId={typedProductId}
+            storeHandle={detail.shopInfo?.storeHandle}
+            data={visualGroupsData}
+            onZoom={lightbox.open}
+          />
 
           {!usesVisualProductWorkspace ? productImagesSection : null}
 

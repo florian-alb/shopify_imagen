@@ -4,11 +4,12 @@ import {
   ArrowUp,
   Check,
   ExternalLink,
+  GripVertical,
   ImageIcon,
   Sparkles,
   X,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { type DragEvent, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import type { LightboxImage } from "@/components/common/Lightbox";
@@ -31,6 +32,7 @@ import { cn } from "@/lib/utils";
 import type { VisualGroupsData } from "../types";
 import {
   moveReferenceId,
+  moveReferenceIdToEdge,
   orderVisualReferences,
 } from "../lib/visualReferenceOrder";
 
@@ -110,6 +112,15 @@ export function VisualGroupsSection({
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [referencePickerGroupId, setReferencePickerGroupId] =
     useState<Id<"visualGroups"> | null>(null);
+  const [draggedReference, setDraggedReference] = useState<{
+    groupId: Id<"visualGroups">;
+    referenceId: Id<"visualGroupReferences">;
+  } | null>(null);
+  const [referenceDropTarget, setReferenceDropTarget] = useState<{
+    groupId: Id<"visualGroups">;
+    referenceId: Id<"visualGroupReferences">;
+    edge: "before" | "after";
+  } | null>(null);
 
   const references = useMemo(
     () => (data ? canonicalReferences(data) : []),
@@ -174,7 +185,7 @@ export function VisualGroupsSection({
         productId,
         optionNames: Array.from(selectedOptions),
       });
-      toast.success("Groupes visuels créés");
+      toast.success("Groupes visuels créés, analyse IA lancée");
     } catch (error) {
       toast.error("Configuration impossible", {
         description: errorMessage(error),
@@ -259,6 +270,22 @@ export function VisualGroupsSection({
     }
   };
 
+  const persistReferenceOrder = async (
+    groupId: Id<"visualGroups">,
+    referenceIds: Id<"visualGroupReferences">[],
+  ) => {
+    setBusyAction(`order:${groupId}`);
+    try {
+      await reorderReferences({ groupId, referenceIds });
+    } catch (error) {
+      toast.error("Réorganisation impossible", {
+        description: errorMessage(error),
+      });
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
   const handleReferenceMove = async (
     groupId: Id<"visualGroups">,
     groupReferences: Doc<"visualGroupReferences">[],
@@ -270,16 +297,47 @@ export function VisualGroupsSection({
       referenceId,
       direction,
     );
-    setBusyAction(`order:${groupId}`);
-    try {
-      await reorderReferences({ groupId, referenceIds });
-    } catch (error) {
-      toast.error("Réorganisation impossible", {
-        description: errorMessage(error),
-      });
-    } finally {
-      setBusyAction(null);
+    await persistReferenceOrder(groupId, referenceIds);
+  };
+
+  const handleReferenceDragStart = (
+    event: DragEvent<HTMLSpanElement>,
+    groupId: Id<"visualGroups">,
+    referenceId: Id<"visualGroupReferences">,
+  ) => {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", referenceId);
+    const row = event.currentTarget.closest("li");
+    if (row) event.dataTransfer.setDragImage(row, 24, 24);
+    setDraggedReference({ groupId, referenceId });
+  };
+
+  const clearReferenceDrag = () => {
+    setDraggedReference(null);
+    setReferenceDropTarget(null);
+  };
+
+  const handleReferenceDrop = async (
+    groupId: Id<"visualGroups">,
+    groupReferences: Doc<"visualGroupReferences">[],
+    targetId: Id<"visualGroupReferences">,
+    edge: "before" | "after",
+  ) => {
+    if (!draggedReference || draggedReference.groupId !== groupId) {
+      clearReferenceDrag();
+      return;
     }
+
+    const currentIds = groupReferences.map((reference) => reference._id);
+    const referenceIds = moveReferenceIdToEdge(
+      currentIds,
+      draggedReference.referenceId,
+      targetId,
+      edge,
+    );
+    clearReferenceDrag();
+    if (referenceIds.every((id, index) => id === currentIds[index])) return;
+    await persistReferenceOrder(groupId, referenceIds);
   };
 
   return (
@@ -567,9 +625,9 @@ export function VisualGroupsSection({
                               Ordre des références — {group.label}
                             </p>
                             <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
-                              L’IA utilise les images de haut en bas. La n° 1
-                              est prioritaire ; le nombre d’images envoyé dépend
-                              du prompt.
+                              Glissez les images ou utilisez les flèches. L’IA
+                              utilise les images de haut en bas ; la n° 1 est
+                              prioritaire.
                             </p>
 
                             {groupReferences.length ? (
@@ -577,8 +635,93 @@ export function VisualGroupsSection({
                                 {groupReferences.map((reference, index) => (
                                   <li
                                     key={reference._id}
-                                    className="flex min-w-0 flex-wrap items-center gap-3 py-2"
+                                    className={cn(
+                                      "relative flex min-w-0 flex-wrap items-center gap-3 py-2 transition-colors",
+                                      draggedReference?.groupId === group._id &&
+                                        draggedReference.referenceId ===
+                                          reference._id &&
+                                        "opacity-50",
+                                      referenceDropTarget?.groupId ===
+                                        group._id &&
+                                        referenceDropTarget.referenceId ===
+                                          reference._id &&
+                                        "bg-primary/5",
+                                    )}
+                                    onDragOver={(event) => {
+                                      if (
+                                        !draggedReference ||
+                                        draggedReference.groupId !==
+                                          group._id ||
+                                        referencesBusy
+                                      ) {
+                                        return;
+                                      }
+                                      event.preventDefault();
+                                      event.dataTransfer.dropEffect = "move";
+                                      const bounds =
+                                        event.currentTarget.getBoundingClientRect();
+                                      const edge =
+                                        event.clientY <
+                                        bounds.top + bounds.height / 2
+                                          ? "before"
+                                          : "after";
+                                      setReferenceDropTarget({
+                                        groupId: group._id,
+                                        referenceId: reference._id,
+                                        edge,
+                                      });
+                                    }}
+                                    onDrop={(event) => {
+                                      event.preventDefault();
+                                      const bounds =
+                                        event.currentTarget.getBoundingClientRect();
+                                      const edge =
+                                        event.clientY <
+                                        bounds.top + bounds.height / 2
+                                          ? "before"
+                                          : "after";
+                                      void handleReferenceDrop(
+                                        group._id,
+                                        groupReferences,
+                                        reference._id,
+                                        edge,
+                                      );
+                                    }}
                                   >
+                                    {referenceDropTarget?.groupId ===
+                                      group._id &&
+                                    referenceDropTarget.referenceId ===
+                                      reference._id ? (
+                                      <span
+                                        aria-hidden="true"
+                                        className={cn(
+                                          "pointer-events-none absolute inset-x-0 z-10 h-0.5 bg-primary",
+                                          referenceDropTarget.edge === "before"
+                                            ? "top-0"
+                                            : "bottom-0",
+                                        )}
+                                      />
+                                    ) : null}
+                                    <span
+                                      draggable={!referencesBusy}
+                                      aria-hidden="true"
+                                      title="Glisser pour réorganiser"
+                                      className={cn(
+                                        "grid size-11 shrink-0 cursor-grab place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:cursor-grabbing sm:size-8",
+                                        referencesBusy &&
+                                          "pointer-events-none opacity-50",
+                                      )}
+                                      onDragStart={(event) =>
+                                        handleReferenceDragStart(
+                                          event,
+                                          group._id,
+                                          reference._id,
+                                        )
+                                      }
+                                      onDragEnd={clearReferenceDrag}
+                                    >
+                                      <GripVertical className="size-4" />
+                                    </span>
                                     <span
                                       className={cn(
                                         "grid size-7 shrink-0 place-items-center rounded-full text-xs font-semibold tabular-nums",

@@ -5,7 +5,7 @@ import { v } from "convex/values";
 
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { action } from "./_generated/server";
+import { action, internalAction, type ActionCtx } from "./_generated/server";
 import { requireUserId } from "./authz";
 import { normalizeReferenceImage } from "./generation/images";
 import { env } from "./generation/runtime";
@@ -194,148 +194,164 @@ async function analyzeBatch(args: {
   };
 }
 
-export const analyze = action({
-  args: { productId: v.id("products") },
-  handler: async (
-    ctx,
-    args,
-  ): Promise<{
-    analyzed: number;
-    suggested: number;
-    unmatched: number;
-    costUsd: number;
-  }> => {
-    const userId = await requireUserId(ctx);
-    const context = (await ctx.runQuery(internal.visualGroups.analysisContext, {
-      productId: args.productId,
-      userId,
-    })) as AnalysisContext | null;
-    if (!context) throw new Error("Configure visual groups first.");
+type AnalysisResult = {
+  analyzed: number;
+  suggested: number;
+  unmatched: number;
+  costUsd: number;
+};
 
-    const settings = (await ctx.runQuery(internal.settings.internalList, {
-      shopId: context.product.shopId ?? null,
-    })) as Record<string, unknown>;
-    const model = String(
-      settings.VARIANT_CLASSIFIER_MODEL ??
-        settings.VIBE_MODEL ??
-        env("VARIANT_CLASSIFIER_MODEL", "gemini-2.5-flash-lite"),
-    );
-    const sourceReferences = context.references.filter(
-      (reference) => !reference.confirmed && !reference.sourceReferenceId,
-    );
-    if (!sourceReferences.length) {
-      await ctx.runMutation(internal.visualGroups.setAnalysisStatus, {
-        configId: context.config._id,
-        status: "ready",
-        model,
-        costUsd: context.config.analysisCostUsd ?? 0,
-        error: null,
-      });
-      return { analyzed: 0, suggested: 0, unmatched: 0, costUsd: 0 };
-    }
+async function analyzeProduct(
+  ctx: ActionCtx,
+  productId: Id<"products">,
+  userId: Id<"users">,
+): Promise<AnalysisResult> {
+  const context = (await ctx.runQuery(internal.visualGroups.analysisContext, {
+    productId,
+    userId,
+  })) as AnalysisContext | null;
+  if (!context) throw new Error("Configure visual groups first.");
 
+  const settings = (await ctx.runQuery(internal.settings.internalList, {
+    shopId: context.product.shopId ?? null,
+  })) as Record<string, unknown>;
+  const model = String(
+    settings.VARIANT_CLASSIFIER_MODEL ??
+      settings.VIBE_MODEL ??
+      env("VARIANT_CLASSIFIER_MODEL", "gemini-2.5-flash-lite"),
+  );
+  const sourceReferences = context.references.filter(
+    (reference) => !reference.confirmed && !reference.sourceReferenceId,
+  );
+  if (!sourceReferences.length) {
     await ctx.runMutation(internal.visualGroups.setAnalysisStatus, {
       configId: context.config._id,
-      status: "running",
+      status: "ready",
       model,
+      costUsd: context.config.analysisCostUsd ?? 0,
       error: null,
     });
+    return { analyzed: 0, suggested: 0, unmatched: 0, costUsd: 0 };
+  }
 
-    try {
-      const prepared: PreparedReference[] = [];
-      for (const reference of sourceReferences) {
-        prepared.push({
-          reference,
-          bytes: await normalizeReferenceImage(reference.sourceUrl),
-        });
-      }
+  await ctx.runMutation(internal.visualGroups.setAnalysisStatus, {
+    configId: context.config._id,
+    status: "running",
+    model,
+    error: null,
+  });
 
-      const applied: Array<{
-        sourceReferenceId: Id<"visualGroupReferences">;
-        groupKey: string | null;
-        confidence: number;
-        referenceUrl: string;
-        crop?: { x: number; y: number; width: number; height: number };
-      }> = [];
-      let totalCostUsd = 0;
+  try {
+    const prepared: PreparedReference[] = [];
+    for (const reference of sourceReferences) {
+      prepared.push({
+        reference,
+        bytes: await normalizeReferenceImage(reference.sourceUrl),
+      });
+    }
 
-      for (
-        let offset = 0;
-        offset < prepared.length;
-        offset += ANALYSIS_BATCH_SIZE
-      ) {
-        const batch = prepared.slice(offset, offset + ANALYSIS_BATCH_SIZE);
-        const result = await analyzeBatch({
-          references: batch,
-          groups: context.groups,
-          model,
-        });
-        totalCostUsd += estimateCostUsd(model, result.usage);
+    const applied: Array<{
+      sourceReferenceId: Id<"visualGroupReferences">;
+      groupKey: string | null;
+      confidence: number;
+      referenceUrl: string;
+      crop?: { x: number; y: number; width: number; height: number };
+    }> = [];
+    let totalCostUsd = 0;
 
-        for (const assignment of result.assignments) {
-          const source = batch[assignment.referenceIndex];
-          if (!source) continue;
-          const matches = assignment.matches.filter(
-            (match) =>
-              Boolean(context.groups[match.groupIndex]) &&
-              Number.isFinite(match.confidence) &&
-              match.confidence >= 0.5,
-          );
-          if (!matches.length) {
-            applied.push({
-              sourceReferenceId: source.reference._id,
-              groupKey: null,
-              confidence: 0,
-              referenceUrl: source.reference.sourceUrl,
-            });
-            continue;
-          }
+    for (
+      let offset = 0;
+      offset < prepared.length;
+      offset += ANALYSIS_BATCH_SIZE
+    ) {
+      const batch = prepared.slice(offset, offset + ANALYSIS_BATCH_SIZE);
+      const result = await analyzeBatch({
+        references: batch,
+        groups: context.groups,
+        model,
+      });
+      totalCostUsd += estimateCostUsd(model, result.usage);
 
-          for (const match of matches) {
-            const group = context.groups[match.groupIndex];
-            const crop =
-              matches.length > 1 ? normalizedCrop(match.box2d) : null;
-            const referenceUrl = crop
-              ? await cropReference({
-                  bytes: source.bytes,
-                  crop,
-                  product: context.product,
-                  group,
-                })
-              : source.reference.sourceUrl;
-            applied.push({
-              sourceReferenceId: source.reference._id,
-              groupKey: group.key,
-              confidence: Math.max(0, Math.min(1, match.confidence)),
-              referenceUrl,
-              ...(crop ? { crop } : {}),
-            });
-          }
+      for (const assignment of result.assignments) {
+        const source = batch[assignment.referenceIndex];
+        if (!source) continue;
+        const matches = assignment.matches.filter(
+          (match) =>
+            Boolean(context.groups[match.groupIndex]) &&
+            Number.isFinite(match.confidence) &&
+            match.confidence >= 0.5,
+        );
+        if (!matches.length) {
+          applied.push({
+            sourceReferenceId: source.reference._id,
+            groupKey: null,
+            confidence: 0,
+            referenceUrl: source.reference.sourceUrl,
+          });
+          continue;
+        }
+
+        for (const match of matches) {
+          const group = context.groups[match.groupIndex];
+          const crop = matches.length > 1 ? normalizedCrop(match.box2d) : null;
+          const referenceUrl = crop
+            ? await cropReference({
+                bytes: source.bytes,
+                crop,
+                product: context.product,
+                group,
+              })
+            : source.reference.sourceUrl;
+          applied.push({
+            sourceReferenceId: source.reference._id,
+            groupKey: group.key,
+            confidence: Math.max(0, Math.min(1, match.confidence)),
+            referenceUrl,
+            ...(crop ? { crop } : {}),
+          });
         }
       }
-
-      const result: { suggested: number; unmatched: number } =
-        await ctx.runMutation(internal.visualGroups.applyAnalysis, {
-          configId: context.config._id,
-          assignments: applied,
-          model,
-          costUsd: totalCostUsd,
-        });
-      return {
-        analyzed: sourceReferences.length,
-        suggested: result.suggested,
-        unmatched: result.unmatched,
-        costUsd: totalCostUsd,
-      };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      await ctx.runMutation(internal.visualGroups.setAnalysisStatus, {
-        configId: context.config._id,
-        status: "failed",
-        model,
-        error: message.slice(0, 1000),
-      });
-      throw error;
     }
+
+    const result: { suggested: number; unmatched: number } =
+      await ctx.runMutation(internal.visualGroups.applyAnalysis, {
+        configId: context.config._id,
+        assignments: applied,
+        model,
+        costUsd: totalCostUsd,
+      });
+    return {
+      analyzed: sourceReferences.length,
+      suggested: result.suggested,
+      unmatched: result.unmatched,
+      costUsd: totalCostUsd,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await ctx.runMutation(internal.visualGroups.setAnalysisStatus, {
+      configId: context.config._id,
+      status: "failed",
+      model,
+      error: message.slice(0, 1000),
+    });
+    throw error;
+  }
+}
+
+export const analyze = action({
+  args: { productId: v.id("products") },
+  handler: async (ctx, args): Promise<AnalysisResult> => {
+    const userId = await requireUserId(ctx);
+    return await analyzeProduct(ctx, args.productId, userId);
+  },
+});
+
+export const analyzeConfiguredProduct = internalAction({
+  args: {
+    productId: v.id("products"),
+    userId: v.id("users"),
+  },
+  handler: async (ctx, args): Promise<AnalysisResult> => {
+    return await analyzeProduct(ctx, args.productId, args.userId);
   },
 });
