@@ -35,16 +35,31 @@ export function buildGeminiGenerationConfig(settings: Record<string, unknown>) {
 // Skips empty entries so callers can pass [primary, secondary] freely.
 export async function buildGeminiReferenceParts(
   urls: Array<string | null | undefined>,
+  referenceImageCache?: Map<string, Promise<Buffer>>,
 ) {
   const parts: Array<{ inline_data: { mime_type: string; data: string } }> = [];
   for (const url of urls) {
     if (!url) continue;
-    const bytes = await normalizeReferenceImage(url);
+    const bytes = referenceImageCache
+      ? await getCachedReferenceImage(referenceImageCache, url)
+      : await normalizeReferenceImage(url);
     parts.push({
       inline_data: { mime_type: "image/jpeg", data: bytes.toString("base64") },
     });
   }
   return parts;
+}
+
+function getCachedReferenceImage(
+  cache: Map<string, Promise<Buffer>>,
+  url: string,
+) {
+  let cached = cache.get(url);
+  if (!cached) {
+    cached = normalizeReferenceImage(url);
+    cache.set(url, cached);
+  }
+  return cached;
 }
 
 export async function generateWithGemini(args: {

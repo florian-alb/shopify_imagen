@@ -63,6 +63,24 @@ const productPrimaryAction = v.union(
   v.literal("done")
 );
 
+function visibleGeneratedImages(images: Doc<"generatedImages">[]) {
+  return images.filter((image) => !image.retrySourceImageId);
+}
+
+async function productWithVisibleWorkflow(
+  ctx: { db: any },
+  product: Doc<"products">,
+) {
+  const images = await ctx.db
+    .query("generatedImages")
+    .withIndex("by_product", (q: any) => q.eq("productId", product._id))
+    .collect();
+  return {
+    ...product,
+    ...calculateProductWorkflow(visibleGeneratedImages(images)),
+  };
+}
+
 const productFilterArgs = {
   search: v.optional(v.string()),
   productType: v.optional(v.string()),
@@ -104,10 +122,14 @@ async function filteredProducts(ctx: { db: any }, args: ProductFilters, scope: S
   }
 
   const needle = (args.search ?? "").trim().toLowerCase();
-  const filtered = products
-    .filter((product) => shopMatchesScope(product, scope))
-    .filter((product) => productMatches(product, args, needle))
-    .sort((a, b) => b._creationTime - a._creationTime);
+  const filtered: Doc<"products">[] = [];
+  for (const product of products) {
+    if (!shopMatchesScope(product, scope)) continue;
+    const currentProduct = await productWithVisibleWorkflow(ctx, product);
+    if (!productMatches(currentProduct, args, needle)) continue;
+    filtered.push(currentProduct);
+  }
+  filtered.sort((a, b) => b._creationTime - a._creationTime);
 
   return filtered;
 }
@@ -140,15 +162,16 @@ export const list = query({
       queryBuilder = ctx.db.query("products").withIndex("by_created").order("desc");
     }
 
-    const page: Doc<"products">[] = [];
-    let matched = 0;
-    for await (const product of queryBuilder) {
-      if (!shopMatchesScope(product, scope)) continue;
-      if (!productMatches(product, args, needle)) continue;
-      if (matched >= offset && page.length < limit + 1) page.push(product);
-      matched += 1;
-      if (page.length >= limit + 1) break;
-    }
+  const page: Doc<"products">[] = [];
+  let matched = 0;
+  for await (const product of queryBuilder) {
+    if (!shopMatchesScope(product, scope)) continue;
+    const currentProduct = await productWithVisibleWorkflow(ctx, product);
+    if (!productMatches(currentProduct, args, needle)) continue;
+    if (matched >= offset && page.length < limit + 1) page.push(currentProduct);
+    matched += 1;
+    if (page.length >= limit + 1) break;
+  }
 
     return {
       page: page.slice(0, limit).map(lightProduct),
@@ -220,7 +243,11 @@ export const getWithImages = query({
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
       .order("desc")
       .collect();
-    return { product: { ...product, ...calculateProductWorkflow(images) }, images };
+    const visibleImages = visibleGeneratedImages(images);
+    return {
+      product: { ...product, ...calculateProductWorkflow(visibleImages) },
+      images: visibleImages,
+    };
   }
 });
 
@@ -372,7 +399,7 @@ export async function recalculateProductStatus(ctx: { db: any }, productId: Id<"
     .query("generatedImages")
     .withIndex("by_product", (q: any) => q.eq("productId", productId))
     .collect();
-  return calculateProductStatus(images);
+  return calculateProductStatus(visibleGeneratedImages(images));
 }
 
 export async function refreshProductSummary(ctx: { db: any }, productId: Id<"products">) {
@@ -380,7 +407,7 @@ export async function refreshProductSummary(ctx: { db: any }, productId: Id<"pro
     .query("generatedImages")
     .withIndex("by_product", (q: any) => q.eq("productId", productId))
     .collect();
-  const summary = calculateProductWorkflow(images);
+  const summary = calculateProductWorkflow(visibleGeneratedImages(images));
   await ctx.db.patch(productId, {
     ...summary,
     updatedAt: Date.now()

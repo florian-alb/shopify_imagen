@@ -84,7 +84,7 @@ export function Gallery({
                     <button
                       type="button"
                       onClick={() => onZoom(lightboxImages, index)}
-                      className="image-tile w-full cursor-zoom-in rounded-none transition hover:opacity-90"
+                      className="block aspect-square w-full cursor-zoom-in overflow-hidden rounded-none bg-muted transition hover:opacity-90 [&>img]:size-full [&>img]:object-cover"
                     >
                       <img
                         src={item.url}
@@ -208,10 +208,10 @@ export function Gallery({
 function GeneratingGalleryCard({ item }: { item: PendingGalleryItem }) {
   return (
     <figure className="relative overflow-hidden rounded-lg bg-muted/30 ring-1 ring-border">
-      <div className="image-tile generated-wave-tile w-full rounded-none">
-        <div className="generated-wave generated-wave-a" />
-        <div className="generated-wave generated-wave-b" />
-        <div className="generated-wave generated-wave-c" />
+      <div className="relative aspect-square w-full overflow-hidden rounded-none bg-[radial-gradient(circle_at_32%_18%,color-mix(in_oklch,var(--primary)_16%,transparent),transparent_34%),linear-gradient(135deg,color-mix(in_oklch,var(--muted)_88%,var(--background)_12%),color-mix(in_oklch,var(--primary)_10%,var(--background)_90%))]">
+        <div className="absolute inset-x-[-18%] bottom-[-36%] h-[38%] animate-pulse rounded-full bg-primary/20 blur-[18px]" />
+        <div className="absolute inset-x-[-18%] bottom-[-36%] h-[38%] animate-pulse rounded-full bg-primary/15 blur-[18px] [animation-delay:200ms]" />
+        <div className="absolute inset-x-[-18%] bottom-[-36%] h-[38%] animate-pulse rounded-full bg-primary/10 blur-[18px] [animation-delay:400ms]" />
       </div>
       <figcaption className="grid gap-1.5 px-2 py-2">
         {item.caption ? (

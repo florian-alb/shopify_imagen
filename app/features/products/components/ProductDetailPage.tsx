@@ -1,11 +1,12 @@
 import { Lightbox, useLightbox } from "@/components/common/Lightbox";
 import { ImageRetouchDialog } from "@/components/image-retouch-dialog";
-import { EmptyState } from "@/components/page";
+import { EmptyState, pageContentClass } from "@/components/page";
+import { useGeneratedImageRetouch } from "@/features/images/hooks/useGeneratedImageRetouch";
 import { api, type Id } from "@/lib/convex";
 import { useQuery } from "convex/react";
 
 import { DeleteImageDialog } from "./DeleteImageDialog";
-import { GenerateImagesDialog } from "./GenerateImagesDialog";
+import { ImageTypeSelectionDialog } from "./ImageTypeSelectionDialog";
 import { ProductFacts } from "./ProductFacts";
 import { ProductHeader } from "./ProductHeader";
 import { ProductImageHistory } from "./ProductImageHistory";
@@ -16,7 +17,6 @@ import { useProductDetail } from "../hooks/useProductDetail";
 import { useProductImageDelete } from "../hooks/useProductImageDelete";
 import { useProductImageGeneration } from "../hooks/useProductImageGeneration";
 import { useProductImagePublish } from "../hooks/useProductImagePublish";
-import { useProductImageRetouch } from "../hooks/useProductImageRetouch";
 import { useProductImageReview } from "../hooks/useProductImageReview";
 import { useProductImagesViewModel } from "../hooks/useProductImagesViewModel";
 import { useShopifyImageReorder } from "../hooks/useShopifyImageReorder";
@@ -49,7 +49,7 @@ export function ProductDetailPage({
     visualGroupsData,
   });
   const review = useProductImageReview();
-  const retouch = useProductImageRetouch();
+  const retouch = useGeneratedImageRetouch();
   const publishableImages =
     visualGroupsData === undefined
       ? []
@@ -65,7 +65,7 @@ export function ProductDetailPage({
 
   if (detail.data === undefined) {
     return (
-      <main className="page">
+      <main className={pageContentClass}>
         <EmptyState
           loading
           title="Loading product"
@@ -77,7 +77,7 @@ export function ProductDetailPage({
 
   if (!detail.product) {
     return (
-      <main className="page">
+      <main className={pageContentClass}>
         <EmptyState
           title="Product not found"
           body="The product may not be synced into Convex yet."
@@ -97,7 +97,7 @@ export function ProductDetailPage({
     : undefined;
 
   return (
-    <main className="page">
+    <main className={pageContentClass}>
       <ProductHeader
         productId={productId}
         product={detail.product}
@@ -135,13 +135,7 @@ export function ProductDetailPage({
             rejectedCount={viewModel.rejectedImages.length}
             reviewingImageId={review.reviewingImageId}
             onReview={review.setImageReview}
-            onRetouch={(image) =>
-              retouch.setTarget({
-                id: image._id,
-                url: image.storageUrl!,
-                label: image.imageType,
-              })
-            }
+            onRetouch={retouch.openRetouch}
             onDelete={deletion.setTarget}
             onZoom={lightbox.open}
           />
@@ -161,24 +155,27 @@ export function ProductDetailPage({
         </div>
       </div>
 
-      <GenerateImagesDialog
+      <ImageTypeSelectionDialog
         open={generation.open}
         onOpenChange={generation.setOpen}
         types={viewModel.availableTypes}
         selectedTypes={generation.selectedTypes}
         visualGroupsData={visualGroupsData}
         selectedGroupIds={generation.selectedGroupIds}
-        onToggle={generation.toggleType}
         onToggleGroup={generation.toggleGroup}
         busy={generation.busy}
         onGenerate={() => void generation.generate()}
+        title="Generate images"
+        description="Select image types for this product. Each type maps to a prompt template."
+        submitLabel="Start background job"
+        onToggleType={generation.toggleType}
       />
 
       <ImageRetouchDialog
         target={retouch.target}
         saving={retouch.saving}
         onOpenChange={(open) => {
-          if (!open && !retouch.saving) retouch.setTarget(null);
+          if (!open) retouch.closeRetouch();
         }}
         onPrepareSource={(target) =>
           retouch.prepareRetouchSource({ sourceImageId: target.id })

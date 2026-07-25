@@ -99,6 +99,7 @@ export async function submitGeminiBatch(args: {
   images: BatchImage[];
   settings: Record<string, unknown>;
   model: string;
+  referenceImageCache?: Map<string, Promise<Buffer>>;
 }) {
   const apiKey = env("GEMINI_API_KEY");
   if (!apiKey)
@@ -112,7 +113,10 @@ export async function submitGeminiBatch(args: {
       throw new Error(
         "Product has no Shopify supplier image to use as reference.",
       );
-    const referenceParts = await buildGeminiReferenceParts(referenceUrls);
+    const referenceParts = await buildGeminiReferenceParts(
+      referenceUrls,
+      args.referenceImageCache,
+    );
     return JSON.stringify({
       key: image._id,
       request: {

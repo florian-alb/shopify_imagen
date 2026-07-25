@@ -72,7 +72,7 @@ export function ProductHeader({
   onPublish: () => void;
 }) {
   return (
-    <header className="mb-4 flex flex-col gap-4 border-b border-white/10 pb-4 xl:flex-row xl:items-end xl:justify-between">
+    <header className="mb-4 flex flex-col gap-4 border-b border-border pb-4 xl:flex-row xl:items-end xl:justify-between">
       <div className="min-w-0">
         <div className="mb-2 flex flex-wrap items-center gap-2">
           <Breadcrumb>

@@ -19,7 +19,7 @@ export function ShopifyImagesGallery({
       description="Glissez pour changer l'ordre Shopify. La premiere image sert de reference produit."
       items={shopifyImages.map((image) => ({
         id: shopifyMediaId(image),
-        url: image.url,
+        url: image.displayUrl ?? image.url,
         label: image.altText ?? "Shopify product",
       }))}
       emptyText="Aucune image Shopify."

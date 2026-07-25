@@ -9,8 +9,10 @@ export type GeneratedImageStateTone =
   | "danger";
 
 export function generatedImageStateLabel(image: Doc<"generatedImages">) {
+  if (image.activeRetryImageId) return "Regenerating";
   if (image.status === "failed") return "Error";
   if (image.status === "canceled") return "Canceled";
+  if (image.status === "postprocessing") return "Post-processing";
   if (image.status === "uploaded") return "Pushed";
   if (!isReviewable(image)) return image.status;
 
@@ -23,6 +25,7 @@ export function generatedImageStateLabel(image: Doc<"generatedImages">) {
 export function generatedImageStateTone(
   image: Doc<"generatedImages">,
 ): GeneratedImageStateTone {
+  if (image.activeRetryImageId) return "warning";
   if (image.status === "failed") return "danger";
   if (image.status === "canceled") return "danger";
   if (image.status === "uploaded") return "success";

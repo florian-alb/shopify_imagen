@@ -1,5 +1,53 @@
 import type { ProductSearch } from "@/lib/productFilters";
+import type {
+  GenerationStatus,
+  ProductGenerationState,
+  ProductPrimaryAction,
+  ProductPublishState,
+  ProductReviewState,
+} from "@/lib/status";
 import type { Doc } from "@/lib/convex";
+
+export type ProductListItem = {
+  _id: Doc<"products">["_id"];
+  _creationTime: Doc<"products">["_creationTime"];
+  shopifyProductId: string;
+  title: string;
+  handle: string;
+  vendor?: string | null;
+  productType?: string | null;
+  shopifyStatus?: string | null;
+  featuredImageUrl?: string | null;
+  featuredImageDisplayUrl?: string | null;
+  shopifyImageCount: number;
+  generationStatus: GenerationStatus;
+  generationState: ProductGenerationState;
+  reviewState: ProductReviewState;
+  publishState: ProductPublishState;
+  primaryAction: ProductPrimaryAction;
+  generatedImageCount?: number;
+  failedImageCount?: number;
+  pendingReviewCount?: number;
+};
+
+export type BulkProductLock = {
+  productId: Doc<"products">["_id"];
+  jobId: Doc<"bulkTransformJobs">["_id"];
+  status: Doc<"bulkTransformJobs">["status"];
+};
+
+export type ProductFacets = {
+  productTypes: string[];
+  shopifyStatuses: string[];
+  collections: Array<{ id: string; title: string; handle?: string }>;
+};
+
+export type ProductPageResult = {
+  page: ProductListItem[];
+  total: number;
+  hasPrevious: boolean;
+  hasNext: boolean;
+};
 
 export type ProductDetail = {
   product: Doc<"products">;
@@ -22,6 +70,7 @@ export type ShopifyGalleryImage = {
   id?: string | null;
   mediaId?: string | null;
   url: string;
+  displayUrl?: string | null;
   altText?: string | null;
 };
 

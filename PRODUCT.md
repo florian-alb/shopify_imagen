@@ -1,43 +1,44 @@
 # Product
 
 ## Register
-
 product
 
 ## Platform
-
 web
 
 ## Users
+The primary users are Shopify store creators and Shopify merchants who need to produce, review, organize, and publish product imagery at catalogue scale. They may work across many product categories, including curtains, shoes, clothing, accessories, home goods, and other merchant-specific collections. Their catalogues may contain visually distinct variants such as colors, materials, sizes, or merchant-defined options.
 
-L’application est utilisée par des marchands et opérateurs de catalogue Shopify qui préparent, vérifient et publient régulièrement des images produits. Ils travaillent à partir de données et de références déjà présentes dans Shopify et doivent pouvoir comprendre rapidement ce qui sera généré, à quel coût et pour quelles variantes.
+They use the application in an operational context: selecting products, filtering catalogue subsets, launching bulk image generation or transformation jobs, reviewing generated assets, and publishing only the images they approve.
 
 ## Product Purpose
+This application is a Shopify catalogue image studio. It helps merchants generate accurate, creative product images from Shopify product data, process them in bulk, review results quickly, and publish optimized assets back to Shopify with explicit human control. Every generated result must remain attached to the correct product, visual group, and Shopify variants without mixing colors, materials, sizes, or custom options.
 
-Image Studio synchronise un catalogue Shopify, transforme les références existantes en séries d’images produits cohérentes, permet leur validation, puis les publie manuellement dans Shopify. Le produit doit garantir que chaque résultat reste rattaché au bon produit, au bon groupe visuel et aux bonnes variantes, sans mélange de couleur, de matière, de taille ou d’option personnalisée.
-
-Le succès se mesure par un parcours de génération compréhensible, un coût prévisible, peu de corrections manuelles et une publication Shopify exacte et réversible.
+Success means users can move from catalogue selection to approved images with fewer clicks, less manual repetition, predictable generation costs, fast bulk actions, precise sorting and filtering, and enough creative control to adapt generated images to different product categories.
 
 ## Positioning
-
-Transformer les références d’un catalogue Shopify en galeries prêtes à publier, avec une compréhension explicite des variantes et un contrôle marchand à chaque étape.
+A fast, expert, creative Shopify image studio for turning product catalogues into reviewable, publish-ready image sets at bulk scale.
 
 ## Brand Personality
+The product should feel fast, expert, and creative. The interface voice should be direct, practical, and confident, with enough polish to feel premium without becoming decorative.
 
-Directe, calme et rigoureuse. L’interface parle comme un outil de production fiable : des libellés concrets, des conséquences visibles avant action et aucun effet décoratif qui ralentit la décision.
+The emotional goal is operational confidence: users should feel that they can move quickly through large catalogues, understand what is happening, and keep control over every generation and publication step.
 
 ## Anti-references
+Avoid decorative, marketing-like, or visually noisy application design. The product should not feel like a showcase page, an AI demo, or a technical control panel that exposes unnecessary complexity.
 
-Éviter les assistants à étapes longues, les tableaux de bord décoratifs, les automatismes opaques et les actions de publication ambiguës. Ne jamais masquer le nombre de générations, leur coût estimé, les variantes concernées ou les modifications qui seront apportées à Shopify.
+Avoid workflows that require too many clicks, unclear sorting, slow bulk operations, hidden states, ambiguous filters, or modals where inline controls would be faster. Avoid ornamental UI that competes with product images, tables, review states, or action controls.
 
 ## Design Principles
-
-- Faire apparaître la structure visuelle du produit avant de proposer la génération.
-- Réduire le travail répétitif sans retirer la validation finale au marchand.
-- Employer l’IA seulement lorsque les données Shopify et les règles déterministes ne suffisent pas.
-- Montrer le coût et la portée d’une action avant son lancement.
-- Préserver les données Shopify existantes et rendre les publications vérifiables.
+- Optimize for the shortest safe path from product selection to generated images.
+- Make bulk workflows first-class, not an afterthought.
+- Keep sorting, filtering, review status, and job progress simple to scan.
+- Show generation scope and cost before starting variant-aware work.
+- Use AI only when Shopify data and deterministic matching are insufficient.
+- Preserve human control before publishing anything to Shopify.
+- Let the product images and operational states carry the interface, not decoration.
 
 ## Accessibility & Inclusion
+The interface should be responsive and comfortable on mobile, because the application is used on mobile as well as desktop. Prioritize clear touch targets, readable labels, simple navigation, and fast access to primary actions.
 
-Le parcours web doit rester utilisable au clavier, lisible avec un contraste suffisant et compréhensible sans dépendre uniquement de la couleur. Les interactions doivent conserver des cibles tactiles adaptées et respecter la préférence de réduction des animations.
+No special accessibility target beyond a clean, readable, responsive product UI is currently required, but future design work should still preserve basic contrast, keyboard reachability, reduced-motion compatibility, and predictable standard controls.

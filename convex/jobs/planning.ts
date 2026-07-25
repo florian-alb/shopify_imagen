@@ -14,10 +14,6 @@ import type {
   ModelReferenceKey,
   StoredModelReference,
 } from "../prompts/access";
-import {
-  applyStudioPromptContract,
-  referenceImageCountForStudio,
-} from "./studioPromptContract";
 
 export type PlannedImageTask = {
   product: Doc<"products">;
@@ -90,62 +86,58 @@ export function buildImageTasks(args: {
 
     for (const target of targets) {
       for (const imageType of selectedImageTypes) {
-      const template = promptByType.get(imageType);
-      if (!template) {
-        throw new Error(`No active prompt template found for ${imageType}.`);
-      }
-      const runtime = resolvePromptRuntime(template);
-      const referenceImageCount = referenceImageCountForStudio({
-        imageType,
-        promptKind: runtime.promptKind,
-        requestedCount: runtime.referenceImageCount,
-      });
-      const modelReference = resolveModelReference(
-        args.modelReferences,
-        visualContext,
-        runtime.promptKind,
-      );
-      const compiledPrompt = compilePrompt(masterPrompt, template.content);
-      const basePrompt = applyStudioPromptContract({
+        const template = promptByType.get(imageType);
+        if (!template) {
+          throw new Error(`No active prompt template found for ${imageType}.`);
+        }
+        const runtime = resolvePromptRuntime(template);
+        const modelReference = resolveModelReference(
+          args.modelReferences,
+          visualContext,
+          runtime.promptKind,
+        );
+        const compiledPrompt = compilePrompt(masterPrompt, template.content);
+        const promptUsed = appendRegenerationInstructions(
+          appendVisualGroupContract(
+            renderPrompt(compiledPrompt, {
+              PRODUCT_TITLE: product.title,
+              PRODUCT_HANDLE: product.handle,
+              IMAGE_TYPE: imageType,
+              VISUAL_GROUP_LABEL: target.label ?? "",
+              VISUAL_GROUP_VALUES: target.optionValues
+                .map((option) => `${option.name}: ${option.value}`)
+                .join(", "),
+              ...visualContextPromptVariables(
+                visualContext,
+                runtime.promptKind,
+              ),
+            }),
+            target,
+          ),
+          args.regenerationInstructions,
+        );
+        const references = target.referenceUrls.slice(
+          0,
+          runtime.referenceImageCount,
+        );
+        planned.push({
+          product,
+          visualGroupId: target.groupId,
+          visualGroupKey: target.key,
+          visualGroupLabel: target.label,
           imageType,
+          promptUsed,
           promptKind: runtime.promptKind,
-          prompt: renderPrompt(compiledPrompt, {
-            PRODUCT_TITLE: product.title,
-            PRODUCT_HANDLE: product.handle,
-            IMAGE_TYPE: imageType,
-            VISUAL_GROUP_LABEL: target.label ?? "",
-            VISUAL_GROUP_VALUES: target.optionValues
-              .map((option) => `${option.name}: ${option.value}`)
-              .join(", "),
-            ...visualContextPromptVariables(visualContext, runtime.promptKind),
-          }),
+          modelReferenceKey: modelReference?.key ?? null,
+          modelReferenceStorageId: modelReference?.storageId ?? null,
+          modelReferenceUrl: null,
+          useVibeAnalysis: runtime.useVibeAnalysis,
+          referenceImageCount: runtime.referenceImageCount,
+          sourceImageUrls: references,
+          sourceImageUrl: references[0] ?? null,
+          sourceImageUrl2: references[1] ?? null,
+          background: backgroundConfigFrom(template),
         });
-      const promptUsed = appendRegenerationInstructions(
-        appendVisualGroupContract(basePrompt, target),
-        args.regenerationInstructions,
-      );
-      const references = target.referenceUrls.slice(
-        0,
-        referenceImageCount,
-      );
-      planned.push({
-        product,
-        visualGroupId: target.groupId,
-        visualGroupKey: target.key,
-        visualGroupLabel: target.label,
-        imageType,
-        promptUsed,
-        promptKind: runtime.promptKind,
-        modelReferenceKey: modelReference?.key ?? null,
-        modelReferenceStorageId: modelReference?.storageId ?? null,
-        modelReferenceUrl: null,
-        useVibeAnalysis: runtime.useVibeAnalysis,
-        referenceImageCount,
-        sourceImageUrls: references,
-        sourceImageUrl: references[0] ?? null,
-        sourceImageUrl2: references[1] ?? null,
-        background: backgroundConfigFrom(template),
-      });
       }
     }
   }

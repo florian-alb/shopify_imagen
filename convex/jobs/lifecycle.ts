@@ -8,7 +8,11 @@ export function isTerminalJobStatus(status: GenerationJobStatus) {
 }
 
 export function isActiveImageStatus(status: GeneratedImageStatus) {
-  return status === "queued" || status === "generating";
+  return (
+    status === "queued" ||
+    status === "generating" ||
+    status === "postprocessing"
+  );
 }
 
 export function isRetryableImageStatus(status: GeneratedImageStatus) {
@@ -16,7 +20,8 @@ export function isRetryableImageStatus(status: GeneratedImageStatus) {
     status === "failed" ||
     status === "canceled" ||
     status === "queued" ||
-    status === "generating"
+    status === "generating" ||
+    status === "postprocessing"
   );
 }
 
@@ -51,6 +56,14 @@ export function retryImagePatch(now: number) {
     reviewedAt: undefined,
     reviewedByUserId: undefined,
     error: null,
+    batchSegmentId: null,
+    providerBatchId: null,
+    providerRequestId: null,
+    providerResponseId: null,
+    postProcessingInputUrl: null,
+    postProcessingInputContentType: null,
+    postProcessingInputExtension: null,
+    postProcessingStartedAt: null,
     updatedAt: now,
   };
 }

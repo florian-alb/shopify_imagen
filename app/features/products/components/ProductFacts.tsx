@@ -13,7 +13,7 @@ export function ProductFacts({
   imageCount: number;
 }) {
   return (
-    <section className="studio-card rounded-lg border p-4">
+    <section className="rounded-lg border bg-card p-4">
       <dl className="grid gap-x-10 gap-y-4 text-sm sm:grid-cols-2">
         <Fact
           label="Collections"

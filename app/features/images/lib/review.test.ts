@@ -33,6 +33,11 @@ describe("generated image review helpers", () => {
     expect(isReviewable(generatedImage({ status: "uploaded" }))).toBe(true);
     expect(isReviewable(generatedImage({ storageUrl: undefined }))).toBe(false);
     expect(isReviewable(generatedImage({ status: "failed" }))).toBe(false);
+    expect(
+      isReviewable(
+        generatedImage({ activeRetryImageId: "retry-image-id" as never }),
+      ),
+    ).toBe(false);
   });
 
   it("marks only approved reviewable images as push ready", () => {
@@ -78,6 +83,23 @@ describe("generated image state helpers", () => {
     expect(generatedImageStateTone(generatedImage({ status: "uploaded" }))).toBe(
       "success",
     );
+
+    expect(
+      generatedImageStateLabel(
+        generatedImage({
+          status: "failed",
+          activeRetryImageId: "retry-image-id" as never,
+        }),
+      ),
+    ).toBe("Regenerating");
+    expect(
+      generatedImageStateTone(
+        generatedImage({
+          status: "failed",
+          activeRetryImageId: "retry-image-id" as never,
+        }),
+      ),
+    ).toBe("warning");
 
     expect(generatedImageStateLabel(generatedImage({ status: "failed" }))).toBe(
       "Error",

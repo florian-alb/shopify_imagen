@@ -98,6 +98,17 @@ export const PRODUCT_VARIANT_APPEND_MEDIA_MUTATION = `#graphql
   }
 `;
 
+export const SHOPIFY_AUTHORIZATION_STATUS_QUERY = `#graphql
+  query ShopifyAuthorizationStatus {
+    currentAppInstallation {
+      app {
+        requestedAccessScopes { handle }
+      }
+      accessScopes { handle }
+    }
+  }
+`;
+
 export const PRODUCT_DUPLICATE_MUTATION = `#graphql
   mutation DuplicateProductForVisualGroup(
     $productId: ID!
@@ -130,6 +141,27 @@ export const PRODUCT_DUPLICATE_MUTATION = `#graphql
   }
 `;
 
+export const PRODUCT_MEDIA_FILE_STATUS_QUERY = `#graphql
+  query ProductMediaFileStatus($id: ID!) {
+    product(id: $id) {
+      id
+      media(first: 250) {
+        nodes {
+          id
+          alt
+          mediaContentType
+          status
+          ... on MediaImage {
+            fileStatus
+            image { url altText }
+            originalSource { url fileSize }
+          }
+        }
+      }
+    }
+  }
+`;
+
 export const PRODUCT_VARIANTS_BULK_DELETE_MUTATION = `#graphql
   mutation DeleteUnmatchedVisualVariants(
     $productId: ID!
@@ -141,6 +173,40 @@ export const PRODUCT_VARIANTS_BULK_DELETE_MUTATION = `#graphql
     ) {
       product { id }
       userErrors { field message }
+    }
+  }
+`;
+
+export const MEDIA_IMAGE_FILE_STATUS_QUERY = `#graphql
+  query MediaImageFileStatus($id: ID!) {
+    node(id: $id) {
+      ... on MediaImage {
+        id
+        alt
+        mediaContentType
+        status
+        fileStatus
+        image { url altText }
+        originalSource { url fileSize }
+      }
+    }
+  }
+`;
+
+export const FILE_UPDATE_MUTATION = `#graphql
+  mutation BulkFileUpdate($files: [FileUpdateInput!]!) {
+    fileUpdate(files: $files) {
+      files { id fileStatus }
+      userErrors { field message code }
+    }
+  }
+`;
+
+export const FILE_ACKNOWLEDGE_UPDATE_FAILED_MUTATION = `#graphql
+  mutation BulkFileAcknowledgeUpdateFailed($fileIds: [ID!]!) {
+    fileAcknowledgeUpdateFailed(fileIds: $fileIds) {
+      files { id fileStatus }
+      userErrors { field message code }
     }
   }
 `;

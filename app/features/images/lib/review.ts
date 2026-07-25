@@ -27,6 +27,7 @@ export function getReviewStatus(image: Doc<"generatedImages">): ReviewStatus {
 
 export function isReviewable(image: Doc<"generatedImages">) {
   return (
+    !image.activeRetryImageId &&
     Boolean(image.storageUrl) &&
     (image.status === "generated" || image.status === "uploaded")
   );

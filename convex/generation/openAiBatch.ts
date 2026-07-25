@@ -2,8 +2,12 @@
 
 import { openAiUsage, OUTPUT_FORMAT_TO_MIME } from "./formats";
 import { normalizeReferenceImage } from "./images";
-import { uploadToR2 } from "./storage";
-import { env } from "./runtime";
+import {
+  deleteKeyFromR2,
+  deleteR2ObjectsWithPrefix,
+  uploadToR2,
+} from "./storage";
+import { env, log } from "./runtime";
 import { mapConcurrent } from "./concurrency";
 import {
   isTransientPollStatus,
@@ -23,6 +27,56 @@ export type OpenAiBatchImage = {
   promptKind?: PromptKind | string | null;
   modelReferenceUrl?: string | null;
 };
+
+const OPENAI_BATCH_REFERENCE_PREFIX = "batch-references";
+const OPENAI_BATCH_REFERENCE_TTL_MS = 48 * 60 * 60 * 1000;
+
+export function openAiBatchReferenceKey(imageId: string, index: number) {
+  return `${OPENAI_BATCH_REFERENCE_PREFIX}/${imageId}-${index}.jpg`;
+}
+
+export async function cleanupOpenAiBatchReferencesForImage(
+  image: OpenAiBatchImage,
+) {
+  const referenceCount = generationInputUrlsForImage(image).length;
+  if (!referenceCount) return;
+  await mapConcurrent(
+    Array.from({ length: referenceCount }, (_, index) => index),
+    3,
+    async (index) => {
+      const key = openAiBatchReferenceKey(image._id, index);
+      try {
+        await deleteKeyFromR2(key);
+      } catch (error) {
+        log("batch", "OpenAI batch reference cleanup failed", {
+          imageId: image._id,
+          key,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    },
+  );
+}
+
+export async function cleanupOpenAiBatchReferencesForImages(
+  images: OpenAiBatchImage[],
+) {
+  await mapConcurrent(images, 3, cleanupOpenAiBatchReferencesForImage);
+}
+
+export async function cleanupStaleOpenAiBatchReferencesFromR2() {
+  const result = await deleteR2ObjectsWithPrefix({
+    prefix: `${OPENAI_BATCH_REFERENCE_PREFIX}/`,
+    olderThanMs: OPENAI_BATCH_REFERENCE_TTL_MS,
+    limit: 500,
+  });
+  if (result.deleted) {
+    log("batch", "cleaned stale OpenAI batch references", {
+      deleted: result.deleted,
+    });
+  }
+  return result;
+}
 
 export async function submitOpenAiBatch(args: {
   images: OpenAiBatchImage[];
@@ -59,7 +113,7 @@ export async function submitOpenAiBatch(args: {
       );
       const referenceUrl = await uploadToR2({
         bytes: referenceBytes,
-        key: `batch-references/${image._id}-${index}.jpg`,
+        key: openAiBatchReferenceKey(image._id, index),
         contentType: "image/jpeg",
       });
       staged.push({ image_url: referenceUrl });

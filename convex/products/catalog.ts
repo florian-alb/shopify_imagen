@@ -39,6 +39,9 @@ export function lightProduct(product: Doc<"products">) {
   const reviewState = product.reviewState ?? legacyReviewState(product);
   const publishState = product.publishState ?? legacyPublishState(product);
   const primaryAction = product.primaryAction ?? legacyPrimaryAction(generationState, reviewState, publishState);
+  const featuredImage = product.currentShopifyImages[0] as
+    | { url?: string | null; displayUrl?: string | null }
+    | undefined;
   return {
     _id: product._id,
     _creationTime: product._creationTime,
@@ -49,6 +52,10 @@ export function lightProduct(product: Doc<"products">) {
     productType: product.productType,
     shopifyStatus: product.shopifyStatus,
     featuredImageUrl: product.featuredImageUrl,
+    featuredImageDisplayUrl:
+      featuredImage?.displayUrl ??
+      featuredImage?.url ??
+      product.featuredImageUrl,
     shopifyImageCount: product.shopifyImageCount ?? product.currentShopifyImages.length,
     generationStatus: product.generationStatus,
     generationState,

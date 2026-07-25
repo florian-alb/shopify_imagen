@@ -14,6 +14,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as SettingsIndexRouteImport } from './routes/settings/index'
 import { Route as ProductsIndexRouteImport } from './routes/products/index'
 import { Route as JobsIndexRouteImport } from './routes/jobs/index'
+import { Route as BulkOperationsIndexRouteImport } from './routes/bulk-operations/index'
 import { Route as SettingsPromptsRouteImport } from './routes/settings/prompts'
 import { Route as ProductsProductIdRouteImport } from './routes/products/$productId'
 import { Route as JobsJobIdRouteImport } from './routes/jobs/$jobId'
@@ -43,6 +44,11 @@ const JobsIndexRoute = JobsIndexRouteImport.update({
   path: '/jobs/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const BulkOperationsIndexRoute = BulkOperationsIndexRouteImport.update({
+  id: '/bulk-operations/',
+  path: '/bulk-operations/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SettingsPromptsRoute = SettingsPromptsRouteImport.update({
   id: '/settings/prompts',
   path: '/settings/prompts',
@@ -65,6 +71,7 @@ export interface FileRoutesByFullPath {
   '/jobs/$jobId': typeof JobsJobIdRoute
   '/products/$productId': typeof ProductsProductIdRoute
   '/settings/prompts': typeof SettingsPromptsRoute
+  '/bulk-operations/': typeof BulkOperationsIndexRoute
   '/jobs/': typeof JobsIndexRoute
   '/products/': typeof ProductsIndexRoute
   '/settings/': typeof SettingsIndexRoute
@@ -75,6 +82,7 @@ export interface FileRoutesByTo {
   '/jobs/$jobId': typeof JobsJobIdRoute
   '/products/$productId': typeof ProductsProductIdRoute
   '/settings/prompts': typeof SettingsPromptsRoute
+  '/bulk-operations': typeof BulkOperationsIndexRoute
   '/jobs': typeof JobsIndexRoute
   '/products': typeof ProductsIndexRoute
   '/settings': typeof SettingsIndexRoute
@@ -86,6 +94,7 @@ export interface FileRoutesById {
   '/jobs/$jobId': typeof JobsJobIdRoute
   '/products/$productId': typeof ProductsProductIdRoute
   '/settings/prompts': typeof SettingsPromptsRoute
+  '/bulk-operations/': typeof BulkOperationsIndexRoute
   '/jobs/': typeof JobsIndexRoute
   '/products/': typeof ProductsIndexRoute
   '/settings/': typeof SettingsIndexRoute
@@ -98,6 +107,7 @@ export interface FileRouteTypes {
     | '/jobs/$jobId'
     | '/products/$productId'
     | '/settings/prompts'
+    | '/bulk-operations/'
     | '/jobs/'
     | '/products/'
     | '/settings/'
@@ -108,6 +118,7 @@ export interface FileRouteTypes {
     | '/jobs/$jobId'
     | '/products/$productId'
     | '/settings/prompts'
+    | '/bulk-operations'
     | '/jobs'
     | '/products'
     | '/settings'
@@ -118,6 +129,7 @@ export interface FileRouteTypes {
     | '/jobs/$jobId'
     | '/products/$productId'
     | '/settings/prompts'
+    | '/bulk-operations/'
     | '/jobs/'
     | '/products/'
     | '/settings/'
@@ -129,6 +141,7 @@ export interface RootRouteChildren {
   JobsJobIdRoute: typeof JobsJobIdRoute
   ProductsProductIdRoute: typeof ProductsProductIdRoute
   SettingsPromptsRoute: typeof SettingsPromptsRoute
+  BulkOperationsIndexRoute: typeof BulkOperationsIndexRoute
   JobsIndexRoute: typeof JobsIndexRoute
   ProductsIndexRoute: typeof ProductsIndexRoute
   SettingsIndexRoute: typeof SettingsIndexRoute
@@ -171,6 +184,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof JobsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/bulk-operations/': {
+      id: '/bulk-operations/'
+      path: '/bulk-operations'
+      fullPath: '/bulk-operations/'
+      preLoaderRoute: typeof BulkOperationsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings/prompts': {
       id: '/settings/prompts'
       path: '/settings/prompts'
@@ -201,6 +221,7 @@ const rootRouteChildren: RootRouteChildren = {
   JobsJobIdRoute: JobsJobIdRoute,
   ProductsProductIdRoute: ProductsProductIdRoute,
   SettingsPromptsRoute: SettingsPromptsRoute,
+  BulkOperationsIndexRoute: BulkOperationsIndexRoute,
   JobsIndexRoute: JobsIndexRoute,
   ProductsIndexRoute: ProductsIndexRoute,
   SettingsIndexRoute: SettingsIndexRoute,

@@ -2,7 +2,15 @@ import type { Doc } from "../_generated/dataModel";
 
 export function calculateProductStatus(images: Doc<"generatedImages">[]): Doc<"products">["generationStatus"] {
   if (!images.length) return "not_started";
-  if (images.some((image) => image.status === "generating" || image.status === "queued")) return "generating";
+  if (
+    images.some(
+      (image) =>
+        image.status === "generating" ||
+        image.status === "queued" ||
+        image.status === "postprocessing",
+    )
+  )
+    return "generating";
 
   const reviewable = images.filter(
     (image) => image.storageUrl && (image.status === "generated" || image.status === "uploaded")
@@ -24,7 +32,12 @@ export function calculateProductStatus(images: Doc<"generatedImages">[]): Doc<"p
 
 export function calculateProductWorkflow(images: Doc<"generatedImages">[]) {
   const totalImageCount = images.length;
-  const runningImageCount = images.filter((image) => image.status === "queued" || image.status === "generating").length;
+  const runningImageCount = images.filter(
+    (image) =>
+      image.status === "queued" ||
+      image.status === "generating" ||
+      image.status === "postprocessing",
+  ).length;
   const failedImageCount = images.filter((image) => image.status === "failed").length;
   const canceledImageCount = images.filter((image) => image.status === "canceled").length;
   const reviewable = images.filter(

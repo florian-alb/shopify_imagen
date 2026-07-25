@@ -7,6 +7,7 @@ import { errorMessage } from "@/lib/errors";
 import { api, type Doc, type Id } from "@/lib/convex";
 
 import type { VisualGroupsData } from "../types";
+import { useImageTypeSelection } from "./useImageTypeSelection";
 
 export function useProductImageGeneration({
   product,
@@ -19,21 +20,19 @@ export function useProductImageGeneration({
 }) {
   const navigate = useNavigate();
   const createJob = useMutation(api.jobs.create);
-  const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set());
   const [selectedGroupIds, setSelectedGroupIds] = useState<
     Set<Id<"visualGroups">>
   >(new Set());
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const imageTypeSelection = useImageTypeSelection(availableTypes);
 
   function openGenerate() {
     if (visualGroupsData === undefined) {
       toast.info("Chargement de la configuration des variantes");
       return;
     }
-    const presets = availableTypes.filter((type) => type.isPreset);
-    const defaults = presets.length ? presets : availableTypes;
-    setSelectedTypes(new Set(defaults.map((type) => type.imageType)));
+    imageTypeSelection.resetSelection();
     setSelectedGroupIds(
       new Set(
         (visualGroupsData?.groups ?? [])
@@ -42,15 +41,6 @@ export function useProductImageGeneration({
       ),
     );
     setOpen(true);
-  }
-
-  function toggleType(type: string) {
-    setSelectedTypes((current) => {
-      const next = new Set(current);
-      if (next.has(type)) next.delete(type);
-      else next.add(type);
-      return next;
-    });
   }
 
   function toggleGroup(groupId: Id<"visualGroups">) {
@@ -63,13 +53,13 @@ export function useProductImageGeneration({
   }
 
   async function generate() {
-    if (!product || !selectedTypes.size) return;
+    if (!product || !imageTypeSelection.selectedTypes.size) return;
     if (visualGroupsData?.config && !selectedGroupIds.size) return;
     setBusy(true);
     try {
       const jobId = await createJob({
         productIds: [product._id],
-        selectedImageTypes: Array.from(selectedTypes),
+        selectedImageTypes: Array.from(imageTypeSelection.selectedTypes),
         ...(visualGroupsData?.config
           ? { visualGroupIds: Array.from(selectedGroupIds) }
           : {}),
@@ -94,13 +84,13 @@ export function useProductImageGeneration({
   }
 
   return {
-    selectedTypes,
+    selectedTypes: imageTypeSelection.selectedTypes,
     selectedGroupIds,
     open,
     setOpen,
     busy,
     openGenerate,
-    toggleType,
+    toggleType: imageTypeSelection.toggleType,
     toggleGroup,
     generate,
   };
