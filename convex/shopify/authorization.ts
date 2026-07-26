@@ -34,6 +34,23 @@ export type ShopifyAuthorizationStatus = {
   checkedAt: number;
 };
 
+export function buildShopifyAuthorizationRequiredStatus(
+  shopDomain: string,
+  checkedAt = Date.now(),
+): ShopifyAuthorizationStatus {
+  return {
+    shopDomain: normalizeShopDomain(shopDomain),
+    status: "requested",
+    scopes: {
+      missing: [],
+      requested: [...REQUIRED_SHOPIFY_ADMIN_SCOPES],
+      granted: [],
+    },
+    authorizationUrl: null,
+    checkedAt,
+  };
+}
+
 function normalizeScopeHandles(scopes: Array<{ handle: string }>) {
   return new Set(
     scopes
@@ -83,6 +100,10 @@ export function buildShopifyAuthorizationStatus(
 export async function fetchShopifyAuthorizationStatus(
   credentials: ShopifyCredentials,
 ) {
+  if (credentials.shopId && !credentials.accessToken) {
+    return buildShopifyAuthorizationRequiredStatus(credentials.domain);
+  }
+
   const data = await shopifyGraphql<{
     currentAppInstallation: ShopifyAuthorizationInstallation | null;
   }>(SHOPIFY_AUTHORIZATION_STATUS_QUERY, {}, undefined, credentials);
