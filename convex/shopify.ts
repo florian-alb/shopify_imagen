@@ -60,6 +60,7 @@ const REJECTED_IMAGE_RETENTION_MS = 5 * 24 * 60 * 60 * 1000;
 const REJECTED_IMAGE_CLEANUP_BATCH_SIZE = 50;
 const SHOPIFY_OAUTH_ATTEMPT_TTL_MS = 10 * 60 * 1000;
 const SHOPIFY_OAUTH_CLEANUP_BATCH_SIZE = 50;
+const SHOPIFY_PRODUCT_SYNC_PAGE_SIZE = 25;
 
 const shopifyAuthorizationStatusValidator = v.object({
   shopDomain: v.string(),
@@ -280,7 +281,10 @@ export const syncProducts = action({
     let after: string | null = null;
 
     while (syncedIds.length < limit) {
-      const first = Math.min(50, limit - syncedIds.length);
+      const first = Math.min(
+        SHOPIFY_PRODUCT_SYNC_PAGE_SIZE,
+        limit - syncedIds.length,
+      );
       const data: ProductsResponse = await shopifyGraphql<ProductsResponse>(
         PRODUCTS_QUERY,
         {
