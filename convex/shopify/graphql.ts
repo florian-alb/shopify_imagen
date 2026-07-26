@@ -71,6 +71,17 @@ export const PRODUCT_QUERY = `#graphql
   }
 `;
 
+export const GENERATED_MEDIA_STATUS_QUERY = `#graphql
+  query GeneratedMediaStatus($mediaIds: [ID!]!) {
+    nodes(ids: $mediaIds) {
+      ... on MediaImage {
+        id
+        status
+      }
+    }
+  }
+`;
+
 export const PRODUCT_UPDATE_MEDIA_MUTATION = `#graphql
   mutation ProductUpdateWithGeneratedMedia($product: ProductUpdateInput!, $media: [CreateMediaInput!]) {
     productUpdate(product: $product, media: $media) {
@@ -80,45 +91,22 @@ export const PRODUCT_UPDATE_MEDIA_MUTATION = `#graphql
   }
 `;
 
-export const PRODUCT_VARIANT_APPEND_MEDIA_MUTATION = `#graphql
-  mutation ProductVariantAppendGeneratedMedia(
+export const PRODUCT_VARIANTS_BULK_UPDATE_MEDIA_MUTATION = `#graphql
+  mutation ReplaceVariantMedia(
     $productId: ID!
-    $variantMedia: [ProductVariantAppendMediaInput!]!
+    $variants: [ProductVariantsBulkInput!]!
   ) {
-    productVariantAppendMedia(
+    productVariantsBulkUpdate(
       productId: $productId
-      variantMedia: $variantMedia
+      variants: $variants
     ) {
       productVariants {
         id
-        media(first: 20) { nodes { id } }
-      }
-      userErrors { field message }
-    }
-  }
-`;
-
-export const PRODUCT_VARIANT_DETACH_MEDIA_MUTATION = `#graphql
-  mutation ProductVariantDetachGeneratedMedia(
-    $productId: ID!
-    $variantMedia: [ProductVariantDetachMediaInput!]!
-  ) {
-    productVariantDetachMedia(
-      productId: $productId
-      variantMedia: $variantMedia
-    ) {
-      productVariants {
-        id
-        media(first: 20) {
-          nodes {
-            id
-          }
+        media(first: 1) {
+          nodes { id }
         }
       }
-      userErrors {
-        field
-        message
-      }
+      userErrors { field message }
     }
   }
 `;

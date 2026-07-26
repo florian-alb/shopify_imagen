@@ -30,15 +30,20 @@ import {
 } from "./shopify/oauth";
 import { buildMediaMoves, sameIds, throwUserErrors } from "./shopify/media";
 import { mapProductForUpsert } from "./shopify/productMapping";
-import { buildVariantMediaPlan } from "./shopify/variantMedia";
 import {
+  buildVariantMediaUpdates,
+  imageForPromptOne,
+  promptOneImageType,
+  shopifyMediaReadiness,
+} from "./shopify/variantMedia";
+import {
+  GENERATED_MEDIA_STATUS_QUERY,
   PRODUCT_DELETE_MEDIA_MUTATION,
   PRODUCT_DUPLICATE_MUTATION,
   PRODUCT_QUERY,
   PRODUCT_REORDER_MEDIA_MUTATION,
   PRODUCT_UPDATE_MEDIA_MUTATION,
-  PRODUCT_VARIANT_APPEND_MEDIA_MUTATION,
-  PRODUCT_VARIANT_DETACH_MEDIA_MUTATION,
+  PRODUCT_VARIANTS_BULK_UPDATE_MEDIA_MUTATION,
   PRODUCT_VARIANTS_BULK_DELETE_MUTATION,
   PRODUCTS_QUERY,
   SHOPIFY_JOB_QUERY,
@@ -526,6 +531,49 @@ async function createGeneratedMedia(args: {
   };
 }
 
+const SHOPIFY_MEDIA_READY_TIMEOUT_MS = 60_000;
+
+async function waitForGeneratedMediaReady(args: {
+  mediaId: string;
+  credentials: ShopifyCredentials;
+}) {
+  const deadline = Date.now() + SHOPIFY_MEDIA_READY_TIMEOUT_MS;
+  let attempt = 0;
+  let lastStatus: string | null = null;
+
+  while (Date.now() < deadline) {
+    const result = await shopifyGraphql<{
+      nodes?: Array<{ id?: string | null; status?: string | null } | null>;
+    }>(
+      GENERATED_MEDIA_STATUS_QUERY,
+      { mediaIds: [args.mediaId] },
+      undefined,
+      args.credentials,
+    );
+    const media = result.nodes?.find((node) => node?.id === args.mediaId);
+    lastStatus = media?.status ?? null;
+    const readiness = shopifyMediaReadiness(lastStatus);
+    if (readiness === "ready") return;
+    if (readiness === "failed") {
+      throw new Error(
+        `Shopify failed to process generated media ${args.mediaId}.`,
+      );
+    }
+
+    const delayMs = Math.min(5_000, Math.round(500 * 1.5 ** attempt));
+    attempt += 1;
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) break;
+    await new Promise((resolve) =>
+      setTimeout(resolve, Math.min(delayMs, remainingMs)),
+    );
+  }
+
+  throw new Error(
+    `Shopify media ${args.mediaId} was not ready after ${SHOPIFY_MEDIA_READY_TIMEOUT_MS / 1000} seconds (last status: ${lastStatus ?? "not found"}).`,
+  );
+}
+
 async function setPrimaryMediaOnVariants(args: {
   productId: string;
   variants: Array<{ id: string; mediaIds: string[] }>;
@@ -535,43 +583,40 @@ async function setPrimaryMediaOnVariants(args: {
 }) {
   if (!args.variants.length || !args.primaryMediaId) return;
 
-  const plan = buildVariantMediaPlan({
+  const updates = buildVariantMediaUpdates({
     variants: args.variants,
     primaryMediaId: args.primaryMediaId,
     replaceExisting: args.replaceExisting,
   });
+  if (!updates.length) return;
 
-  if (plan.detach.length) {
-    const detached = await shopifyGraphql<any>(
-      PRODUCT_VARIANT_DETACH_MEDIA_MUTATION,
-      {
-        productId: args.productId,
-        variantMedia: plan.detach,
-      },
-      undefined,
-      args.credentials,
-    );
-    throwUserErrors(
-      detached.productVariantDetachMedia?.userErrors,
-      "Shopify variant media replacement failed",
+  await waitForGeneratedMediaReady({
+    mediaId: args.primaryMediaId,
+    credentials: args.credentials,
+  });
+
+  const updated = await shopifyGraphql<{
+    productVariantsBulkUpdate?: {
+      userErrors?: Array<{ field?: string[] | null; message: string }>;
+    } | null;
+  }>(
+    PRODUCT_VARIANTS_BULK_UPDATE_MEDIA_MUTATION,
+    {
+      productId: args.productId,
+      variants: updates,
+    },
+    undefined,
+    args.credentials,
+  );
+  if (!updated.productVariantsBulkUpdate) {
+    throw new ConvexError(
+      "Shopify variant media replacement failed: Shopify returned no bulk update payload.",
     );
   }
-
-  if (plan.append.length) {
-    const appended = await shopifyGraphql<any>(
-      PRODUCT_VARIANT_APPEND_MEDIA_MUTATION,
-      {
-        productId: args.productId,
-        variantMedia: plan.append,
-      },
-      undefined,
-      args.credentials,
-    );
-    throwUserErrors(
-      appended.productVariantAppendMedia?.userErrors,
-      "Shopify variant media association failed",
-    );
-  }
+  throwUserErrors(
+    updated.productVariantsBulkUpdate.userErrors,
+    "Shopify variant media replacement failed",
+  );
 }
 
 function shopifyVariantMediaIds(variant: {
@@ -599,6 +644,7 @@ async function publishAsSeparateProducts(args: {
   product: Doc<"products">;
   ready: Doc<"generatedImages">[];
   targets: VisualGroupTarget[];
+  promptOneImageType: string | null;
   replaceVariantMedia: boolean;
   credentials: ShopifyCredentials;
 }) {
@@ -716,17 +762,25 @@ async function publishAsSeparateProducts(args: {
               .map(String),
           ),
     });
-    const primaryMediaId = created.mediaIdByImageId.get(groupImages[0]._id)!;
-    await setPrimaryMediaOnVariants({
-      productId: publishedProduct.id,
-      variants: keptVariants.map((variant) => ({
-        id: variant.id,
-        mediaIds: shopifyVariantMediaIds(variant),
-      })),
-      primaryMediaId,
-      replaceExisting: isNewProduct || args.replaceVariantMedia,
-      credentials: args.credentials,
-    });
+    const promptOneImage = imageForPromptOne(
+      groupImages,
+      args.promptOneImageType,
+    );
+    const primaryMediaId = promptOneImage
+      ? created.mediaIdByImageId.get(promptOneImage._id)
+      : undefined;
+    if (primaryMediaId) {
+      await setPrimaryMediaOnVariants({
+        productId: publishedProduct.id,
+        variants: keptVariants.map((variant) => ({
+          id: variant.id,
+          mediaIds: shopifyVariantMediaIds(variant),
+        })),
+        primaryMediaId,
+        replaceExisting: isNewProduct || args.replaceVariantMedia,
+        credentials: args.credentials,
+      });
+    }
 
     for (const image of groupImages) {
       await args.ctx.runMutation(internal.shopify.markImagePushed, {
@@ -802,6 +856,7 @@ export const pushProductImages = action({
         shopId: product.shopId ?? null,
       },
     )) as Array<{ imageType: string; position: number | null }>;
+    const primaryVariantImageType = promptOneImageType(promptOrderEntries);
     const promptOrder = new Map(
       promptOrderEntries.map((entry) => [
         entry.imageType,
@@ -826,6 +881,27 @@ export const pushProductImages = action({
           groupIds: visualGroupIds,
         })) as VisualGroupTarget[])
       : [];
+    if (replaceVariantMedia && targets.length) {
+      if (!primaryVariantImageType) {
+        throw new Error(
+          "Configure a prompt in position 1 before replacing variant images.",
+        );
+      }
+      const targetMissingPromptOne = targets.find((target) => {
+        const groupImages = ready.filter(
+          (image) => image.visualGroupId === target.group._id,
+        );
+        return (
+          groupImages.length > 0 &&
+          !imageForPromptOne(groupImages, primaryVariantImageType)
+        );
+      });
+      if (targetMissingPromptOne) {
+        throw new Error(
+          `Select and approve the prompt 1 image for "${targetMissingPromptOne.group.label}" before replacing its variant images.`,
+        );
+      }
+    }
     const visualContext = (await ctx.runQuery(
       internal.visualGroups.analysisContext,
       {
@@ -843,6 +919,7 @@ export const pushProductImages = action({
         product,
         ready,
         targets,
+        promptOneImageType: primaryVariantImageType,
         replaceVariantMedia,
         credentials,
       });
@@ -883,8 +960,12 @@ export const pushProductImages = action({
       const groupImages = ready.filter(
         (image) => image.visualGroupId === target.group._id,
       );
-      const primaryMediaId = groupImages[0]
-        ? created.mediaIdByImageId.get(groupImages[0]._id)
+      const promptOneImage = imageForPromptOne(
+        groupImages,
+        primaryVariantImageType,
+      );
+      const primaryMediaId = promptOneImage
+        ? created.mediaIdByImageId.get(promptOneImage._id)
         : undefined;
       if (!primaryMediaId) continue;
 

@@ -1,5 +1,8 @@
+import { CheckCheck } from "lucide-react";
+
 import type { LightboxImage } from "@/components/common/Lightbox";
-import { StateBadge } from "@/components/page";
+import { BusyIcon, StateBadge } from "@/components/page";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   GeneratedImageTile,
@@ -15,7 +18,9 @@ export function GeneratedImagesGallery({
   pendingCount,
   rejectedCount,
   reviewingImageId,
+  reviewingAll,
   onReview,
+  onApproveAll,
   onRetouch,
   onDelete,
   onZoom,
@@ -27,15 +32,18 @@ export function GeneratedImagesGallery({
   pendingCount: number;
   rejectedCount: number;
   reviewingImageId: Id<"generatedImages"> | null;
+  reviewingAll: boolean;
   onReview: (
     image: Doc<"generatedImages">,
     reviewStatus: "approved" | "rejected",
   ) => void;
+  onApproveAll: () => void;
   onRetouch: (image: Doc<"generatedImages">) => void;
   onDelete: (image: Doc<"generatedImages">) => void;
   onZoom: (images: LightboxImage[], index: number) => void;
 }) {
-  const itemCount = generatedGalleryImages.length + generatingGalleryImages.length;
+  const itemCount =
+    generatedGalleryImages.length + generatingGalleryImages.length;
   const lightboxImages = generatedGalleryImages
     .filter((image) => image.storageUrl)
     .map((image) => ({
@@ -47,9 +55,23 @@ export function GeneratedImagesGallery({
 
   return (
     <Card className="min-h-72 rounded-lg">
-      <CardHeader className="flex flex-row items-center justify-between">
+      <CardHeader className="flex flex-row items-center justify-between gap-3">
         <CardTitle className="text-lg">{title}</CardTitle>
-        <StateBadge>{itemCount}</StateBadge>
+        <div className="flex shrink-0 items-center gap-2">
+          {pendingCount ? (
+            <Button
+              type="button"
+              size="sm"
+              disabled={reviewingAll || Boolean(reviewingImageId)}
+              onClick={onApproveAll}
+            >
+              <BusyIcon busy={reviewingAll} />
+              {!reviewingAll ? <CheckCheck data-icon="inline-start" /> : null}
+              Tout approuver
+            </Button>
+          ) : null}
+          <StateBadge>{itemCount}</StateBadge>
+        </div>
       </CardHeader>
       <CardContent>
         <p className="mb-3 text-xs text-muted-foreground">
@@ -69,13 +91,15 @@ export function GeneratedImagesGallery({
                   <GeneratedImageTile
                     key={image._id}
                     image={image}
-                    reviewing={reviewingImageId === image._id}
+                    reviewing={reviewingAll || reviewingImageId === image._id}
                     onPreview={
                       lightboxIndex >= 0
                         ? () => onZoom(lightboxImages, lightboxIndex)
                         : undefined
                     }
-                    onReview={(reviewStatus) => void onReview(image, reviewStatus)}
+                    onReview={(reviewStatus) =>
+                      void onReview(image, reviewStatus)
+                    }
                     onRetouch={() => onRetouch(image)}
                     onDelete={() => onDelete(image)}
                   />

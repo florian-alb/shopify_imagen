@@ -16,7 +16,9 @@ export function ProductImagesSection({
   pendingCount,
   rejectedCount,
   reviewingImageId,
+  reviewingAll,
   onReview,
+  onApproveAll,
   onRetouch,
   onDelete,
   onZoom,
@@ -31,10 +33,12 @@ export function ProductImagesSection({
   pendingCount: number;
   rejectedCount: number;
   reviewingImageId: Id<"generatedImages"> | null;
+  reviewingAll: boolean;
   onReview: (
     image: Doc<"generatedImages">,
     reviewStatus: "approved" | "rejected",
   ) => void;
+  onApproveAll: () => void;
   onRetouch: (image: Doc<"generatedImages">) => void;
   onDelete: (image: Doc<"generatedImages">) => void;
   onZoom: Parameters<typeof ShopifyImagesGallery>[0]["onZoom"];
@@ -66,7 +70,9 @@ export function ProductImagesSection({
           pendingCount={pendingCount}
           rejectedCount={rejectedCount}
           reviewingImageId={reviewingImageId}
+          reviewingAll={reviewingAll}
           onReview={onReview}
+          onApproveAll={onApproveAll}
           onRetouch={onRetouch}
           onDelete={onDelete}
           onZoom={onZoom}

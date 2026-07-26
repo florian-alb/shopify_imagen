@@ -154,7 +154,11 @@ export function ProductDetailPage({
       pendingCount={displayedViewModel.pendingImages.length}
       rejectedCount={displayedViewModel.rejectedImages.length}
       reviewingImageId={review.reviewingImageId}
+      reviewingAll={review.reviewingAll}
       onReview={review.setImageReview}
+      onApproveAll={() =>
+        void review.approveAll(displayedViewModel.pendingImages)
+      }
       onRetouch={retouch.openRetouch}
       onDelete={deletion.setTarget}
       onZoom={lightbox.open}
@@ -292,6 +296,7 @@ export function ProductDetailPage({
         setReplaceVariantMedia={publish.setReplaceVariantMedia}
         hasVisualGroups={Boolean(visualGroupsData?.config)}
         visualGroupsData={visualGroupsData}
+        primaryVariantImageType={detail.prompts?.[0]?.imageType ?? null}
         focusedGroupId={publish.focusedGroupId}
         busy={publish.busy}
         onPush={() => void publish.push()}
