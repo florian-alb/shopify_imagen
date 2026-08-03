@@ -3,12 +3,17 @@ import { internal } from "./_generated/api";
 
 const crons = cronJobs();
 
-// Batch image jobs are asynchronous: this poll checks every pending provider
-// batch, retrieves finished images, and completes the job once results arrive.
-crons.interval("poll image batches", { minutes: 2 }, internal.generation.pollBatches, {});
+// Active batch jobs schedule their own provider polls with adaptive backoff.
+// This slower watchdog only recovers work if a scheduled poll was interrupted.
+crons.interval(
+  "poll image batches",
+  { minutes: 15 },
+  internal.generation.pollBatches,
+  {},
+);
 crons.interval(
   "resume image post-processing",
-  { minutes: 1 },
+  { minutes: 15 },
   internal.generation.processPostprocessingBacklog,
   {},
 );
@@ -26,13 +31,13 @@ crons.interval(
 );
 crons.interval(
   "resume stale bulk image transforms",
-  { minutes: 5 },
+  { minutes: 15 },
   internal.bulkTransforms.resumeStaleJobs,
   {},
 );
 crons.interval(
   "resume stale bulk image reorders",
-  { minutes: 5 },
+  { minutes: 15 },
   internal.bulkReorders.resumeStaleJobs,
   {},
 );
