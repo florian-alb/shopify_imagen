@@ -39,6 +39,7 @@ export function PublishImagesDialog({
   setReplaceVariantMedia,
   hasVisualGroups,
   visualGroupsData,
+  primaryVariantImageType,
   focusedGroupId,
   busy,
   onPush,
@@ -54,6 +55,7 @@ export function PublishImagesDialog({
   setReplaceVariantMedia: Dispatch<SetStateAction<boolean>>;
   hasVisualGroups: boolean;
   visualGroupsData: VisualGroupsData | null | undefined;
+  primaryVariantImageType: string | null;
   focusedGroupId?: Id<"visualGroups"> | null;
   busy: boolean;
   onPush: () => void;
@@ -67,6 +69,23 @@ export function PublishImagesDialog({
   const selectedProductCount = productGroups.filter((productGroup) =>
     productGroup.images.some((image) => selectedPushIds.has(image._id)),
   ).length;
+  const groupsMissingPromptOne =
+    replaceVariantMedia && primaryVariantImageType
+      ? productGroups.filter(
+          (productGroup) =>
+            productGroup.group &&
+            productGroup.images.some((image) =>
+              selectedPushIds.has(image._id),
+            ) &&
+            !productGroup.images.some(
+              (image) =>
+                image.imageType === primaryVariantImageType &&
+                selectedPushIds.has(image._id),
+            ),
+        )
+      : [];
+  const promptOneConfigurationMissing =
+    replaceVariantMedia && hasVisualGroups && !primaryVariantImageType;
 
   const toggleImage = (imageId: Id<"generatedImages">, checked: boolean) => {
     setSelectedPushIds((current) => {
@@ -88,9 +107,9 @@ export function PublishImagesDialog({
           </AlertDialogTitle>
           <AlertDialogDescription>
             {focusedProductGroup
-              ? "Les images et les variantes Shopify de cette déclinaison uniquement seront mises à jour."
+              ? "Les images de cette déclinaison seront publiées et son image du prompt n° 1 sera assignée à ses variantes Shopify."
               : hasVisualGroups
-                ? "Chaque bloc correspond à une déclinaison du produit mère. La première image sélectionnée sera assignée à ses variantes."
+                ? "Chaque bloc correspond à une déclinaison du produit mère. L’image générée avec le prompt n° 1 sera assignée à ses variantes."
                 : "Choisissez les images approuvées à envoyer sur Shopify."}
           </AlertDialogDescription>
         </AlertDialogHeader>
@@ -106,7 +125,9 @@ export function PublishImagesDialog({
                   {selectedPushIds.size === 1 ? "" : "s"}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  L’ordre des images détermine l’image principale.
+                  {hasVisualGroups
+                    ? "Le prompt n° 1 détermine l’image des variantes."
+                    : "L’ordre des images détermine l’image principale."}
                 </p>
               </div>
               <Label className="flex min-h-11 items-center gap-2 text-sm sm:min-h-8">
@@ -133,10 +154,25 @@ export function PublishImagesDialog({
                   key={productGroup.key}
                   productGroup={productGroup}
                   selectedPushIds={selectedPushIds}
+                  primaryVariantImageType={primaryVariantImageType}
                   onToggleImage={toggleImage}
                 />
               ))}
             </div>
+
+            {promptOneConfigurationMissing ? (
+              <p role="alert" className="text-sm font-medium text-destructive">
+                Configurez un prompt en position n° 1 avant de remplacer les
+                images des variantes.
+              </p>
+            ) : groupsMissingPromptOne.length ? (
+              <p role="alert" className="text-sm font-medium text-destructive">
+                Sélectionnez l’image du prompt n° 1 pour{" "}
+                {groupsMissingPromptOne.length} déclinaison
+                {groupsMissingPromptOne.length === 1 ? "" : "s"} avant de
+                remplacer les images des variantes.
+              </p>
+            ) : null}
 
             <PublishImagesOptions
               hasVisualGroups={hasVisualGroups}
@@ -154,7 +190,12 @@ export function PublishImagesDialog({
           </AlertDialogCancel>
           <Button
             className="min-h-11 sm:min-h-9"
-            disabled={busy || !selectedPushIds.size}
+            disabled={
+              busy ||
+              !selectedPushIds.size ||
+              promptOneConfigurationMissing ||
+              groupsMissingPromptOne.length > 0
+            }
             onClick={onPush}
           >
             <BusyIcon busy={busy} />
@@ -169,16 +210,22 @@ export function PublishImagesDialog({
 function PublishProductBlock({
   productGroup,
   selectedPushIds,
+  primaryVariantImageType,
   onToggleImage,
 }: {
   productGroup: PublishProductGroup;
   selectedPushIds: Set<Id<"generatedImages">>;
+  primaryVariantImageType: string | null;
   onToggleImage: (imageId: Id<"generatedImages">, checked: boolean) => void;
 }) {
   const selectedImages = productGroup.images.filter((image) =>
     selectedPushIds.has(image._id),
   );
-  const primaryImage = selectedImages[0];
+  const primaryImage = productGroup.group
+    ? productGroup.images.find(
+        (image) => image.imageType === primaryVariantImageType,
+      )
+    : selectedImages[0];
   const secondaryImages = productGroup.images.filter(
     (image) => image._id !== primaryImage?._id,
   );
@@ -221,26 +268,35 @@ function PublishProductBlock({
             <span className="block aspect-[4/5]">
               <img
                 src={primaryImage.storageUrl!}
-                alt={`Image principale ${productGroup.label}`}
+                alt={
+                  productGroup.group
+                    ? `Image du prompt n° 1 pour ${productGroup.label}`
+                    : `Image principale ${productGroup.label}`
+                }
                 className="size-full object-cover"
               />
             </span>
             <span className="absolute left-2 top-2 grid size-6 place-items-center rounded-md bg-background/90">
               <Checkbox
-                checked
+                checked={selectedPushIds.has(primaryImage._id)}
                 onCheckedChange={(checked) =>
                   onToggleImage(primaryImage._id, checked === true)
                 }
-                aria-label={`Désélectionner l’image principale de ${productGroup.label}`}
+                aria-label={`Sélectionner l’image ${
+                  productGroup.group ? "du prompt n° 1" : "principale"
+                } de ${productGroup.label}`}
               />
             </span>
             <span className="absolute inset-x-0 bottom-0 bg-background/90 px-2 py-1.5 text-center text-[11px] font-medium">
-              Image principale
+              {productGroup.group
+                ? "Prompt n° 1 · Variantes"
+                : "Image principale"}
             </span>
           </Label>
         ) : (
-          <div className="grid aspect-[4/5] place-items-center rounded-lg border bg-muted text-muted-foreground">
+          <div className="grid aspect-[4/5] place-items-center gap-1 rounded-lg border bg-muted px-2 text-center text-xs text-muted-foreground">
             <ImageIcon className="size-5" />
+            {productGroup.group ? "Prompt n° 1 absent" : null}
           </div>
         )}
 

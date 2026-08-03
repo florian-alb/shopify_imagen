@@ -37,7 +37,7 @@ export function PublishImagesOptions({
               {galleryForcesVariantReplacement
                 ? "Requis lorsque la galerie Shopify existante est remplacée."
                 : replaceVariantMedia
-                  ? "La première image publiée de chaque groupe devient l’image de ses variantes."
+                  ? "L’image générée avec le prompt n° 1 de chaque groupe devient l’image de ses variantes."
                   : "Les variantes qui ont déjà une image ne seront pas modifiées."}
             </span>
           </span>

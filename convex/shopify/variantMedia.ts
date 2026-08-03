@@ -3,23 +3,22 @@ export type ShopifyVariantMedia = {
   mediaIds: string[];
 };
 
-export type VariantMediaMutationInput = {
-  variantId: string;
-  mediaIds: string[];
+export type VariantMediaUpdateInput = {
+  id: string;
+  mediaId: string;
 };
 
-export type VariantMediaPlan = {
-  detach: VariantMediaMutationInput[];
-  append: VariantMediaMutationInput[];
+export type PromptOrderEntry = {
+  imageType: string;
+  position: number | null;
 };
 
-export function buildVariantMediaPlan(args: {
+export function buildVariantMediaUpdates(args: {
   variants: ShopifyVariantMedia[];
   primaryMediaId: string;
   replaceExisting: boolean;
-}): VariantMediaPlan {
-  const detach: VariantMediaMutationInput[] = [];
-  const append: VariantMediaMutationInput[] = [];
+}): VariantMediaUpdateInput[] {
+  const updates: VariantMediaUpdateInput[] = [];
   const seenVariantIds = new Set<string>();
 
   for (const variant of args.variants) {
@@ -29,34 +28,39 @@ export function buildVariantMediaPlan(args: {
     const currentMediaIds = Array.from(
       new Set(variant.mediaIds.filter(Boolean)),
     );
-    const alreadyUsesPrimary = currentMediaIds.includes(args.primaryMediaId);
-
-    if (args.replaceExisting) {
-      const mediaIdsToDetach = currentMediaIds.filter(
-        (mediaId) => mediaId !== args.primaryMediaId,
-      );
-      if (mediaIdsToDetach.length) {
-        detach.push({
-          variantId: variant.id,
-          mediaIds: mediaIdsToDetach,
-        });
-      }
-      if (!alreadyUsesPrimary) {
-        append.push({
-          variantId: variant.id,
-          mediaIds: [args.primaryMediaId],
-        });
-      }
+    if (!args.replaceExisting && currentMediaIds.length) continue;
+    if (
+      currentMediaIds.length === 1 &&
+      currentMediaIds[0] === args.primaryMediaId
+    )
       continue;
-    }
-
-    if (!currentMediaIds.length) {
-      append.push({
-        variantId: variant.id,
-        mediaIds: [args.primaryMediaId],
-      });
-    }
+    updates.push({ id: variant.id, mediaId: args.primaryMediaId });
   }
 
-  return { detach, append };
+  return updates;
+}
+
+export function promptOneImageType(prompts: readonly PromptOrderEntry[]) {
+  const [promptOne] = [...prompts].sort((left, right) => {
+    const leftPosition = left.position ?? Number.POSITIVE_INFINITY;
+    const rightPosition = right.position ?? Number.POSITIVE_INFINITY;
+    if (leftPosition !== rightPosition) return leftPosition - rightPosition;
+    return left.imageType.localeCompare(right.imageType);
+  });
+  return promptOne?.imageType ?? null;
+}
+
+export function imageForPromptOne<T extends { imageType: string }>(
+  images: readonly T[],
+  imageType: string | null,
+) {
+  if (!imageType) return undefined;
+  return images.find((image) => image.imageType === imageType);
+}
+
+export function shopifyMediaReadiness(status: string | null | undefined) {
+  const normalized = status?.toUpperCase();
+  if (normalized === "READY") return "ready" as const;
+  if (normalized === "FAILED") return "failed" as const;
+  return "pending" as const;
 }

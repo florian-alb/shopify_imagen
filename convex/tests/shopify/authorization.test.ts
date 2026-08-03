@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { normalizeShopDomain } from "../../shopScope";
 import {
+  buildShopifyAuthorizationRequiredStatus,
   buildShopifyAuthorizationStatus,
   requireShopifyAdminScopes,
   type ShopifyAuthorizationInstallation,
@@ -131,6 +132,24 @@ describe("buildShopifyAuthorizationStatus", () => {
     expect(() =>
       requireShopifyAdminScopes(granted, ["write_files"]),
     ).not.toThrow();
+  });
+});
+
+describe("buildShopifyAuthorizationRequiredStatus", () => {
+  it("marks a saved shop without an OAuth token as ready for authorization", () => {
+    expect(
+      buildShopifyAuthorizationRequiredStatus(" Demo-Store ", 123),
+    ).toEqual({
+      shopDomain: SHOP_DOMAIN,
+      status: "requested",
+      scopes: {
+        missing: [],
+        requested: ["write_products", "write_files"],
+        granted: [],
+      },
+      authorizationUrl: null,
+      checkedAt: 123,
+    });
   });
 });
 

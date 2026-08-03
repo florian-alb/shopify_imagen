@@ -10,12 +10,23 @@ type GraphQlResponse<T> = {
   errors?: Array<{ message: string }>;
 };
 
+type ShopifyTokenResponse = {
+  access_token?: string;
+  error_description?: string;
+  error?: string;
+};
+
 function env(name: string, fallback = "") {
   return process.env[name] ?? fallback;
 }
 
 export async function getAccessToken(credentials?: ShopifyCredentials) {
   if (credentials?.accessToken) return credentials.accessToken;
+  if (credentials?.shopId) {
+    throw new ConvexError(
+      `La boutique ${credentials.domain} doit être autorisée dans Shopify avant d'utiliser l'API.`,
+    );
+  }
 
   const domain = normalizeShopDomain(
     credentials?.domain ?? env("SHOPIFY_SHOP_DOMAIN"),
@@ -49,16 +60,22 @@ export async function getAccessToken(credentials?: ShopifyCredentials) {
     );
   }
 
-  const payload = (await response.json().catch(() => null)) as {
-    access_token?: string;
-    error_description?: string;
-    error?: string;
-  } | null;
+  const rawPayload = await response.text();
+  let payload: ShopifyTokenResponse | null = null;
+  try {
+    payload = JSON.parse(rawPayload) as ShopifyTokenResponse;
+  } catch {
+    // Shopify can return a plain-text OAuth error for rejected grant types.
+  }
+  const plainTextError = payload
+    ? null
+    : rawPayload.replace(/\s+/g, " ").trim().slice(0, 500);
 
   if (!response.ok || !payload?.access_token) {
     throw new ConvexError(
       payload?.error_description ??
         payload?.error ??
+        plainTextError ??
         `Shopify token request failed with ${response.status}.`,
     );
   }
