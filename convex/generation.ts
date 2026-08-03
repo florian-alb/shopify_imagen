@@ -405,12 +405,6 @@ async function processTerminalBatch(
   job: Doc<"generationJobs">,
   poll: Exclude<BatchPollResult, { state: "pending" }>,
 ): Promise<TerminalBatchResult> {
-  if (poll.batchStatus !== undefined) {
-    await ctx.runMutation(internal.jobs.setBatchStatus, {
-      jobId: job._id,
-      batchStatus: poll.batchStatus,
-    });
-  }
   const acquired = await ctx.runMutation(internal.jobs.acquireBatchIngestion, {
     jobId: job._id,
   });
@@ -457,9 +451,16 @@ async function processTerminalBatch(
     }
 
     if (!pending.length) {
-      await ctx.runMutation(internal.jobs.finishJobIfDone, { jobId: job._id });
+      const finished = (await ctx.runMutation(
+        internal.jobs.finishSuccessfulBatchIfIdle,
+        { jobId: job._id },
+      )) as boolean;
       await cleanupGeminiBatchFiles(job);
-      log("batch", "job done", { jobId: job._id, ingested: 0, failed: 0 });
+      log("batch", finished ? "job done" : "provider done; work still active", {
+        jobId: job._id,
+        ingested: 0,
+        failed: 0,
+      });
       return { state: "done" as const, ingested: 0, failed: 0 };
     }
 
@@ -489,7 +490,9 @@ async function processTerminalBatch(
       log("batch", "chunk done", { jobId: job._id, ingested, failed });
       return { state: "partial" as const, ingested, failed };
     }
-    await ctx.runMutation(internal.jobs.finishJobIfDone, { jobId: job._id });
+    await ctx.runMutation(internal.jobs.finishSuccessfulBatchIfIdle, {
+      jobId: job._id,
+    });
     await cleanupGeminiBatchFiles(job);
     log("batch", "job done", { jobId: job._id, ingested, failed });
     return { state: "done" as const, ingested, failed };
@@ -565,7 +568,9 @@ async function processTerminalSegment(
         batchStatus: poll.batchStatus ?? segment.batchStatus ?? null,
       });
       await cleanupGeminiInputFile(job._id, segment.inputFileName);
-      await ctx.runMutation(internal.jobs.finishJobIfDone, { jobId: job._id });
+      await ctx.runMutation(internal.jobs.finishSuccessfulBatchIfIdle, {
+        jobId: job._id,
+      });
       return { state: "done" as const, ingested: 0, failed: 0 };
     }
 
@@ -632,7 +637,9 @@ async function processTerminalSegment(
       failedCount: (segment.failedCount ?? 0) + failed,
     });
     await cleanupGeminiInputFile(job._id, segment.inputFileName);
-    await ctx.runMutation(internal.jobs.finishJobIfDone, { jobId: job._id });
+    await ctx.runMutation(internal.jobs.finishSuccessfulBatchIfIdle, {
+      jobId: job._id,
+    });
     log("batch", "segment done", {
       jobId: job._id,
       segmentId: segment._id,

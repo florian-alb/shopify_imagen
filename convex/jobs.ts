@@ -63,12 +63,22 @@ function executionPatchForJob(
   now = job.updatedAt,
 ) {
   if (job.isHidden || job.status === "cancelled") return {};
-  const completedTasks = images.filter(
+  const observedCompletedTasks = images.filter(
     (image) => image.status === "generated" || image.status === "uploaded",
   ).length;
-  const failedTasks = images.filter(
+  const observedFailedTasks = images.filter(
     (image) => image.status === "failed" || image.status === "canceled",
   ).length;
+  // Image retention and explicit deletion remove rows after execution has
+  // finished. Keep terminal execution counters monotonic so a completed job is
+  // never reopened just because one of its retained outputs was deleted.
+  const preserveTerminalOutcome = isTerminalJobStatus(job.status);
+  const completedTasks = preserveTerminalOutcome
+    ? Math.max(job.completedTasks, observedCompletedTasks)
+    : observedCompletedTasks;
+  const failedTasks = preserveTerminalOutcome
+    ? Math.max(job.failedTasks, observedFailedTasks)
+    : observedFailedTasks;
   const done = completedTasks + failedTasks >= job.totalTasks;
   return {
     completedTasks,
@@ -80,13 +90,7 @@ function executionPatchForJob(
             failedTasks > 0 ? `${failedTasks} image task(s) failed.` : null,
           completedAt: job.completedAt ?? now,
         }
-      : job.status === "failed" || job.status === "completed"
-        ? {
-            status: "running" as const,
-            completedAt: undefined,
-            error: null,
-          }
-        : {}),
+      : {}),
   };
 }
 
@@ -613,10 +617,13 @@ export const setBatchStatus = internalMutation({
     batchStatus: v.union(v.string(), v.null()),
   },
   handler: async (ctx, args) => {
+    const job = await ctx.db.get(args.jobId);
+    if (!job || job.batchStatus === args.batchStatus) return false;
     await ctx.db.patch(args.jobId, {
       batchStatus: args.batchStatus,
       updatedAt: Date.now(),
     });
+    return true;
   },
 });
 
@@ -1922,6 +1929,51 @@ export const finishJobIfDone = internalMutation({
     });
     await refreshJobSummary(ctx, args.jobId);
 
+    for (const productId of job.productIds as Id<"products">[]) {
+      await refreshProductSummary(ctx, productId);
+    }
+    return true;
+  },
+});
+
+export const finishSuccessfulBatchIfIdle = internalMutation({
+  args: { jobId: v.id("generationJobs") },
+  handler: async (ctx, args) => {
+    const job = await ctx.db.get(args.jobId);
+    if (!job) return false;
+    if (job.status === "cancelled") return false;
+    if (job.status === "completed" || job.status === "failed") return true;
+    if (job.status !== "running" || job.executionMode !== "batch") return false;
+
+    const images = await ctx.db
+      .query("generatedImages")
+      .withIndex("by_job", (q) => q.eq("jobId", args.jobId))
+      .collect();
+    if (images.some((image) => isActiveImageStatus(image.status))) return false;
+
+    // A successful provider batch with no active image rows is terminal. Any
+    // missing rows were removed after execution (retention, explicit deletion,
+    // or retry replacement), so reconcile them as completed instead of leaving
+    // the job in the global polling queue forever.
+    const observedFailedTasks = images.filter(
+      (image) => image.status === "failed" || image.status === "canceled",
+    ).length;
+    const failedTasks = Math.min(
+      job.totalTasks,
+      Math.max(job.failedTasks, observedFailedTasks),
+    );
+    const completedTasks = Math.max(0, job.totalTasks - failedTasks);
+    const status = failedTasks > 0 ? ("failed" as const) : ("completed" as const);
+    const now = Date.now();
+    await ctx.db.patch(args.jobId, {
+      status,
+      completedTasks,
+      failedTasks,
+      error: failedTasks > 0 ? `${failedTasks} image task(s) failed.` : null,
+      completedAt: now,
+      updatedAt: now,
+    });
+    await refreshJobSummary(ctx, args.jobId);
     for (const productId of job.productIds as Id<"products">[]) {
       await refreshProductSummary(ctx, productId);
     }
