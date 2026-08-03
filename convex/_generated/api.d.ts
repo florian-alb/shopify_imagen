@@ -11,6 +11,9 @@
 import type * as auth from "../auth.js";
 import type * as authz from "../authz.js";
 import type * as background from "../background.js";
+import type * as bulkOperations from "../bulkOperations.js";
+import type * as bulkReorders from "../bulkReorders.js";
+import type * as bulkReorders_model from "../bulkReorders/model.js";
 import type * as bulkTransforms from "../bulkTransforms.js";
 import type * as bulkTransforms_image from "../bulkTransforms/image.js";
 import type * as bulkTransforms_model from "../bulkTransforms/model.js";
@@ -66,6 +69,7 @@ import type * as shopify_graphql from "../shopify/graphql.js";
 import type * as shopify_media from "../shopify/media.js";
 import type * as shopify_oauth from "../shopify/oauth.js";
 import type * as shopify_productMapping from "../shopify/productMapping.js";
+import type * as shopify_reorder from "../shopify/reorder.js";
 import type * as shopify_variantMedia from "../shopify/variantMedia.js";
 import type * as shops from "../shops.js";
 import type * as userAccess from "../userAccess.js";
@@ -85,6 +89,9 @@ declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   authz: typeof authz;
   background: typeof background;
+  bulkOperations: typeof bulkOperations;
+  bulkReorders: typeof bulkReorders;
+  "bulkReorders/model": typeof bulkReorders_model;
   bulkTransforms: typeof bulkTransforms;
   "bulkTransforms/image": typeof bulkTransforms_image;
   "bulkTransforms/model": typeof bulkTransforms_model;
@@ -140,6 +147,7 @@ declare const fullApi: ApiFromModules<{
   "shopify/media": typeof shopify_media;
   "shopify/oauth": typeof shopify_oauth;
   "shopify/productMapping": typeof shopify_productMapping;
+  "shopify/reorder": typeof shopify_reorder;
   "shopify/variantMedia": typeof shopify_variantMedia;
   shops: typeof shops;
   userAccess: typeof userAccess;

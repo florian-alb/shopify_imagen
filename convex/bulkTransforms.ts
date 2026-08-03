@@ -12,6 +12,7 @@ import {
   type QueryCtx,
 } from "./_generated/server";
 import { requireUserId } from "./authz";
+import { bulkReorderJobIsTerminal } from "./bulkReorders/model";
 import {
   BULK_TRANSFORM_ASSET_RETENTION_MS,
   BULK_TRANSFORM_OPERATION,
@@ -167,11 +168,14 @@ async function legacyActiveJobsWithoutProductLocks(
 
 type ActiveProductLock = {
   productId: Id<"products">;
-  jobId: Id<"bulkTransformJobs">;
-  status: Doc<"bulkTransformJobs">["status"];
+  operation: "flip_horizontal" | "reorder_media";
+  jobId: Id<"bulkTransformJobs"> | Id<"bulkReorderJobs">;
+  status:
+    | Doc<"bulkTransformJobs">["status"]
+    | Doc<"bulkReorderJobs">["status"];
 };
 
-async function activeProductLocksForIds(
+export async function activeProductLocksForIds(
   ctx: JobReadCtx,
   scope: ShopScope,
   productIds: Id<"products">[],
@@ -207,6 +211,46 @@ async function activeProductLocksForIds(
     }
     active.set(lock.productId, {
       productId: lock.productId,
+      operation: "flip_horizontal",
+      jobId: job._id,
+      status: job.status,
+    });
+  }
+
+  const reorderLockRows = await Promise.all(
+    uniqueProductIds.map((productId) =>
+      ctx.db
+        .query("bulkReorderProductLocks")
+        .withIndex("by_product", (q) => q.eq("productId", productId))
+        .unique(),
+    ),
+  );
+  const reorderJobIds = Array.from(
+    new Set(
+      reorderLockRows.flatMap((lock) => (lock ? [lock.jobId] : [])),
+    ),
+  );
+  const reorderJobs = await Promise.all(
+    reorderJobIds.map((jobId) => ctx.db.get(jobId)),
+  );
+  const reorderJobsById = new Map(
+    reorderJobs
+      .filter((job): job is Doc<"bulkReorderJobs"> => Boolean(job))
+      .map((job) => [job._id, job]),
+  );
+  for (const lock of reorderLockRows) {
+    if (!lock || active.has(lock.productId)) continue;
+    const job = reorderJobsById.get(lock.jobId);
+    if (
+      !job ||
+      bulkReorderJobIsTerminal(job.status) ||
+      !shopMatchesScope(job, scope)
+    ) {
+      continue;
+    }
+    active.set(lock.productId, {
+      productId: lock.productId,
+      operation: "reorder_media",
       jobId: job._id,
       status: job.status,
     });
@@ -219,6 +263,7 @@ async function activeProductLocksForIds(
       if (!requested.has(productId) || active.has(productId)) continue;
       active.set(productId, {
         productId,
+        operation: "flip_horizontal",
         jobId: job._id,
         status: job.status,
       });
@@ -232,6 +277,38 @@ async function acquireProductLocks(
   job: Doc<"bulkTransformJobs">,
 ) {
   const productIds = Array.from(new Set(job.productIds));
+  const reorderLocks = await Promise.all(
+    productIds.map((productId) =>
+      ctx.db
+        .query("bulkReorderProductLocks")
+        .withIndex("by_product", (q) => q.eq("productId", productId))
+        .unique(),
+    ),
+  );
+  const reorderOwners = await Promise.all(
+    Array.from(
+      new Set(reorderLocks.flatMap((lock) => (lock ? [lock.jobId] : []))),
+    ).map((jobId) => ctx.db.get(jobId)),
+  );
+  const activeReorderOwnerIds = new Set(
+    reorderOwners
+      .filter(
+        (owner): owner is Doc<"bulkReorderJobs"> =>
+          Boolean(owner && !bulkReorderJobIsTerminal(owner.status)),
+      )
+      .map((owner) => owner._id),
+  );
+  const reorderConflicts = reorderLocks.filter(
+    (lock) => lock && activeReorderOwnerIds.has(lock.jobId),
+  );
+  if (reorderConflicts.length) {
+    throw new Error(
+      `${reorderConflicts.length} selected product${reorderConflicts.length === 1 ? " is" : "s are"} already locked by another unfinished bulk operation.`,
+    );
+  }
+  for (const lock of reorderLocks) {
+    if (lock) await ctx.db.delete(lock._id);
+  }
   const existingLocks = await Promise.all(
     productIds.map((productId) =>
       ctx.db
@@ -633,6 +710,7 @@ export const selectionOptions = query({
       {
         position: number;
         productCount: number;
+        unlockedProductCount: number;
         previews: Array<{
           productId: Id<"products">;
           productTitle: string;
@@ -647,9 +725,13 @@ export const selectionOptions = query({
         const option = positions.get(position) ?? {
           position,
           productCount: 0,
+          unlockedProductCount: 0,
           previews: [],
         };
         option.productCount += 1;
+        if (!productLocks.has(product._id)) {
+          option.unlockedProductCount += 1;
+        }
         if (option.previews.length < SELECTION_PREVIEW_SIZE) {
           option.previews.push({
             productId: product._id,

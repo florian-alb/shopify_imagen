@@ -4,6 +4,7 @@ export type RetouchTarget = {
   id: Id<"generatedImages">;
   url: string;
   label: string;
+  published: boolean;
 };
 
 export type RetouchSaveMode = "version" | "overwrite";

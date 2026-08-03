@@ -191,28 +191,47 @@ export const costSummary = query({
   handler: async (ctx) => {
     const userId = await requireUserId(ctx);
     const scope = await getActiveShopScope(ctx, userId);
-    const jobs = (await ctx.db.query("generationJobs").collect()).filter(
-      (job: Doc<"generationJobs">) => !job.isHidden && shopMatchesScope(job, scope),
+    const shopIds: Array<Id<"shops"> | undefined> = [
+      ...(scope.shopId ? [scope.shopId] : []),
+      ...(scope.includeLegacy ? [undefined] : []),
+    ];
+    const [jobsByShop, productsByShop] = await Promise.all([
+      Promise.all(
+        shopIds.map((shopId) =>
+          ctx.db
+            .query("generationJobs")
+            .withIndex("by_shop_and_created", (q) => q.eq("shopId", shopId))
+            .collect(),
+        ),
+      ),
+      Promise.all(
+        shopIds.map((shopId) =>
+          ctx.db
+            .query("products")
+            .withIndex("by_shop_and_vibe_cost_usd", (q) =>
+              q.eq("shopId", shopId).gt("vibeCostUsd", 0),
+            )
+            .collect(),
+        ),
+      ),
+    ]);
+    const jobs = jobsByShop
+      .flat()
+      .filter((job: Doc<"generationJobs">) => !job.isHidden);
+    const products = productsByShop.flat();
+    const fallbackImages = await Promise.all(
+      jobs.filter(jobNeedsImageCostFallback).map(async (job) => [
+        job._id,
+        await ctx.db
+          .query("generatedImages")
+          .withIndex("by_job", (q) => q.eq("jobId", job._id))
+          .collect(),
+      ] as const),
     );
-    const products = (await ctx.db.query("products").collect()).filter(
-      (product: Doc<"products">) => shopMatchesScope(product, scope),
-    );
-    const needsImageFallback = jobs.some(jobNeedsImageCostFallback);
-    const images = needsImageFallback
-      ? (await ctx.db.query("generatedImages").collect()).filter(
-          (image: Doc<"generatedImages">) => shopMatchesScope(image, scope),
-        )
-      : [];
     const imagesByJob = new Map<
       Id<"generationJobs">,
       Doc<"generatedImages">[]
-    >();
-    for (const image of images) {
-      imagesByJob.set(image.jobId, [
-        ...(imagesByJob.get(image.jobId) ?? []),
-        image,
-      ]);
-    }
+    >(fallbackImages);
     const costs = jobs.map((job) => ({
       job,
       cost: summarizeJobCostWithFallback(job, imagesByJob),
@@ -1412,6 +1431,8 @@ export const insertRetouchedImage = internalMutation({
 
     const now = Date.now();
     if ((args.saveMode ?? "version") === "overwrite") {
+      const staysPublished =
+        source.status === "uploaded" && Boolean(source.shopifyMediaId);
       await ctx.db.patch(source._id, {
         generatedImageUrl: args.storageUrl,
         storageUrl: args.storageUrl,
@@ -1420,11 +1441,15 @@ export const insertRetouchedImage = internalMutation({
         retouchedAt: now,
         retouchedByUserId: userId,
         transparentCutoutUrl: null,
-        status: "generated",
-        reviewStatus: "pending",
-        reviewedAt: undefined,
-        reviewedByUserId: undefined,
-        shopifyMediaId: null,
+        status: staysPublished ? "uploaded" : "generated",
+        reviewStatus: staysPublished ? "approved" : "pending",
+        ...(staysPublished
+          ? {}
+          : {
+              reviewedAt: undefined,
+              reviewedByUserId: undefined,
+              shopifyMediaId: null,
+            }),
         error: null,
         updatedAt: now,
       });

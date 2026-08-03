@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { SelectItem } from "@/components/ui/select";
 import type { ProductSearch } from "@/lib/productFilters";
 import {
@@ -17,8 +18,10 @@ import {
 
 import type { ProductFacets } from "../types";
 
-const actionTabs: Array<{ label: string; value?: ProductPrimaryAction }> = [
-  { label: "Tous" },
+type ProductActionFilter = ProductPrimaryAction | "all";
+
+const actionTabs: Array<{ label: string; value: ProductActionFilter }> = [
+  { label: "Tous", value: "all" },
   { label: "A traiter", value: "generate" },
   { label: "A verifier", value: "review" },
   { label: "Pret", value: "push" },
@@ -38,23 +41,15 @@ export function ProductsFilters({
     <Card className="mb-4 rounded-lg">
       <CardContent className="space-y-3 p-3">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-          <div className="flex flex-wrap gap-1">
-            {actionTabs.map((tab) => {
-              const active =
-                search.action === tab.value || (!search.action && !tab.value);
-              return (
-                <Button
-                  key={tab.label}
-                  variant={active ? "default" : "ghost"}
-                  size="sm"
-                  className={active ? "" : "text-muted-foreground"}
-                  onClick={() => onFilterChange({ action: tab.value })}
-                >
-                  {tab.label}
-                </Button>
-              );
-            })}
-          </div>
+          <SegmentedControl
+            className="sm:w-[22rem]"
+            value={search.action ?? "all"}
+            options={actionTabs}
+            ariaLabel="Filtrer les produits par action"
+            onValueChange={(action) =>
+              onFilterChange({ action: action === "all" ? undefined : action })
+            }
+          />
           <div className="flex min-w-0 flex-1 flex-col gap-2 md:flex-row xl:max-w-2xl">
             <Label className="relative block min-w-0 flex-1">
               <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />

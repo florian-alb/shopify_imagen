@@ -20,6 +20,7 @@ import {
 } from "@/lib/status";
 
 import { bulkTransformStatusLabel } from "../lib/bulkImageTransformViewModel";
+import { bulkReorderStatusLabel } from "../lib/bulkImageReorderViewModel";
 import type { BulkProductLock, ProductListItem } from "../types";
 
 export function ProductTableRow({
@@ -45,7 +46,7 @@ export function ProductTableRow({
         <Checkbox
           checked={selected}
           onCheckedChange={onToggle}
-          aria-label={`Selectionner ${product.title}`}
+          aria-label={`Sélectionner ${product.title}`}
         />
       </TableCell>
       <TableCell className="min-w-[20rem]">
@@ -86,7 +87,17 @@ export function ProductTableRow({
                   title="Ce produit est réservé par un bulk non terminé."
                 >
                   <LockKeyhole className="size-3" />
-                  Bulk · {bulkTransformStatusLabel(bulkLock.status)}
+                  {bulkLock.operation === "reorder_media"
+                    ? `Réorganisation · ${bulkReorderStatusLabel(
+                        bulkLock.status as Parameters<
+                          typeof bulkReorderStatusLabel
+                        >[0],
+                      )}`
+                    : `Miroir · ${bulkTransformStatusLabel(
+                        bulkLock.status as Parameters<
+                          typeof bulkTransformStatusLabel
+                        >[0],
+                      )}`}
                 </Badge>
               ) : null}
             </div>
@@ -154,7 +165,7 @@ export function ProductTableRow({
       <TableCell className="text-right">
         <Button variant="outline" size="sm" onClick={onGenerateOne}>
           <WandSparkles data-icon="inline-start" />
-          Generer
+          Générer
         </Button>
       </TableCell>
     </TableRow>

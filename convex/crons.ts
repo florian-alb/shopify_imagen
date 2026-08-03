@@ -31,6 +31,12 @@ crons.interval(
   {},
 );
 crons.interval(
+  "resume stale bulk image reorders",
+  { minutes: 5 },
+  internal.bulkReorders.resumeStaleJobs,
+  {},
+);
+crons.interval(
   "cleanup expired bulk image assets",
   { hours: 1 },
   internal.bulkTransformsNode.cleanupExpiredAssets,

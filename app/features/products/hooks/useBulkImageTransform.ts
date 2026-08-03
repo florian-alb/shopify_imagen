@@ -40,13 +40,17 @@ export type BulkTransformSelectionOptions = {
   lockedProducts: Array<{
     productId: Id<"products">;
     productTitle: string;
-    jobId: Id<"bulkTransformJobs">;
-    status: Doc<"bulkTransformJobs">["status"];
+    operation: "flip_horizontal" | "reorder_media";
+    jobId: Id<"bulkTransformJobs"> | Id<"bulkReorderJobs">;
+    status:
+      | Doc<"bulkTransformJobs">["status"]
+      | Doc<"bulkReorderJobs">["status"];
   }>;
   snapshotToken?: string;
   positions: Array<{
     position: number;
     productCount: number;
+    unlockedProductCount: number;
     previews: Array<{
       productId: Id<"products">;
       productTitle: string;

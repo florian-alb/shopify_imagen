@@ -116,6 +116,37 @@ const bulkTransformItemRollbackStatus = v.union(
   v.literal("failed"),
   v.literal("conflict"),
 );
+const bulkReorderJobStatus = v.union(
+  v.literal("queued"),
+  v.literal("running"),
+  v.literal("cancelling"),
+  v.literal("completed"),
+  v.literal("partial"),
+  v.literal("failed"),
+  v.literal("cancelled"),
+);
+const bulkReorderItemStatus = v.union(
+  v.literal("queued"),
+  v.literal("running"),
+  v.literal("completed"),
+  v.literal("skipped"),
+  v.literal("failed"),
+  v.literal("conflict"),
+  v.literal("cancelled"),
+);
+const bulkReorderRestoreStatus = v.union(
+  v.literal("queued"),
+  v.literal("running"),
+  v.literal("completed"),
+  v.literal("partial"),
+);
+const bulkReorderItemRestoreStatus = v.union(
+  v.literal("queued"),
+  v.literal("running"),
+  v.literal("restored"),
+  v.literal("failed"),
+  v.literal("conflict"),
+);
 const backgroundMode = v.union(v.literal("solid"), v.literal("transparent"));
 const backgroundRemovalProvider = v.union(v.literal("fal_ideogram"), v.null());
 const promptKind = v.union(
@@ -256,6 +287,7 @@ export default defineSchema({
     .index("by_shop_and_publish_state", ["shopId", "publishState"])
     .index("by_shop_and_primary_action", ["shopId", "primaryAction"])
     .index("by_shop_and_product_type", ["shopId", "productType"])
+    .index("by_shop_and_vibe_cost_usd", ["shopId", "vibeCostUsd"])
     .index("by_shop_and_shopify_status", ["shopId", "shopifyStatus"])
     .index("by_shop_and_generation_status_and_product_type", [
       "shopId",
@@ -804,6 +836,89 @@ export default defineSchema({
   })
     .index("by_job", ["jobId"])
     .index("by_job_and_product", ["jobId", "productId"]),
+  bulkReorderJobs: defineTable({
+    shopId: v.optional(v.id("shops")),
+    createdByUserId: v.id("users"),
+    status: bulkReorderJobStatus,
+    firstPosition: v.number(),
+    secondPosition: v.number(),
+    productCount: v.number(),
+    totalItems: v.number(),
+    processedItems: v.number(),
+    completedItems: v.number(),
+    skippedItems: v.number(),
+    failedItems: v.number(),
+    conflictItems: v.number(),
+    lockedItems: v.number(),
+    unavailableItems: v.number(),
+    error: v.optional(v.union(v.string(), v.null())),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    startedAt: v.optional(v.number()),
+    completedAt: v.optional(v.number()),
+    dismissedAt: v.optional(v.number()),
+    restoreStatus: v.optional(bulkReorderRestoreStatus),
+    restoreTotalItems: v.optional(v.number()),
+    restoredItems: v.optional(v.number()),
+    restoreFailedItems: v.optional(v.number()),
+    restoreConflictItems: v.optional(v.number()),
+    restoreStartedAt: v.optional(v.number()),
+    restoreCompletedAt: v.optional(v.number()),
+  })
+    .index("by_shop_and_status", ["shopId", "status"])
+    .index("by_shop_and_created_at", ["shopId", "createdAt"])
+    .index("by_shop_and_dismissed_at", ["shopId", "dismissedAt"])
+    .index("by_status_and_updated_at", ["status", "updatedAt"])
+    .index("by_restore_status_and_updated_at", ["restoreStatus", "updatedAt"]),
+  bulkReorderItems: defineTable({
+    shopId: v.optional(v.id("shops")),
+    jobId: v.id("bulkReorderJobs"),
+    productId: v.id("products"),
+    productTitle: v.string(),
+    shopifyProductId: v.string(),
+    status: bulkReorderItemStatus,
+    sourceImageIds: v.optional(v.array(v.string())),
+    targetImageIds: v.optional(v.array(v.string())),
+    shopifyJobId: v.optional(v.string()),
+    attempts: v.number(),
+    availableAt: v.number(),
+    error: v.optional(v.union(v.string(), v.null())),
+    processingStartedAt: v.optional(v.number()),
+    completedAt: v.optional(v.number()),
+    restoreStatus: v.optional(bulkReorderItemRestoreStatus),
+    restoreShopifyJobId: v.optional(v.string()),
+    restoreAttempts: v.optional(v.number()),
+    restoreAvailableAt: v.optional(v.number()),
+    restoreError: v.optional(v.union(v.string(), v.null())),
+    restoreProcessingStartedAt: v.optional(v.number()),
+    restoredAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_job", ["jobId"])
+    .index("by_job_and_status", ["jobId", "status"])
+    .index("by_job_and_status_and_available_at", [
+      "jobId",
+      "status",
+      "availableAt",
+    ])
+    .index("by_job_and_restore_status", ["jobId", "restoreStatus"])
+    .index("by_job_and_restore_status_and_restore_available_at", [
+      "jobId",
+      "restoreStatus",
+      "restoreAvailableAt",
+    ])
+    .index("by_status_and_updated_at", ["status", "updatedAt"])
+    .index("by_restore_status_and_updated_at", ["restoreStatus", "updatedAt"]),
+  bulkReorderProductLocks: defineTable({
+    shopId: v.optional(v.id("shops")),
+    productId: v.id("products"),
+    jobId: v.id("bulkReorderJobs"),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_product", ["productId"])
+    .index("by_job", ["jobId"]),
   appSettings: defineTable({
     shopId: v.optional(v.id("shops")),
     key: v.string(),

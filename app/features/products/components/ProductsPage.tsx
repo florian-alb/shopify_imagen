@@ -1,7 +1,4 @@
-import { Link } from "@tanstack/react-router";
 import {
-  Activity,
-  FlipHorizontal2,
   ImageIcon,
   RefreshCw,
   WandSparkles,
@@ -21,6 +18,8 @@ import { api } from "@/lib/convex";
 import type { ProductSearch } from "@/lib/productFilters";
 
 import { useProductsListPage } from "../hooks/useProductsListPage";
+import { BulkActionsMenu } from "./BulkActionsMenu";
+import { BulkImageReorderDialogs } from "./BulkImageReorderDialogs";
 import { BulkImageTransformDialogs } from "./BulkImageTransformDialogs";
 import { ImageTypeSelectionDialog } from "./ImageTypeSelectionDialog";
 import { ProductsFilters } from "./ProductsFilters";
@@ -40,6 +39,7 @@ function ProductsPageForShop({ search }: { search: ProductSearch }) {
   const {
     allVisibleSelected,
     bulkLocksByProductId,
+    bulkReorder,
     bulkTransform,
     chooserOpen,
     creatingJob,
@@ -84,22 +84,21 @@ function ProductsPageForShop({ search }: { search: ProductSearch }) {
               {!syncing ? <RefreshCw data-icon="inline-start" /> : null}
               Synchroniser
             </Button>
-            {bulkTransform.hasTrackedJob ? (
-              <Button variant="outline" size="sm" asChild>
-                <Link to="/bulk-operations">
-                  <Activity data-icon="inline-start" />
-                  Voir les bulks
-                </Link>
-              </Button>
-            ) : null}
+            <BulkActionsMenu
+              disabled={
+                !selected.size || bulkTransform.busy || bulkReorder.busy
+              }
+              onReorder={bulkReorder.openNew}
+              onFlip={bulkTransform.openNew}
+            />
             <Button size="sm" disabled={!selected.size} onClick={openChooser}>
               <WandSparkles data-icon="inline-start" />
-              Generer
+              Générer
             </Button>
           </>
         }
       >
-        Catalogue Shopify, generations image et publication en une seule table.
+        Catalogue Shopify, générations d’images et publication en une seule table.
       </PageHeader>
 
       <ProductsFilters
@@ -112,7 +111,7 @@ function ProductsPageForShop({ search }: { search: ProductSearch }) {
         <EmptyState
           loading
           title="Chargement des produits"
-          body="Lecture du catalogue synchronise depuis Convex."
+          body="Lecture du catalogue synchronisé depuis Convex."
         />
       ) : products.length === 0 ? (
         <EmptyState
@@ -151,22 +150,18 @@ function ProductsPageForShop({ search }: { search: ProductSearch }) {
             <div>
               <p className="text-sm font-medium">
                 {selected.size} produit{selected.size === 1 ? "" : "s"}{" "}
-                selectionne{selected.size === 1 ? "" : "s"}
+                sélectionné{selected.size === 1 ? "" : "s"}
               </p>
               <p className="text-xs text-muted-foreground">
-                Lancez une génération ou une transformation sur la sélection.
+                Lancez une génération ou une opération bulk sur la sélection.
               </p>
             </div>
             <div className="flex flex-wrap justify-end gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={bulkTransform.busy}
-                onClick={bulkTransform.openNew}
-              >
-                <FlipHorizontal2 data-icon="inline-start" />
-                Miroir horizontal
-              </Button>
+              <BulkActionsMenu
+                disabled={bulkTransform.busy || bulkReorder.busy}
+                onReorder={bulkReorder.openNew}
+                onFlip={bulkTransform.openNew}
+              />
               <Button size="sm" onClick={openChooser}>
                 <ImageIcon data-icon="inline-start" />
                 Types
@@ -186,7 +181,7 @@ function ProductsPageForShop({ search }: { search: ProductSearch }) {
           title="Types d'images"
           description={`${selected.size} produit${
             selected.size === 1 ? "" : "s"
-          } selectionne${
+          } sélectionné${
             selected.size === 1 ? "" : "s"
           }. Chaque type utilise son prompt actif.`}
           submitLabel="Lancer le job"
@@ -195,6 +190,7 @@ function ProductsPageForShop({ search }: { search: ProductSearch }) {
         />
       ) : null}
 
+      <BulkImageReorderDialogs bulkReorder={bulkReorder} />
       <BulkImageTransformDialogs bulkTransform={bulkTransform} />
     </main>
   );

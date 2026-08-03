@@ -59,8 +59,10 @@ export function ProductImagesSection({
       <section className="grid gap-4 lg:grid-cols-2">
         <ShopifyImagesGallery
           shopifyImages={shopifyImages}
+          generatedImages={generatedGalleryImages}
           description={shopifyDescription}
           onZoom={onZoom}
+          onRetouch={onRetouch}
           reorder={shopifyReorder}
         />
         <GeneratedImagesGallery
