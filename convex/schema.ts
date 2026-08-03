@@ -256,6 +256,7 @@ export default defineSchema({
     .index("by_shop_and_publish_state", ["shopId", "publishState"])
     .index("by_shop_and_primary_action", ["shopId", "primaryAction"])
     .index("by_shop_and_product_type", ["shopId", "productType"])
+    .index("by_shop_and_vibe_cost_usd", ["shopId", "vibeCostUsd"])
     .index("by_shop_and_shopify_status", ["shopId", "shopifyStatus"])
     .index("by_shop_and_generation_status_and_product_type", [
       "shopId",
