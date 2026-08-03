@@ -32,8 +32,13 @@ export type ProductListItem = {
 
 export type BulkProductLock = {
   productId: Doc<"products">["_id"];
-  jobId: Doc<"bulkTransformJobs">["_id"];
-  status: Doc<"bulkTransformJobs">["status"];
+  operation: "flip_horizontal" | "reorder_media";
+  jobId:
+    | Doc<"bulkTransformJobs">["_id"]
+    | Doc<"bulkReorderJobs">["_id"];
+  status:
+    | Doc<"bulkTransformJobs">["status"]
+    | Doc<"bulkReorderJobs">["status"];
 };
 
 export type ProductFacets = {

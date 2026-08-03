@@ -29,6 +29,7 @@ export function useGeneratedImageRetouch({
       id: image._id,
       url: image.storageUrl,
       label: image.imageType,
+      published: image.status === "uploaded" && Boolean(image.shopifyMediaId),
     });
   }
 
@@ -69,12 +70,16 @@ export function useGeneratedImageRetouch({
       setTarget(null);
       onSaved?.(retouchedImageId);
       toast.success(
-        mode === "overwrite"
+        mode === "overwrite" && target.published
+          ? "Image retouchée dans Shopify"
+          : mode === "overwrite"
           ? "Image retouchee enregistree"
           : "Version retouchee enregistree",
         {
           description:
-            mode === "overwrite"
+            mode === "overwrite" && target.published
+              ? "Le média Shopify existant a été mis à jour à la même position."
+              : mode === "overwrite"
               ? "L'image existante est remplacee et repasse en attente de validation."
               : "Elle est ajoutee en attente de validation.",
         },

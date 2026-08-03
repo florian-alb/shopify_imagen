@@ -10,12 +10,14 @@ export function RetouchDialogFooter({
   busy,
   canEdit,
   historyReadout,
+  published,
   onSave,
 }: {
   activeToolLabel: string;
   busy: boolean;
   canEdit: boolean;
   historyReadout: string;
+  published: boolean;
   onSave: (mode: RetouchSaveMode) => void;
 }) {
   const isMobile = useIsMobile();
@@ -53,14 +55,18 @@ export function RetouchDialogFooter({
           size={saveButtonSize}
           disabled={!canEdit || busy}
           onClick={() => onSave("overwrite")}
-          aria-label="Remplacer l'image"
+          aria-label={
+            published ? "Remplacer l'image dans Shopify" : "Remplacer l'image"
+          }
         >
           {busy ? (
             <Loader2 data-icon="inline-start" className="animate-spin" />
           ) : (
             <Save data-icon="inline-start" />
           )}
-          <span className="max-[640px]:sr-only">Remplacer l'image</span>
+          <span className="max-[640px]:sr-only">
+            {published ? "Remplacer dans Shopify" : "Remplacer l'image"}
+          </span>
         </Button>
       </div>
     </DialogFooter>

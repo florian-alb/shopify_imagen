@@ -1,7 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import type { FunctionArgs, FunctionReturnType } from "convex/server";
 import { useQuery } from "convex/react";
-import { Images } from "lucide-react";
+import { ArrowLeftRight, FlipHorizontal2, Images } from "lucide-react";
 import { useState } from "react";
 
 import {
@@ -14,6 +14,10 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import {
+  SegmentedControl,
+  type SegmentedControlOption,
+} from "@/components/ui/segmented-control";
+import {
   Table,
   TableBody,
   TableCell,
@@ -21,24 +25,46 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { BulkImageReorderDialogs } from "@/features/products/components/BulkImageReorderDialogs";
 import { BulkImageTransformDialogs } from "@/features/products/components/BulkImageTransformDialogs";
+import { useBulkImageReorder } from "@/features/products/hooks/useBulkImageReorder";
 import { useBulkImageTransform } from "@/features/products/hooks/useBulkImageTransform";
-import {
-  bulkTransformImagePositionsLabel,
-  bulkTransformStatusLabel,
-} from "@/features/products/lib/bulkImageTransformViewModel";
-import { api } from "@/lib/convex";
+import { bulkReorderStatusLabel } from "@/features/products/lib/bulkImageReorderViewModel";
+import { bulkTransformStatusLabel } from "@/features/products/lib/bulkImageTransformViewModel";
+import { api, type Doc, type Id } from "@/lib/convex";
 
 type ListedBulkOperation = NonNullable<
-  FunctionReturnType<typeof api.bulkTransforms.list>
+  FunctionReturnType<typeof api.bulkOperations.list>
 >["page"][number];
-type BulkHistoryCursor = FunctionArgs<typeof api.bulkTransforms.list>["cursor"];
+type BulkHistoryCursor = FunctionArgs<
+  typeof api.bulkOperations.list
+>["cursor"];
+type OperationFilter = NonNullable<
+  FunctionArgs<typeof api.bulkOperations.list>["operation"]
+>;
 
 const BULK_HISTORY_PAGE_SIZE = 20;
+const operationFilters: SegmentedControlOption<OperationFilter>[] = [
+  { label: "Toutes", value: "all" },
+  {
+    label: "Réorganisation",
+    value: "reorder_media",
+    icon: <ArrowLeftRight />,
+  },
+  {
+    label: "Miroir",
+    value: "flip_horizontal",
+    icon: <FlipHorizontal2 />,
+  },
+];
 
 function statusTone(job: ListedBulkOperation) {
-  if (job.rollbackStatus === "completed") return "success" as const;
-  if (job.rollbackStatus === "running" || job.rollbackStatus === "partial") {
+  if (job.restoreStatus === "completed") return "success" as const;
+  if (
+    job.restoreStatus === "running" ||
+    job.restoreStatus === "queued" ||
+    job.restoreStatus === "partial"
+  ) {
     return "warning" as const;
   }
   if (job.status === "completed") return "success" as const;
@@ -49,43 +75,82 @@ function statusTone(job: ListedBulkOperation) {
 }
 
 function operationStatusLabel(job: ListedBulkOperation) {
-  if (job.rollbackStatus === "running") return "Restauration";
-  if (job.rollbackStatus === "completed") return "Originaux restaurés";
-  if (job.rollbackStatus === "partial") return "Restauration avec alertes";
-  return bulkTransformStatusLabel(job.status);
+  if (job.restoreStatus === "queued") return "Restauration en attente";
+  if (job.restoreStatus === "running") return "Restauration en cours";
+  if (job.restoreStatus === "completed") return "Original restauré";
+  if (job.restoreStatus === "partial") return "Restauration avec alertes";
+  return job.operation === "reorder_media"
+    ? bulkReorderStatusLabel(
+        job.status as Doc<"bulkReorderJobs">["status"],
+      )
+    : bulkTransformStatusLabel(
+        job.status as Doc<"bulkTransformJobs">["status"],
+      );
 }
 
-function operationProgress(job: ListedBulkOperation) {
-  if (job.rollbackStatus) {
-    const completed =
-      job.rolledBackItems + job.rollbackFailedItems + job.rollbackConflictItems;
-    const total = job.rollbackTotalItems ?? job.publishedItems;
-    return {
-      completed,
-      total,
-      label: `${completed}/${total} images restaurées ou vérifiées`,
-    };
+function operationLabel(job: ListedBulkOperation) {
+  return job.operation === "reorder_media"
+    ? `Positions ${job.details.firstPosition} ↔ ${job.details.secondPosition}`
+    : job.details.selectedImagePositions?.length
+      ? `${job.details.selectedImagePositions.length} position${job.details.selectedImagePositions.length === 1 ? "" : "s"}`
+      : "Toutes les images";
+}
+
+function resultSummary(job: ListedBulkOperation) {
+  if (job.details.error) return job.details.error;
+  if (job.restoreStatus === "completed") {
+    return "Aucun conflit de restauration";
+  }
+  if (job.restoreIssueItems) {
+    return `${job.restoreIssueItems} restauration${job.restoreIssueItems === 1 ? "" : "s"} en échec ou conflit`;
+  }
+  if (job.issueItems) {
+    return `${job.issueItems} élément${job.issueItems === 1 ? "" : "s"} ignoré${job.issueItems === 1 ? "" : "s"}, en échec ou conflit`;
+  }
+  if (
+    job.status === "queued" ||
+    job.status === "running" ||
+    job.status === "transforming" ||
+    job.status === "ready" ||
+    job.status === "publishing" ||
+    job.restoreStatus === "queued" ||
+    job.restoreStatus === "running"
+  ) {
+    return "Traitement en cours";
+  }
+  return "Aucune erreur";
+}
+
+function progressLabel(job: ListedBulkOperation) {
+  if (job.restoreStatus) {
+    return `${job.processedItems}/${job.totalItems} élément${job.totalItems === 1 ? "" : "s"} restauré${job.processedItems === 1 ? "" : "s"} ou vérifié${job.processedItems === 1 ? "" : "s"}`;
+  }
+  if (job.operation === "reorder_media") {
+    return `${job.processedItems}/${job.totalItems} produits vérifiés`;
   }
   if (job.status === "queued") {
-    return {
-      completed: job.seededProductCount,
-      total: job.productCount,
-      label: `${job.seededProductCount}/${job.productCount} produits inventoriés`,
-    };
+    return `${job.processedItems}/${job.totalItems} produits inventoriés`;
   }
-  const publishing =
+  if (job.status === "publishing") {
+    return `${job.processedItems}/${job.totalItems} images publiées ou vérifiées`;
+  }
+  return `${job.processedItems}/${job.totalItems} images préparées ou vérifiées`;
+}
+
+function completionLabel(job: ListedBulkOperation) {
+  if (job.restoreStatus) {
+    return `${job.restoredItems ?? 0} restauré${(job.restoredItems ?? 0) === 1 ? "" : "s"}`;
+  }
+  if (job.operation === "reorder_media") {
+    return `${job.completedItems} galerie${job.completedItems === 1 ? " réorganisée" : "s réorganisées"}`;
+  }
+  const completed =
     job.status === "publishing" ||
     job.status === "completed" ||
-    job.status === "partial";
-  const completed = publishing
-    ? job.publishedItems + job.publishFailedItems + job.conflictItems
-    : job.transformedItems + job.transformFailedItems + job.unsupportedItems;
-  const total = publishing ? job.transformedItems : job.totalItems;
-  return {
-    completed,
-    total,
-    label: `${completed}/${total} images`,
-  };
+    job.status === "partial"
+      ? job.details.publishedItems
+      : job.details.transformedItems;
+  return `${completed} image${completed === 1 ? "" : "s"} ${job.status === "publishing" || job.status === "completed" || job.status === "partial" ? "publiée" : "préparée"}${completed === 1 ? "" : "s"}`;
 }
 
 export function BulkOperationsPage() {
@@ -98,17 +163,29 @@ export function BulkOperationsPage() {
 }
 
 function BulkOperationsForShop() {
+  const [operation, setOperation] = useState<OperationFilter>("all");
   const [pageIndex, setPageIndex] = useState(0);
   const [cursorStack, setCursorStack] = useState<BulkHistoryCursor[]>([null]);
   const cursor = cursorStack[pageIndex] ?? null;
-  const jobsPage = useQuery(api.bulkTransforms.list, {
+  const jobsPage = useQuery(api.bulkOperations.list, {
     cursor,
     limit: BULK_HISTORY_PAGE_SIZE,
+    operation,
   });
   const bulkTransform = useBulkImageTransform({
     onStarted: () => undefined,
     selectedProductIds: [],
   });
+  const bulkReorder = useBulkImageReorder({
+    onStarted: () => undefined,
+    selectedProductIds: [],
+  });
+
+  function changeOperation(next: string) {
+    setOperation(next as OperationFilter);
+    setPageIndex(0);
+    setCursorStack([null]);
+  }
 
   function goToPreviousPage() {
     setPageIndex((current) => Math.max(0, current - 1));
@@ -122,6 +199,14 @@ function BulkOperationsForShop() {
       nextCursor,
     ]);
     setPageIndex((current) => current + 1);
+  }
+
+  function openJob(job: ListedBulkOperation) {
+    if (job.operation === "reorder_media") {
+      bulkReorder.openJob(job.id as Id<"bulkReorderJobs">);
+    } else {
+      bulkTransform.openJob(job.id as Id<"bulkTransformJobs">);
+    }
   }
 
   return (
@@ -142,9 +227,18 @@ function BulkOperationsForShop() {
           </Button>
         }
       >
-        Suivi en temps réel des préparations, publications, conflits et
-        résultats archivés.
+        Réorganisations, préparations miroir, publications et conflits de la
+        boutique active.
       </PageHeader>
+
+      <div className="space-y-4">
+        <SegmentedControl
+          className="sm:w-[22rem]"
+          value={operation}
+          onValueChange={changeOperation}
+          options={operationFilters}
+          ariaLabel="Filtrer les opérations bulk"
+        />
 
       {jobsPage === undefined ? (
         <EmptyState
@@ -155,17 +249,28 @@ function BulkOperationsForShop() {
       ) : jobsPage.page.length === 0 ? (
         <EmptyState
           title="Aucune opération bulk"
-          body="Sélectionne des produits pour préparer ta première transformation en masse."
+          body="Sélectionnez des produits pour lancer une réorganisation ou préparer des miroirs."
         >
           <Button asChild>
             <Link to="/products">Voir les produits</Link>
           </Button>
         </EmptyState>
       ) : (
-        <Card className="overflow-hidden rounded-lg">
-          <Table className="min-w-[940px] [&_td]:h-20 [&_th]:text-[0.72rem] [&_th]:font-medium [&_th]:text-muted-foreground">
+        <>
+          <div className="grid gap-3 lg:hidden">
+            {jobsPage.page.map((job) => (
+              <BulkOperationCard
+                key={job.key}
+                job={job}
+                onOpen={() => openJob(job)}
+              />
+            ))}
+          </div>
+          <Card className="hidden overflow-hidden rounded-lg lg:block">
+          <Table className="min-w-[1020px] [&_td]:h-20 [&_th]:text-xs [&_th]:font-medium [&_th]:text-muted-foreground">
             <TableHeader>
               <TableRow className="hover:bg-transparent">
+                <TableHead>Opération</TableHead>
                 <TableHead>Statut</TableHead>
                 <TableHead>Cible</TableHead>
                 <TableHead>Progression</TableHead>
@@ -176,38 +281,32 @@ function BulkOperationsForShop() {
             </TableHeader>
             <TableBody>
               {jobsPage.page.map((job) => {
-                const progress = operationProgress(job);
-                const percent = progress.total
-                  ? Math.min(100, (progress.completed / progress.total) * 100)
+                const percent = job.totalItems
+                  ? Math.min(
+                      100,
+                      (job.processedItems / job.totalItems) * 100,
+                    )
                   : 0;
-                const failures =
-                  job.seedFailedProducts +
-                  job.transformFailedItems +
-                  job.publishFailedItems +
-                  job.conflictItems +
-                  job.skippedItems +
-                  job.unsupportedItems;
-                const rollbackFailures =
-                  job.rollbackFailedItems + job.rollbackConflictItems;
-                const resultSummary = job.error
-                  ? job.error
-                  : job.rollbackStatus && rollbackFailures
-                    ? `${rollbackFailures} restauration${rollbackFailures === 1 ? "" : "s"} en échec ou conflit`
-                    : job.rollbackStatus === "completed"
-                      ? "Toutes les images éligibles ont été restaurées"
-                      : failures
-                        ? `${failures} élément${failures === 1 ? "" : "s"} non traité${failures === 1 ? "" : "s"}`
-                        : "Aucune erreur";
                 return (
-                  <TableRow key={job._id}>
+                  <TableRow key={job.key}>
+                    <TableCell>
+                      <div className="flex items-center gap-2 font-medium">
+                        {job.operation === "reorder_media" ? (
+                          <ArrowLeftRight className="size-4" />
+                        ) : (
+                          <FlipHorizontal2 className="size-4" />
+                        )}
+                        {job.operation === "reorder_media"
+                          ? "Réorganisation"
+                          : "Miroir horizontal"}
+                      </div>
+                    </TableCell>
                     <TableCell>
                       <div className="flex flex-wrap gap-1">
                         <StateBadge state={statusTone(job)}>
                           {operationStatusLabel(job)}
                         </StateBadge>
-                        {job.dismissedAt ? (
-                          <StateBadge>Archivé</StateBadge>
-                        ) : null}
+                        {job.dismissedAt ? <StateBadge>Archivé</StateBadge> : null}
                       </div>
                     </TableCell>
                     <TableCell>
@@ -216,33 +315,27 @@ function BulkOperationsForShop() {
                         {job.productCount === 1 ? "" : "s"}
                       </p>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        {bulkTransformImagePositionsLabel(
-                          job.selectedImagePositions,
-                        )}
+                        {operationLabel(job)}
                       </p>
                     </TableCell>
                     <TableCell>
                       <div className="min-w-44 space-y-2">
                         <Progress
                           value={percent}
-                          aria-label={`Progression du bulk ${job._id.slice(-6)}`}
-                          aria-valuetext={progress.label}
+                          aria-label={`Progression du bulk ${job.key.slice(-6)}`}
+                          aria-valuetext={progressLabel(job)}
                         />
                         <p className="text-xs text-muted-foreground">
-                          {progress.label}
+                          {progressLabel(job)}
                         </p>
                       </div>
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="max-w-72 whitespace-normal break-words">
                       <p className="text-sm">
-                        {job.transformedItems} préparées · {job.publishedItems}{" "}
-                        publiées
-                        {job.rollbackStatus
-                          ? ` · ${job.rolledBackItems} restaurées`
-                          : ""}
+                        {completionLabel(job)}
                       </p>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        {resultSummary}
+                        {resultSummary(job)}
                       </p>
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
@@ -253,13 +346,14 @@ function BulkOperationsForShop() {
                         type="button"
                         size="sm"
                         variant="outline"
-                        onClick={() => bulkTransform.openJob(job._id)}
+                        onClick={() => openJob(job)}
                       >
                         {job.status === "queued" ||
+                        job.status === "running" ||
                         job.status === "transforming" ||
                         job.status === "ready" ||
                         job.status === "publishing" ||
-                        job.rollbackStatus === "running"
+                        job.restoreStatus === "running"
                           ? "Suivre"
                           : "Voir"}
                       </Button>
@@ -269,10 +363,11 @@ function BulkOperationsForShop() {
               })}
             </TableBody>
           </Table>
-        </Card>
+          </Card>
+        </>
       )}
 
-      <div className="mt-4 flex items-center justify-between gap-3 rounded-lg border bg-card px-3 py-2">
+      <div className="flex items-center justify-between gap-3 rounded-lg border bg-card px-3 py-2">
         <span className="text-xs text-muted-foreground">
           Page {pageIndex + 1}
         </span>
@@ -281,6 +376,7 @@ function BulkOperationsForShop() {
             type="button"
             size="sm"
             variant="outline"
+            className="min-h-11 sm:min-h-7"
             disabled={pageIndex === 0 || jobsPage === undefined}
             onClick={goToPreviousPage}
           >
@@ -290,6 +386,7 @@ function BulkOperationsForShop() {
             type="button"
             size="sm"
             variant="outline"
+            className="min-h-11 sm:min-h-7"
             disabled={!jobsPage?.hasNext || !jobsPage.continueCursor}
             onClick={goToNextPage}
           >
@@ -297,8 +394,73 @@ function BulkOperationsForShop() {
           </Button>
         </div>
       </div>
+      </div>
 
+      <BulkImageReorderDialogs bulkReorder={bulkReorder} />
       <BulkImageTransformDialogs bulkTransform={bulkTransform} />
     </main>
+  );
+}
+
+function BulkOperationCard({
+  job,
+  onOpen,
+}: {
+  job: ListedBulkOperation;
+  onOpen: () => void;
+}) {
+  const percent = job.totalItems
+    ? Math.min(100, (job.processedItems / job.totalItems) * 100)
+    : 0;
+  return (
+    <Card size="sm" className="gap-4 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2 font-medium">
+            {job.operation === "reorder_media" ? (
+              <ArrowLeftRight className="size-4" />
+            ) : (
+              <FlipHorizontal2 className="size-4" />
+            )}
+            {job.operation === "reorder_media"
+              ? "Réorganisation"
+              : "Miroir horizontal"}
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {job.productCount} produit{job.productCount === 1 ? "" : "s"} · {operationLabel(job)}
+          </p>
+        </div>
+        <StateBadge state={statusTone(job)}>
+          {operationStatusLabel(job)}
+        </StateBadge>
+      </div>
+      <div className="space-y-2">
+        <Progress
+          value={percent}
+          aria-label={`Progression du bulk ${job.key.slice(-6)}`}
+          aria-valuetext={progressLabel(job)}
+        />
+        <p className="text-xs text-muted-foreground">{progressLabel(job)}</p>
+      </div>
+      <div className="min-w-0 text-sm">
+        <p>{completionLabel(job)}</p>
+        <p className="mt-1 break-words text-xs text-muted-foreground">
+          {resultSummary(job)}
+        </p>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-3">
+        <time className="text-xs text-muted-foreground" dateTime={new Date(job.createdAt).toISOString()}>
+          {new Date(job.createdAt).toLocaleString("fr-FR")}
+        </time>
+        <Button
+          type="button"
+          variant="outline"
+          className="min-h-11 w-full sm:w-auto"
+          onClick={onOpen}
+        >
+          Voir le détail
+        </Button>
+      </div>
+    </Card>
   );
 }

@@ -678,6 +678,7 @@ export function ImageRetouchDialog({
               busy={busy}
               canEdit={canEdit}
               historyReadout={historyReadout}
+              published={target?.published ?? false}
               onSave={(mode) => void save(mode)}
             />
           </div>

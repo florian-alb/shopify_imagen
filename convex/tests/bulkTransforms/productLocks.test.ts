@@ -37,6 +37,160 @@ function productFields(
 }
 
 describe("bulk transform product locks", () => {
+  test("shares product locks with bulk image reorders", async () => {
+    const t = convexTest(schema, modules);
+    const { productId, userId } = await t.run(async (ctx) => {
+      const userId = await ctx.db.insert("users", {
+        approvalStatus: "approved",
+      });
+      const shopId = await ctx.db.insert("shops", {
+        domain: "cross-operation-lock.myshopify.com",
+        createdByUserId: userId,
+        createdAt: 1,
+        updatedAt: 1,
+      });
+      await ctx.db.patch(userId, { activeShopId: shopId });
+      const productId = await ctx.db.insert(
+        "products",
+        productFields(shopId, 200),
+      );
+      return { productId, userId };
+    });
+
+    const reorderJobId = await t.mutation(internal.bulkReorders.createJob, {
+      userId,
+      productIds: [productId],
+      firstPosition: 1,
+      secondPosition: 2,
+    });
+    const visibleLocks = await t
+      .withIdentity({ subject: userId })
+      .query(api.bulkTransforms.productLocks, { productIds: [productId] });
+    expect(visibleLocks).toEqual([
+      {
+        productId,
+        operation: "reorder_media",
+        jobId: reorderJobId,
+        status: "queued",
+      },
+    ]);
+
+    await expect(
+      t.mutation(internal.bulkTransforms.createJob, {
+        userId,
+        productIds: [productId],
+        operation: "flip_horizontal",
+      }),
+    ).rejects.toThrow("already locked");
+
+    const skippedReorderJobId = await t.mutation(
+      internal.bulkReorders.createJob,
+      {
+        userId,
+        productIds: [productId],
+        firstPosition: 1,
+        secondPosition: 2,
+      },
+    );
+    const skippedReorderJob = await t.run((ctx) =>
+      ctx.db.get(skippedReorderJobId),
+    );
+    expect(skippedReorderJob).toMatchObject({
+      lockedItems: 1,
+      totalItems: 0,
+      processedItems: 1,
+    });
+  });
+
+  test("keeps a Shopify job locked and verifiable during cancellation", async () => {
+    const t = convexTest(schema, modules);
+    const { productId, userId } = await t.run(async (ctx) => {
+      const userId = await ctx.db.insert("users", {
+        approvalStatus: "approved",
+      });
+      const shopId = await ctx.db.insert("shops", {
+        domain: "pending-reorder-cancel.myshopify.com",
+        createdByUserId: userId,
+        createdAt: 1,
+        updatedAt: 1,
+      });
+      await ctx.db.patch(userId, { activeShopId: shopId });
+      const productId = await ctx.db.insert(
+        "products",
+        productFields(shopId, 201),
+      );
+      return { productId, userId };
+    });
+    const jobId = await t.mutation(internal.bulkReorders.createJob, {
+      userId,
+      productIds: [productId],
+      firstPosition: 1,
+      secondPosition: 2,
+    });
+    const claimed = await t.mutation(internal.bulkReorders.claimNext, {
+      jobId,
+    });
+    if (!claimed || !("item" in claimed)) {
+      throw new Error("Expected a claimed reorder item.");
+    }
+    await t.mutation(internal.bulkReorders.saveSnapshot, {
+      itemId: claimed.item._id,
+      sourceImageIds: ["image-a", "image-b"],
+      targetImageIds: ["image-b", "image-a"],
+    });
+    await t.mutation(internal.bulkReorders.saveShopifyJob, {
+      itemId: claimed.item._id,
+      shopifyJobId: "gid://shopify/Job/pending-cancel",
+    });
+    await t.mutation(internal.bulkReorders.deferItem, {
+      itemId: claimed.item._id,
+      delayMs: 0,
+    });
+
+    await t
+      .withIdentity({ subject: userId })
+      .mutation(api.bulkReorders.cancel, { jobId });
+    const pendingState = await t.run(async (ctx) => ({
+      job: await ctx.db.get(jobId),
+      item: await ctx.db.get(claimed.item._id),
+      lock: await ctx.db
+        .query("bulkReorderProductLocks")
+        .withIndex("by_product", (q) => q.eq("productId", productId))
+        .unique(),
+    }));
+    expect(pendingState.job?.status).toBe("cancelling");
+    expect(pendingState.item?.status).toBe("queued");
+    expect(pendingState.lock?.jobId).toBe(jobId);
+    await t.run((ctx) =>
+      ctx.db.patch(claimed.item._id, { availableAt: 0 }),
+    );
+
+    const verificationClaim = await t.mutation(
+      internal.bulkReorders.claimNext,
+      { jobId },
+    );
+    if (!verificationClaim || !("item" in verificationClaim)) {
+      throw new Error("Expected the pending Shopify job to be reclaimed.");
+    }
+    await t.mutation(internal.bulkReorders.recordOutcome, {
+      itemId: verificationClaim.item._id,
+      outcome: "completed",
+    });
+    const finalState = await t.run(async (ctx) => ({
+      job: await ctx.db.get(jobId),
+      lock: await ctx.db
+        .query("bulkReorderProductLocks")
+        .withIndex("by_product", (q) => q.eq("productId", productId))
+        .unique(),
+    }));
+    expect(finalState.job).toMatchObject({
+      status: "cancelled",
+      completedItems: 1,
+      processedItems: 1,
+    });
+    expect(finalState.lock).toBeNull();
+  });
+
   test("allows disjoint jobs and rolls back a partially overlapping selection", async () => {
     const t = convexTest(schema, modules);
     const { product1, product2, product3, shopId, userId } = await t.run(
@@ -316,6 +470,7 @@ describe("bulk transform product locks", () => {
     expect(visibleLocks).toEqual([
       {
         productId: product1,
+        operation: "flip_horizontal",
         jobId: legacyJobId,
         status: "ready",
       },

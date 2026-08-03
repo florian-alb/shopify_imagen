@@ -15,6 +15,7 @@ import type {
   ProductListItem,
   ProductPageResult,
 } from "../types";
+import { useBulkImageReorder } from "./useBulkImageReorder";
 import { useBulkImageTransform } from "./useBulkImageTransform";
 import { useImageTypeSelection } from "./useImageTypeSelection";
 
@@ -69,6 +70,7 @@ export function useProductsListPage(search: ProductSearch) {
     api.bulkTransforms.productLocks,
     visibleProductIds.length ? { productIds: visibleProductIds } : "skip",
   ) as BulkProductLock[] | undefined;
+  const hasTrackedBulk = useQuery(api.bulkOperations.hasUndismissed, {});
   const bulkLocksByProductId = useMemo(
     () =>
       new Map(
@@ -84,6 +86,10 @@ export function useProductsListPage(search: ProductSearch) {
   const createJob = useMutation(api.jobs.create);
   const selectedProductIds = useMemo(() => Array.from(selected), [selected]);
   const bulkTransform = useBulkImageTransform({
+    onStarted: () => setSelected(new Set()),
+    selectedProductIds,
+  });
+  const bulkReorder = useBulkImageReorder({
     onStarted: () => setSelected(new Set()),
     selectedProductIds,
   });
@@ -215,6 +221,8 @@ export function useProductsListPage(search: ProductSearch) {
     productPage,
     products,
     bulkTransform,
+    bulkReorder,
+    hasTrackedBulk: hasTrackedBulk ?? false,
     selected,
     syncing,
     generate,

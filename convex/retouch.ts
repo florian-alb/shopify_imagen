@@ -2,7 +2,7 @@
 
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
-import { action, internalAction } from "./_generated/server";
+import { action, internalAction, type ActionCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireUserId } from "./authz";
 import { mimeToExtension } from "./generation/formats";
@@ -11,9 +11,62 @@ import {
   uniqueStorageToken,
   uploadToR2,
 } from "./generation/storage";
+import type { ShopifyCredentials } from "./shopScope";
+import { shopifyGraphql } from "./shopify/client";
+import { FILE_UPDATE_MUTATION } from "./shopify/graphql";
+import { throwUserErrors } from "./shopify/media";
 
 const MAX_RETOUCH_BYTES = 15 * 1024 * 1024;
 const PREPARED_SOURCE_RETENTION_MS = 60 * 60 * 1000;
+
+async function replacePublishedShopifyImage(args: {
+  ctx: Pick<ActionCtx, "runQuery">;
+  source: Doc<"generatedImages">;
+  storageUrl: string;
+  userId: Id<"users">;
+}) {
+  const mediaId = args.source.shopifyMediaId;
+  if (!mediaId?.startsWith("gid://")) {
+    throw new Error("Published Shopify media was not found.");
+  }
+
+  const credentials = (await args.ctx.runQuery(
+    internal.shops.getShopifyCredentials,
+    {
+      shopId: args.source.shopId ?? null,
+      userId: args.userId,
+    },
+  )) as ShopifyCredentials;
+  const updated = await shopifyGraphql<{
+    fileUpdate?: {
+      files?: Array<{ id?: string | null }> | null;
+      userErrors?: Array<{
+        field?: string[] | null;
+        message: string;
+      }> | null;
+    } | null;
+  }>(
+    FILE_UPDATE_MUTATION,
+    {
+      files: [{ id: mediaId, originalSource: args.storageUrl }],
+    },
+    undefined,
+    credentials,
+  );
+
+  if (!updated.fileUpdate) {
+    throw new Error(
+      "Shopify image replacement failed: Shopify returned no file update payload.",
+    );
+  }
+  throwUserErrors(
+    updated.fileUpdate.userErrors,
+    "Shopify image replacement failed",
+  );
+  if (!updated.fileUpdate.files?.some((file) => file.id === mediaId)) {
+    throw new Error("Shopify did not confirm the image replacement request.");
+  }
+}
 
 export const deletePreparedRetouchSource = internalAction({
   args: {
@@ -83,7 +136,7 @@ export const saveRetouchedImage = action({
     saveMode: v.optional(v.union(v.literal("version"), v.literal("overwrite"))),
   },
   handler: async (ctx, args): Promise<Id<"generatedImages">> => {
-    await requireUserId(ctx);
+    const userId = await requireUserId(ctx);
     const saveMode = args.saveMode ?? "version";
     const source = (await ctx.runQuery(internal.jobs.retouchSourceForSave, {
       imageId: args.sourceImageId,
@@ -118,6 +171,19 @@ export const saveRetouchedImage = action({
       contentType,
       key: `retouched/${source.productId}/${source._id}-${uniqueStorageToken()}.${extension}`,
     });
+
+    if (
+      saveMode === "overwrite" &&
+      source.status === "uploaded" &&
+      source.shopifyMediaId
+    ) {
+      await replacePublishedShopifyImage({
+        ctx,
+        source,
+        storageUrl,
+        userId,
+      });
+    }
 
     try {
       await ctx.storage.delete(args.storageId);

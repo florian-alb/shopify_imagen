@@ -28,8 +28,9 @@ import {
   hashShopifyOAuthState,
   shopifyOAuthCallbackUrl,
 } from "./shopify/oauth";
-import { buildMediaMoves, sameIds, throwUserErrors } from "./shopify/media";
+import { sameIds, throwUserErrors } from "./shopify/media";
 import { mapProductForUpsert } from "./shopify/productMapping";
+import { submitShopifyMediaReorder } from "./shopify/reorder";
 import {
   buildVariantMediaUpdates,
   imageForPromptOne,
@@ -41,12 +42,10 @@ import {
   PRODUCT_DELETE_MEDIA_MUTATION,
   PRODUCT_DUPLICATE_MUTATION,
   PRODUCT_QUERY,
-  PRODUCT_REORDER_MEDIA_MUTATION,
   PRODUCT_UPDATE_MEDIA_MUTATION,
   PRODUCT_VARIANTS_BULK_UPDATE_MEDIA_MUTATION,
   PRODUCT_VARIANTS_BULK_DELETE_MUTATION,
   PRODUCTS_QUERY,
-  SHOPIFY_JOB_QUERY,
 } from "./shopify/graphql";
 
 type ProductsResponse = {
@@ -60,7 +59,10 @@ const REJECTED_IMAGE_RETENTION_MS = 5 * 24 * 60 * 60 * 1000;
 const REJECTED_IMAGE_CLEANUP_BATCH_SIZE = 50;
 const SHOPIFY_OAUTH_ATTEMPT_TTL_MS = 10 * 60 * 1000;
 const SHOPIFY_OAUTH_CLEANUP_BATCH_SIZE = 50;
-const SHOPIFY_PRODUCT_SYNC_PAGE_SIZE = 25;
+// This query expands product media, variants, collections, and metafields.
+// Shopify rejects `first: 25` at a requested cost of 1010 (maximum: 1000), so
+// keep each cursor page comfortably below the single-query limit.
+const SHOPIFY_PRODUCT_SYNC_PAGE_SIZE = 20;
 
 const shopifyAuthorizationStatusValidator = v.object({
   shopDomain: v.string(),
@@ -346,19 +348,6 @@ export const syncProduct = action({
   },
 });
 
-async function waitForShopifyJob(jobId: string, accessToken: string) {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    const data = await shopifyGraphql<{ job: { done: boolean } | null }>(
-      SHOPIFY_JOB_QUERY,
-      { id: jobId },
-      accessToken,
-    );
-    if (data.job?.done) return true;
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  }
-  return false;
-}
-
 // Reorders the existing Shopify gallery immediately after a drag-and-drop. The
 // Shopify mutation accepts sequential moves rather than a final array, and may
 // include non-image media, so the target keeps those entries in their slots.
@@ -406,32 +395,21 @@ export const reorderProductImages = action({
       );
     }
 
-    const moves = buildMediaMoves(mediaNodes, args.orderedMediaIds);
-    if (!moves.length) return { reordered: 0, pending: false };
-
-    const data = await shopifyGraphql<any>(
-      PRODUCT_REORDER_MEDIA_MUTATION,
-      {
-        id: product.shopifyProductId,
-        moves,
-      },
-      accessToken,
+    const reorder = await submitShopifyMediaReorder({
+      productId: product.shopifyProductId,
+      mediaNodes,
+      orderedImageIds: args.orderedMediaIds,
       credentials,
-    );
-    throwUserErrors(
-      data.productReorderMedia.mediaUserErrors,
-      "Shopify product media reorder failed",
-    );
+      accessToken,
+    });
+    if (!reorder.reordered) return { reordered: 0, pending: false };
 
     await ctx.runMutation(internal.shopify.cacheProductImageOrder, {
       productId: product._id,
       orderedMediaIds: args.orderedMediaIds,
     });
 
-    const jobId = data.productReorderMedia.job?.id as string | undefined;
-    const completed = jobId
-      ? await waitForShopifyJob(jobId, accessToken)
-      : true;
+    const completed = reorder.completed;
     if (completed) {
       const after = await shopifyGraphql<{ product: any | null }>(
         PRODUCT_QUERY,
@@ -450,7 +428,7 @@ export const reorderProductImages = action({
       }
     }
 
-    return { reordered: moves.length, pending: !completed };
+    return { reordered: reorder.reordered, pending: !completed };
   },
 });
 

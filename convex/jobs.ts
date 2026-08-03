@@ -1431,6 +1431,8 @@ export const insertRetouchedImage = internalMutation({
 
     const now = Date.now();
     if ((args.saveMode ?? "version") === "overwrite") {
+      const staysPublished =
+        source.status === "uploaded" && Boolean(source.shopifyMediaId);
       await ctx.db.patch(source._id, {
         generatedImageUrl: args.storageUrl,
         storageUrl: args.storageUrl,
@@ -1439,11 +1441,15 @@ export const insertRetouchedImage = internalMutation({
         retouchedAt: now,
         retouchedByUserId: userId,
         transparentCutoutUrl: null,
-        status: "generated",
-        reviewStatus: "pending",
-        reviewedAt: undefined,
-        reviewedByUserId: undefined,
-        shopifyMediaId: null,
+        status: staysPublished ? "uploaded" : "generated",
+        reviewStatus: staysPublished ? "approved" : "pending",
+        ...(staysPublished
+          ? {}
+          : {
+              reviewedAt: undefined,
+              reviewedByUserId: undefined,
+              shopifyMediaId: null,
+            }),
         error: null,
         updatedAt: now,
       });
