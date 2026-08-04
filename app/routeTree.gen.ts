@@ -14,10 +14,14 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as SettingsIndexRouteImport } from './routes/settings/index'
 import { Route as ProductsIndexRouteImport } from './routes/products/index'
 import { Route as JobsIndexRouteImport } from './routes/jobs/index'
+import { Route as GoogleFeedIndexRouteImport } from './routes/google-feed/index'
 import { Route as BulkOperationsIndexRouteImport } from './routes/bulk-operations/index'
 import { Route as SettingsPromptsRouteImport } from './routes/settings/prompts'
 import { Route as ProductsProductIdRouteImport } from './routes/products/$productId'
 import { Route as JobsJobIdRouteImport } from './routes/jobs/$jobId'
+import { Route as GoogleFeedRulesIndexRouteImport } from './routes/google-feed/rules/index'
+import { Route as GoogleFeedPreviewIndexRouteImport } from './routes/google-feed/preview/index'
+import { Route as GoogleFeedHistoryIndexRouteImport } from './routes/google-feed/history/index'
 
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
@@ -44,6 +48,11 @@ const JobsIndexRoute = JobsIndexRouteImport.update({
   path: '/jobs/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const GoogleFeedIndexRoute = GoogleFeedIndexRouteImport.update({
+  id: '/google-feed/',
+  path: '/google-feed/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const BulkOperationsIndexRoute = BulkOperationsIndexRouteImport.update({
   id: '/bulk-operations/',
   path: '/bulk-operations/',
@@ -64,6 +73,21 @@ const JobsJobIdRoute = JobsJobIdRouteImport.update({
   path: '/jobs/$jobId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const GoogleFeedRulesIndexRoute = GoogleFeedRulesIndexRouteImport.update({
+  id: '/google-feed/rules/',
+  path: '/google-feed/rules/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GoogleFeedPreviewIndexRoute = GoogleFeedPreviewIndexRouteImport.update({
+  id: '/google-feed/preview/',
+  path: '/google-feed/preview/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GoogleFeedHistoryIndexRoute = GoogleFeedHistoryIndexRouteImport.update({
+  id: '/google-feed/history/',
+  path: '/google-feed/history/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -72,9 +96,13 @@ export interface FileRoutesByFullPath {
   '/products/$productId': typeof ProductsProductIdRoute
   '/settings/prompts': typeof SettingsPromptsRoute
   '/bulk-operations/': typeof BulkOperationsIndexRoute
+  '/google-feed/': typeof GoogleFeedIndexRoute
   '/jobs/': typeof JobsIndexRoute
   '/products/': typeof ProductsIndexRoute
   '/settings/': typeof SettingsIndexRoute
+  '/google-feed/history/': typeof GoogleFeedHistoryIndexRoute
+  '/google-feed/preview/': typeof GoogleFeedPreviewIndexRoute
+  '/google-feed/rules/': typeof GoogleFeedRulesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -83,9 +111,13 @@ export interface FileRoutesByTo {
   '/products/$productId': typeof ProductsProductIdRoute
   '/settings/prompts': typeof SettingsPromptsRoute
   '/bulk-operations': typeof BulkOperationsIndexRoute
+  '/google-feed': typeof GoogleFeedIndexRoute
   '/jobs': typeof JobsIndexRoute
   '/products': typeof ProductsIndexRoute
   '/settings': typeof SettingsIndexRoute
+  '/google-feed/history': typeof GoogleFeedHistoryIndexRoute
+  '/google-feed/preview': typeof GoogleFeedPreviewIndexRoute
+  '/google-feed/rules': typeof GoogleFeedRulesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -95,9 +127,13 @@ export interface FileRoutesById {
   '/products/$productId': typeof ProductsProductIdRoute
   '/settings/prompts': typeof SettingsPromptsRoute
   '/bulk-operations/': typeof BulkOperationsIndexRoute
+  '/google-feed/': typeof GoogleFeedIndexRoute
   '/jobs/': typeof JobsIndexRoute
   '/products/': typeof ProductsIndexRoute
   '/settings/': typeof SettingsIndexRoute
+  '/google-feed/history/': typeof GoogleFeedHistoryIndexRoute
+  '/google-feed/preview/': typeof GoogleFeedPreviewIndexRoute
+  '/google-feed/rules/': typeof GoogleFeedRulesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -108,9 +144,13 @@ export interface FileRouteTypes {
     | '/products/$productId'
     | '/settings/prompts'
     | '/bulk-operations/'
+    | '/google-feed/'
     | '/jobs/'
     | '/products/'
     | '/settings/'
+    | '/google-feed/history/'
+    | '/google-feed/preview/'
+    | '/google-feed/rules/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -119,9 +159,13 @@ export interface FileRouteTypes {
     | '/products/$productId'
     | '/settings/prompts'
     | '/bulk-operations'
+    | '/google-feed'
     | '/jobs'
     | '/products'
     | '/settings'
+    | '/google-feed/history'
+    | '/google-feed/preview'
+    | '/google-feed/rules'
   id:
     | '__root__'
     | '/'
@@ -130,9 +174,13 @@ export interface FileRouteTypes {
     | '/products/$productId'
     | '/settings/prompts'
     | '/bulk-operations/'
+    | '/google-feed/'
     | '/jobs/'
     | '/products/'
     | '/settings/'
+    | '/google-feed/history/'
+    | '/google-feed/preview/'
+    | '/google-feed/rules/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -142,9 +190,13 @@ export interface RootRouteChildren {
   ProductsProductIdRoute: typeof ProductsProductIdRoute
   SettingsPromptsRoute: typeof SettingsPromptsRoute
   BulkOperationsIndexRoute: typeof BulkOperationsIndexRoute
+  GoogleFeedIndexRoute: typeof GoogleFeedIndexRoute
   JobsIndexRoute: typeof JobsIndexRoute
   ProductsIndexRoute: typeof ProductsIndexRoute
   SettingsIndexRoute: typeof SettingsIndexRoute
+  GoogleFeedHistoryIndexRoute: typeof GoogleFeedHistoryIndexRoute
+  GoogleFeedPreviewIndexRoute: typeof GoogleFeedPreviewIndexRoute
+  GoogleFeedRulesIndexRoute: typeof GoogleFeedRulesIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -184,6 +236,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof JobsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/google-feed/': {
+      id: '/google-feed/'
+      path: '/google-feed'
+      fullPath: '/google-feed/'
+      preLoaderRoute: typeof GoogleFeedIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/bulk-operations/': {
       id: '/bulk-operations/'
       path: '/bulk-operations'
@@ -212,6 +271,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof JobsJobIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/google-feed/rules/': {
+      id: '/google-feed/rules/'
+      path: '/google-feed/rules'
+      fullPath: '/google-feed/rules/'
+      preLoaderRoute: typeof GoogleFeedRulesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/google-feed/preview/': {
+      id: '/google-feed/preview/'
+      path: '/google-feed/preview'
+      fullPath: '/google-feed/preview/'
+      preLoaderRoute: typeof GoogleFeedPreviewIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/google-feed/history/': {
+      id: '/google-feed/history/'
+      path: '/google-feed/history'
+      fullPath: '/google-feed/history/'
+      preLoaderRoute: typeof GoogleFeedHistoryIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -222,9 +302,13 @@ const rootRouteChildren: RootRouteChildren = {
   ProductsProductIdRoute: ProductsProductIdRoute,
   SettingsPromptsRoute: SettingsPromptsRoute,
   BulkOperationsIndexRoute: BulkOperationsIndexRoute,
+  GoogleFeedIndexRoute: GoogleFeedIndexRoute,
   JobsIndexRoute: JobsIndexRoute,
   ProductsIndexRoute: ProductsIndexRoute,
   SettingsIndexRoute: SettingsIndexRoute,
+  GoogleFeedHistoryIndexRoute: GoogleFeedHistoryIndexRoute,
+  GoogleFeedPreviewIndexRoute: GoogleFeedPreviewIndexRoute,
+  GoogleFeedRulesIndexRoute: GoogleFeedRulesIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

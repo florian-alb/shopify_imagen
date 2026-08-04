@@ -189,6 +189,56 @@ const modelReference = v.object({
   updatedAt: v.number(),
 });
 
+const googleFeedAttribute = v.union(
+  v.literal("google_product_category"),
+  v.literal("gender"),
+  v.literal("age_group"),
+);
+
+const googleFeedOwnerType = v.union(
+  v.literal("PRODUCT"),
+  v.literal("PRODUCTVARIANT"),
+);
+
+const googleFeedCoordinate = v.object({
+  definitionId: v.string(),
+  namespace: v.string(),
+  key: v.string(),
+  type: v.string(),
+  ownerType: googleFeedOwnerType,
+});
+
+const googleFeedCondition = v.object({
+  field: v.union(
+    v.literal("product_title"),
+    v.literal("product_type"),
+    v.literal("vendor"),
+    v.literal("tags"),
+    v.literal("collections"),
+    v.literal("variant_title"),
+    v.literal("option_name"),
+    v.literal("option_value"),
+    v.literal("sku"),
+    v.literal("current_attribute"),
+  ),
+  operator: v.union(
+    v.literal("equals"),
+    v.literal("not_equals"),
+    v.literal("contains"),
+    v.literal("not_contains"),
+    v.literal("starts_with"),
+    v.literal("ends_with"),
+    v.literal("in"),
+    v.literal("empty"),
+    v.literal("not_empty"),
+    v.literal("between"),
+  ),
+  value: v.optional(v.string()),
+  values: v.optional(v.array(v.string())),
+  min: v.optional(v.number()),
+  max: v.optional(v.number()),
+});
+
 export default defineSchema({
   ...authTables,
   users: defineTable({
@@ -254,6 +304,8 @@ export default defineSchema({
     options: v.array(v.any()),
     variants: v.array(v.any()),
     metafields: v.array(v.any()),
+    googleProductCategory: v.optional(v.union(v.string(), v.null())),
+    googleProductCategoryDigest: v.optional(v.union(v.string(), v.null())),
     featuredImageUrl: v.optional(v.union(v.string(), v.null())),
     currentShopifyImages: v.array(v.any()),
     shopifyImageCount: v.optional(v.number()),
@@ -321,6 +373,150 @@ export default defineSchema({
       searchField: "title",
       filterFields: ["shopId", "generationStatus"],
     }),
+  productVariants: defineTable({
+    shopId: v.id("shops"),
+    productId: v.id("products"),
+    shopifyVariantId: v.string(),
+    title: v.string(),
+    sku: v.string(),
+    selectedOptions: v.array(v.object({ name: v.string(), value: v.string() })),
+    gender: v.optional(v.union(v.string(), v.null())),
+    genderDigest: v.optional(v.union(v.string(), v.null())),
+    ageGroup: v.optional(v.union(v.string(), v.null())),
+    ageGroupDigest: v.optional(v.union(v.string(), v.null())),
+    lastSyncedAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_shop_and_shopify_variant_id", ["shopId", "shopifyVariantId"])
+    .index("by_shop_and_product_id", ["shopId", "productId"])
+    .index("by_product_id", ["productId"]),
+  googleFeedConfigs: defineTable({
+    shopId: v.id("shops"),
+    status: v.union(
+      v.literal("ready"),
+      v.literal("partial"),
+      v.literal("blocked"),
+    ),
+    googleAppStatus: v.literal("unverified"),
+    attributes: v.array(
+      v.object({
+        attribute: googleFeedAttribute,
+        status: v.union(
+          v.literal("ready"),
+          v.literal("missing"),
+          v.literal("ambiguous"),
+          v.literal("incompatible"),
+        ),
+        coordinate: v.union(googleFeedCoordinate, v.null()),
+        message: v.string(),
+      }),
+    ),
+    checkedAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_shop_id", ["shopId"]),
+  googleFeedRules: defineTable({
+    shopId: v.id("shops"),
+    createdByUserId: v.id("users"),
+    name: v.string(),
+    active: v.boolean(),
+    priority: v.number(),
+    target: v.union(v.literal("product"), v.literal("variant")),
+    attribute: googleFeedAttribute,
+    conditionMode: v.union(v.literal("and"), v.literal("or")),
+    conditions: v.array(googleFeedCondition),
+    value: v.string(),
+    overwritePolicy: v.union(
+      v.literal("only_if_empty"),
+      v.literal("replace_existing"),
+    ),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_shop_id_and_priority", ["shopId", "priority"])
+    .index("by_shop_id_and_updated_at", ["shopId", "updatedAt"]),
+  googleFeedDrafts: defineTable({
+    shopId: v.id("shops"),
+    createdByUserId: v.id("users"),
+    productId: v.id("products"),
+    variantId: v.optional(v.union(v.id("productVariants"), v.null())),
+    ownerId: v.string(),
+    ownerType: googleFeedOwnerType,
+    attribute: googleFeedAttribute,
+    currentValue: v.union(v.string(), v.null()),
+    currentDigest: v.optional(v.union(v.string(), v.null())),
+    proposedValue: v.string(),
+    sourceKind: v.union(v.literal("manual"), v.literal("rule")),
+    sourceRuleId: v.optional(v.union(v.id("googleFeedRules"), v.null())),
+    sourceLabel: v.string(),
+    matchingRuleIds: v.optional(v.array(v.id("googleFeedRules"))),
+    status: v.union(
+      v.literal("draft"),
+      v.literal("conflict"),
+      v.literal("invalid"),
+      v.literal("publishing"),
+      v.literal("confirmed"),
+      v.literal("failed"),
+    ),
+    included: v.boolean(),
+    error: v.optional(v.union(v.string(), v.null())),
+    lastRunId: v.optional(v.union(v.id("googleFeedRuns"), v.null())),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_shop_id_and_owner_id_and_attribute", [
+      "shopId",
+      "ownerId",
+      "attribute",
+    ])
+    .index("by_shop_id_and_updated_at", ["shopId", "updatedAt"])
+    .index("by_shop_id_and_status", ["shopId", "status"])
+    .index("by_product_id", ["productId"])
+    .index("by_variant_id", ["variantId"]),
+  googleFeedRuns: defineTable({
+    shopId: v.id("shops"),
+    createdByUserId: v.id("users"),
+    kind: v.union(v.literal("evaluation"), v.literal("publication")),
+    status: v.union(
+      v.literal("running"),
+      v.literal("completed"),
+      v.literal("partial"),
+      v.literal("failed"),
+    ),
+    source: v.union(v.literal("manual"), v.literal("rules"), v.literal("retry")),
+    totalItems: v.number(),
+    succeededItems: v.number(),
+    skippedItems: v.number(),
+    failedItems: v.number(),
+    conflictItems: v.number(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    completedAt: v.optional(v.number()),
+  }).index("by_shop_id_and_created_at", ["shopId", "createdAt"]),
+  googleFeedRunItems: defineTable({
+    shopId: v.id("shops"),
+    runId: v.id("googleFeedRuns"),
+    draftId: v.optional(v.union(v.id("googleFeedDrafts"), v.null())),
+    productId: v.id("products"),
+    variantId: v.optional(v.union(v.id("productVariants"), v.null())),
+    ownerId: v.string(),
+    ownerType: googleFeedOwnerType,
+    attribute: googleFeedAttribute,
+    oldValue: v.union(v.string(), v.null()),
+    newValue: v.string(),
+    sourceLabel: v.string(),
+    status: v.union(
+      v.literal("ready"),
+      v.literal("confirmed"),
+      v.literal("skipped"),
+      v.literal("conflict"),
+      v.literal("failed"),
+    ),
+    error: v.optional(v.union(v.string(), v.null())),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_run_id", ["runId"])
+    .index("by_shop_id_and_run_id", ["shopId", "runId"]),
   visualGroupConfigs: defineTable({
     shopId: v.id("shops"),
     productId: v.id("products"),
