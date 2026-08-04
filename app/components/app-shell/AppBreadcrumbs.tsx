@@ -16,6 +16,9 @@ type BreadcrumbRoute =
   | "/products"
   | "/jobs"
   | "/bulk-operations"
+  | "/google-feed"
+  | "/google-feed/rules"
+  | "/google-feed/history"
   | "/settings"
   | "/settings/prompts";
 
@@ -57,6 +60,31 @@ function routeBreadcrumbs(pathname: string): AppBreadcrumbItem[] {
 
   if (normalizedPathname === "/bulk-operations") {
     return [{ label: "Bulk operations", to: "/bulk-operations" }];
+  }
+
+  if (normalizedPathname === "/google-feed") {
+    return [{ label: "Flux Google", to: "/google-feed" }];
+  }
+
+  if (normalizedPathname === "/google-feed/rules") {
+    return [
+      { label: "Flux Google", to: "/google-feed" },
+      { label: "Règles", to: "/google-feed/rules" },
+    ];
+  }
+
+  if (normalizedPathname === "/google-feed/history") {
+    return [
+      { label: "Flux Google", to: "/google-feed" },
+      { label: "Historique", to: "/google-feed/history" },
+    ];
+  }
+
+  if (normalizedPathname === "/google-feed/preview") {
+    return [
+      { label: "Flux Google", to: "/google-feed" },
+      { label: "Prévisualisation" },
+    ];
   }
 
   if (normalizedPathname === "/settings") {

@@ -1,5 +1,15 @@
 export const PRODUCTS_QUERY = `#graphql
-  query ProductsForImageStudio($first: Int!, $after: String, $query: String) {
+  query ProductsForImageStudio(
+    $first: Int!
+    $after: String
+    $query: String
+    $categoryNamespace: String
+    $categoryKey: String!
+    $genderNamespace: String
+    $genderKey: String!
+    $ageGroupNamespace: String
+    $ageGroupKey: String!
+  ) {
     products(first: $first, after: $after, query: $query, sortKey: UPDATED_AT, reverse: true) {
       pageInfo { hasNextPage endCursor }
       nodes {
@@ -13,11 +23,25 @@ export const PRODUCTS_QUERY = `#graphql
         collections(first: 50) { nodes { id title handle } }
         featuredMedia { preview { image { url altText } } }
         options { name values }
+        googleProductCategory: metafield(
+          namespace: $categoryNamespace
+          key: $categoryKey
+        ) { value compareDigest }
         variants(first: 100) {
+          pageInfo { hasNextPage endCursor }
           nodes {
             id
             title
+            sku
             selectedOptions { name value }
+            googleGender: metafield(namespace: $genderNamespace, key: $genderKey) {
+              value
+              compareDigest
+            }
+            googleAgeGroup: metafield(namespace: $ageGroupNamespace, key: $ageGroupKey) {
+              value
+              compareDigest
+            }
             media(first: 20) { nodes { id } }
           }
         }
@@ -37,7 +61,15 @@ export const PRODUCTS_QUERY = `#graphql
 `;
 
 export const PRODUCT_QUERY = `#graphql
-  query ProductForImageStudio($id: ID!) {
+  query ProductForImageStudio(
+    $id: ID!
+    $categoryNamespace: String
+    $categoryKey: String!
+    $genderNamespace: String
+    $genderKey: String!
+    $ageGroupNamespace: String
+    $ageGroupKey: String!
+  ) {
     product(id: $id) {
       id
       title
@@ -49,11 +81,25 @@ export const PRODUCT_QUERY = `#graphql
       collections(first: 50) { nodes { id title handle } }
       featuredMedia { preview { image { url altText } } }
       options { name values }
+      googleProductCategory: metafield(
+        namespace: $categoryNamespace
+        key: $categoryKey
+      ) { value compareDigest }
       variants(first: 100) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           title
+          sku
           selectedOptions { name value }
+          googleGender: metafield(namespace: $genderNamespace, key: $genderKey) {
+            value
+            compareDigest
+          }
+          googleAgeGroup: metafield(namespace: $ageGroupNamespace, key: $ageGroupKey) {
+            value
+            compareDigest
+          }
           media(first: 20) { nodes { id } }
         }
       }
@@ -65,6 +111,38 @@ export const PRODUCT_QUERY = `#graphql
           mediaContentType
           preview { image { url altText } }
           ... on MediaImage { image { url altText } }
+        }
+      }
+    }
+  }
+`;
+
+export const PRODUCT_VARIANTS_GOOGLE_FEED_QUERY = `#graphql
+  query ProductVariantsForGoogleFeed(
+    $productId: ID!
+    $after: String
+    $genderNamespace: String
+    $genderKey: String!
+    $ageGroupNamespace: String
+    $ageGroupKey: String!
+  ) {
+    product(id: $productId) {
+      variants(first: 100, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          title
+          sku
+          selectedOptions { name value }
+          googleGender: metafield(namespace: $genderNamespace, key: $genderKey) {
+            value
+            compareDigest
+          }
+          googleAgeGroup: metafield(namespace: $ageGroupNamespace, key: $ageGroupKey) {
+            value
+            compareDigest
+          }
+          media(first: 20) { nodes { id } }
         }
       }
     }

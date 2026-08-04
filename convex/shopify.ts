@@ -29,7 +29,10 @@ import {
   shopifyOAuthCallbackUrl,
 } from "./shopify/oauth";
 import { sameIds, throwUserErrors } from "./shopify/media";
-import { mapProductForUpsert } from "./shopify/productMapping";
+import {
+  mapProductForUpsert,
+  mapVariantsForGoogleFeed,
+} from "./shopify/productMapping";
 import { submitShopifyMediaReorder } from "./shopify/reorder";
 import {
   buildVariantMediaUpdates,
@@ -42,6 +45,7 @@ import {
   PRODUCT_DELETE_MEDIA_MUTATION,
   PRODUCT_DUPLICATE_MUTATION,
   PRODUCT_QUERY,
+  PRODUCT_VARIANTS_GOOGLE_FEED_QUERY,
   PRODUCT_UPDATE_MEDIA_MUTATION,
   PRODUCT_VARIANTS_BULK_UPDATE_MEDIA_MUTATION,
   PRODUCT_VARIANTS_BULK_DELETE_MUTATION,
@@ -54,6 +58,58 @@ type ProductsResponse = {
     nodes: Array<any>;
   };
 };
+
+type GoogleFeedSyncCoordinates = {
+  google_product_category: { namespace: string; key: string; type: string } | null;
+  gender: { namespace: string; key: string; type: string } | null;
+  age_group: { namespace: string; key: string; type: string } | null;
+};
+
+function googleFeedQueryVariables(coordinates: GoogleFeedSyncCoordinates) {
+  return {
+    categoryNamespace: coordinates.google_product_category?.namespace ?? "google_feed_missing",
+    categoryKey: coordinates.google_product_category?.key ?? "missing_category",
+    genderNamespace: coordinates.gender?.namespace ?? "google_feed_missing",
+    genderKey: coordinates.gender?.key ?? "missing_gender",
+    ageGroupNamespace: coordinates.age_group?.namespace ?? "google_feed_missing",
+    ageGroupKey: coordinates.age_group?.key ?? "missing_age_group",
+  };
+}
+
+async function loadRemainingGoogleFeedVariants(
+  product: any,
+  coordinates: GoogleFeedSyncCoordinates,
+  credentials: ShopifyCredentials,
+) {
+  const nodes = [...(product.variants?.nodes ?? [])];
+  let pageInfo = product.variants?.pageInfo as
+    | { hasNextPage: boolean; endCursor: string | null }
+    | undefined;
+  while (pageInfo?.hasNextPage && pageInfo.endCursor) {
+    const response = await shopifyGraphql<{
+      product: {
+        variants: {
+          nodes: any[];
+          pageInfo: { hasNextPage: boolean; endCursor: string | null };
+        };
+      } | null;
+    }>(
+      PRODUCT_VARIANTS_GOOGLE_FEED_QUERY,
+      {
+        productId: product.id,
+        after: pageInfo.endCursor,
+        ...googleFeedQueryVariables(coordinates),
+      },
+      undefined,
+      credentials,
+    );
+    if (!response.product) break;
+    nodes.push(...response.product.variants.nodes);
+    pageInfo = response.product.variants.pageInfo;
+  }
+  product.variants = { nodes, pageInfo };
+  return product;
+}
 
 const REJECTED_IMAGE_RETENTION_MS = 5 * 24 * 60 * 60 * 1000;
 const REJECTED_IMAGE_CLEANUP_BATCH_SIZE = 50;
@@ -278,6 +334,13 @@ export const syncProducts = action({
       internal.shops.ensureActiveForAction,
       { userId },
     )) as ShopifyCredentials;
+    const googleFeedContext = (await ctx.runQuery(
+      internal.googleFeed.getActionContext,
+      { userId },
+    )) as { shopId: Id<"shops">; coordinates: GoogleFeedSyncCoordinates };
+    if (credentials.shopId !== googleFeedContext.shopId) {
+      throw new ConvexError("La boutique active a changé pendant la synchronisation.");
+    }
     const limit = Math.max(1, Math.min(args.limit ?? 100, 250));
     const syncedIds: Id<"products">[] = [];
     let after: string | null = null;
@@ -293,15 +356,29 @@ export const syncProducts = action({
           first,
           after,
           query: credentials.productQuery,
+          ...googleFeedQueryVariables(googleFeedContext.coordinates),
         },
         undefined,
         credentials,
       );
       for (const product of data.products.nodes) {
+        await loadRemainingGoogleFeedVariants(
+          product,
+          googleFeedContext.coordinates,
+          credentials,
+        );
         const id = await ctx.runMutation(
           internal.products.upsertSynced,
           mapProductForUpsert(product, credentials),
         );
+        if (credentials.shopId) {
+          await ctx.runMutation(internal.googleFeed.upsertSyncedVariants, {
+            shopId: credentials.shopId,
+            productId: id,
+            variants: mapVariantsForGoogleFeed(product),
+            removeMissing: true,
+          });
+        }
         syncedIds.push(id);
       }
       if (!data.products.pageInfo.hasNextPage) break;
@@ -323,24 +400,47 @@ export const syncProduct = action({
       productId: args.productId,
     })) as Doc<"products"> | null;
     if (!product) throw new Error("Product not found.");
+    const googleFeedContext = (await ctx.runQuery(
+      internal.googleFeed.getActionContext,
+      { userId },
+    )) as { shopId: Id<"shops">; coordinates: GoogleFeedSyncCoordinates };
+    if (product.shopId !== googleFeedContext.shopId) {
+      throw new ConvexError("Ce produit n’appartient pas à la boutique active.");
+    }
     const credentials = (await ctx.runQuery(
       internal.shops.getShopifyCredentials,
       {
-        shopId: product.shopId ?? null,
+        shopId: product.shopId,
         userId,
       },
     )) as ShopifyCredentials;
     const data = await shopifyGraphql<{ product: any | null }>(
       PRODUCT_QUERY,
-      { id: product.shopifyProductId },
+      {
+        id: product.shopifyProductId,
+        ...googleFeedQueryVariables(googleFeedContext.coordinates),
+      },
       undefined,
       credentials,
     );
     if (!data.product) throw new Error("Product no longer exists in Shopify.");
+    await loadRemainingGoogleFeedVariants(
+      data.product,
+      googleFeedContext.coordinates,
+      credentials,
+    );
     const id: Id<"products"> = await ctx.runMutation(
       internal.products.upsertSynced,
       mapProductForUpsert(data.product, credentials),
     );
+    if (credentials.shopId) {
+      await ctx.runMutation(internal.googleFeed.upsertSyncedVariants, {
+        shopId: credentials.shopId,
+        productId: id,
+        variants: mapVariantsForGoogleFeed(data.product),
+        removeMissing: true,
+      });
+    }
     await ctx.runMutation(internal.products.refreshFacets, {
       shopId: credentials.shopId ?? null,
     });

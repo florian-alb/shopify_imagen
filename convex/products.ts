@@ -301,6 +301,8 @@ export const upsertSynced = internalMutation({
     options: v.array(v.any()),
     variants: v.array(v.any()),
     metafields: v.array(v.any()),
+    googleProductCategory: v.optional(v.union(v.string(), v.null())),
+    googleProductCategoryDigest: v.optional(v.union(v.string(), v.null())),
     featuredImageUrl: v.optional(v.union(v.string(), v.null())),
     currentShopifyImages: v.array(v.any())
   },

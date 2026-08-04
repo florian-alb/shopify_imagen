@@ -55,7 +55,28 @@ export function mapProductForUpsert(product: any, credentials: ShopifyCredential
     options: product.options ?? [],
     variants: product.variants?.nodes ?? [],
     metafields: product.metafields?.nodes ?? [],
+    googleProductCategory: product.googleProductCategory?.value ?? null,
+    googleProductCategoryDigest:
+      product.googleProductCategory?.compareDigest ?? null,
     featuredImageUrl: currentShopifyImages[0]?.url ?? null,
     currentShopifyImages
   };
+}
+
+export function mapVariantsForGoogleFeed(product: any) {
+  return (product.variants?.nodes ?? []).map((variant: any) => ({
+    shopifyVariantId: variant.id,
+    title: variant.title ?? "",
+    sku: variant.sku ?? "",
+    selectedOptions: (variant.selectedOptions ?? []).map(
+      (option: { name?: string; value?: string }) => ({
+        name: option.name ?? "",
+        value: option.value ?? "",
+      }),
+    ),
+    gender: variant.googleGender?.value ?? null,
+    genderDigest: variant.googleGender?.compareDigest ?? null,
+    ageGroup: variant.googleAgeGroup?.value ?? null,
+    ageGroupDigest: variant.googleAgeGroup?.compareDigest ?? null,
+  }));
 }
