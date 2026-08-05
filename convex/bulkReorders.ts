@@ -38,6 +38,10 @@ import { getAccessToken, shopifyGraphql } from "./shopify/client";
 import { PRODUCT_QUERY } from "./shopify/graphql";
 import { mapProductForUpsert } from "./shopify/productMapping";
 import {
+  productQueryVariables,
+  type GoogleFeedSyncCoordinates,
+} from "./shopify/productQuery";
+import {
   submitShopifyMediaReorder,
   waitForShopifyJob,
   type ShopifyMediaOrderNode,
@@ -158,6 +162,7 @@ function imageIds(mediaNodes: ShopifyMediaOrderNode[]) {
 
 async function fetchLiveProduct(
   shopifyProductId: string,
+  coordinates: GoogleFeedSyncCoordinates,
   credentials: ShopifyCredentials,
   accessToken: string,
 ) {
@@ -165,7 +170,7 @@ async function fetchLiveProduct(
     product: ShopifyProductPayload | null;
   }>(
     PRODUCT_QUERY,
-    { id: shopifyProductId },
+    productQueryVariables(shopifyProductId, coordinates),
     accessToken,
     credentials,
   );
@@ -808,6 +813,10 @@ export const processNext = internalAction({
         internal.shops.getShopifyCredentials,
         { shopId: job.shopId ?? null, userId: job.createdByUserId },
       )) as ShopifyCredentials;
+      const coordinates = (await ctx.runQuery(
+        internal.googleFeed.getSyncCoordinates,
+        { shopId: job.shopId ?? null },
+      )) as GoogleFeedSyncCoordinates;
       const accessToken = await getAccessToken(credentials);
 
       if (item.shopifyJobId) {
@@ -837,6 +846,7 @@ export const processNext = internalAction({
 
       let liveProduct = await fetchLiveProduct(
         item.shopifyProductId,
+        coordinates,
         credentials,
         accessToken,
       );
@@ -924,6 +934,7 @@ export const processNext = internalAction({
       // read/write race window and refuse every observable concurrent change.
       liveProduct = await fetchLiveProduct(
         item.shopifyProductId,
+        coordinates,
         credentials,
         accessToken,
       );
@@ -974,6 +985,7 @@ export const processNext = internalAction({
       }
       liveProduct = await fetchLiveProduct(
         item.shopifyProductId,
+        coordinates,
         credentials,
         accessToken,
       );
@@ -1274,6 +1286,10 @@ export const processNextRestore = internalAction({
         internal.shops.getShopifyCredentials,
         { shopId: job.shopId ?? null, userId: job.createdByUserId },
       )) as ShopifyCredentials;
+      const coordinates = (await ctx.runQuery(
+        internal.googleFeed.getSyncCoordinates,
+        { shopId: job.shopId ?? null },
+      )) as GoogleFeedSyncCoordinates;
       const accessToken = await getAccessToken(credentials);
       if (item.restoreShopifyJobId) {
         const done = await waitForShopifyJob({
@@ -1307,6 +1323,7 @@ export const processNextRestore = internalAction({
       }
       let liveProduct = await fetchLiveProduct(
         item.shopifyProductId,
+        coordinates,
         credentials,
         accessToken,
       );
@@ -1367,6 +1384,7 @@ export const processNextRestore = internalAction({
       }
       liveProduct = await fetchLiveProduct(
         item.shopifyProductId,
+        coordinates,
         credentials,
         accessToken,
       );
@@ -1413,6 +1431,7 @@ export const processNextRestore = internalAction({
       } else {
         liveProduct = await fetchLiveProduct(
           item.shopifyProductId,
+          coordinates,
           credentials,
           accessToken,
         );
