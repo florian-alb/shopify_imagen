@@ -112,28 +112,25 @@ export function GoogleFeedCatalogTable({
   return (
     <>
       <Card className="hidden gap-0 overflow-x-auto rounded-lg py-0 lg:block">
-        <div className="flex h-12 min-w-[1120px] items-center border-b bg-card px-4">
-          <SelectionControl
-            pageSelection={pageSelection}
-            selectionCount={selectionCount}
-            allFilteredSelected={allFilteredSelected}
-            selectingAll={selectingAll}
-            onSelectPage={onSelectPage}
-            onSelectAllFiltered={onSelectAllFiltered}
-            onClearSelection={onClearSelection}
-          />
-        </div>
-        <Table className="min-w-[1120px] [&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-card">
+        <Table className="min-w-[1120px] [&_th]:sticky [&_th]:top-0 [&_th]:bg-card">
           <TableHeader>
             <TableRow className="hover:bg-transparent">
-              <TableHead className="w-16">
-                <span className="sr-only">Sélection</span>
+              <TableHead className="left-0 z-20 w-28 min-w-28 max-w-28 after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:border-r after:border-border after:content-['']">
+                <SelectionControl
+                  pageSelection={pageSelection}
+                  selectionCount={selectionCount}
+                  allFilteredSelected={allFilteredSelected}
+                  selectingAll={selectingAll}
+                  onSelectPage={onSelectPage}
+                  onSelectAllFiltered={onSelectAllFiltered}
+                  onClearSelection={onClearSelection}
+                />
               </TableHead>
-              <TableHead className="left-0 z-20 min-w-72">Produit</TableHead>
-              <TableHead className="min-w-72">Catégorie Google</TableHead>
-              <TableHead className="min-w-44">Genre</TableHead>
-              <TableHead className="min-w-48">Tranches d’âge</TableHead>
-              <TableHead className="min-w-40">État</TableHead>
+              <TableHead className="z-10 min-w-56">Produit</TableHead>
+              <TableHead className="z-10 min-w-72">Catégorie Google</TableHead>
+              <TableHead className="z-10 min-w-44">Genre</TableHead>
+              <TableHead className="z-10 min-w-48">Tranches d’âge</TableHead>
+              <TableHead className="z-10 min-w-40">État</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -211,7 +208,7 @@ function SelectionControl({
   onClearSelection: () => void;
 }) {
   return (
-    <div className="flex items-center gap-4">
+    <div className="flex items-center gap-2">
       <Checkbox
         checked={pageSelection}
         aria-label="Sélectionner tous les produits de cette page"
@@ -225,10 +222,9 @@ function SelectionControl({
               variant="ghost"
               size="sm"
               disabled={selectingAll}
+              aria-label={`${selectionCount} résultat${selectionCount === 1 ? "" : "s"} sélectionné${selectionCount === 1 ? "" : "s"}. Afficher les options de sélection`}
             >
-              {selectingAll
-                ? "Sélection en cours…"
-                : `${selectionCount} sélectionné(s)`}
+              {selectionCount}
               <ChevronDown data-icon="inline-end" />
             </Button>
           </DropdownMenuTrigger>
@@ -246,9 +242,7 @@ function SelectionControl({
             </DropdownMenuGroup>
           </DropdownMenuContent>
         </DropdownMenu>
-      ) : (
-        <span className="text-sm font-medium">Sélectionner cette page</span>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -277,13 +271,19 @@ function DesktopProductRows(props: ProductRowsProps) {
   return (
     <Fragment>
       <TableRow data-state={props.selected ? "selected" : undefined}>
-        <TableCell>
-          <div className="flex items-center gap-1">
+        <TableCell
+          className={cn(
+            "sticky left-0 z-[5] w-28 min-w-28 max-w-28 after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:border-r after:border-border after:content-['']",
+            props.selected ? "bg-muted" : "bg-card",
+          )}
+        >
+          <div className="flex items-center gap-2">
             <Checkbox
               checked={props.selected}
               aria-label={`Sélectionner ${product.title}`}
               onCheckedChange={(checked) => props.onSelect(checked === true)}
             />
+            <ProductThumbnail product={product} />
             <Button
               type="button"
               size="icon-sm"
@@ -300,13 +300,8 @@ function DesktopProductRows(props: ProductRowsProps) {
             </Button>
           </div>
         </TableCell>
-        <TableCell
-          className={cn(
-            "sticky left-0 z-[5]",
-            props.selected ? "bg-muted" : "bg-card",
-          )}
-        >
-          <ProductIdentity product={product} />
+        <TableCell>
+          <ProductDetails product={product} />
         </TableCell>
         <TableCell>
           <GoogleCategoryCombobox
@@ -365,17 +360,23 @@ function DesktopVariantRows(props: ProductRowsProps) {
     <>
       {variants.map((variant) => (
         <TableRow key={variant.id} className="bg-muted/35 hover:bg-muted/55">
-          <TableCell className="pl-10">
-            <Checkbox
-              checked={props.selected || props.selectedVariants.has(variant.id)}
-              disabled={props.selected}
-              aria-label={`Sélectionner la variante ${variant.title}`}
-              onCheckedChange={(checked) =>
-                props.onSelectVariant(variant.id, checked === true)
-              }
-            />
+          <TableCell className="sticky left-0 z-[4] w-28 min-w-28 max-w-28 bg-muted after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:border-r after:border-border after:content-['']">
+            <div className="flex items-center gap-2">
+              <Checkbox
+                checked={
+                  props.selected || props.selectedVariants.has(variant.id)
+                }
+                disabled={props.selected}
+                aria-label={`Sélectionner la variante ${variant.title}`}
+                onCheckedChange={(checked) =>
+                  props.onSelectVariant(variant.id, checked === true)
+                }
+              />
+              <div className="size-10 shrink-0" aria-hidden="true" />
+              <div className="size-7 shrink-0" aria-hidden="true" />
+            </div>
           </TableCell>
-          <TableCell className="sticky left-0 z-[4] bg-muted">
+          <TableCell>
             <p className="font-medium">{variant.title}</p>
             <p className="mt-1 text-xs text-muted-foreground">
               {variant.sku || "Sans SKU"} ·{" "}
@@ -545,25 +546,37 @@ function MobileProductRow(props: ProductRowsProps) {
 function ProductIdentity({ product }: { product: GoogleFeedCatalogProduct }) {
   return (
     <div className="flex min-w-0 items-center gap-3">
-      <div className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-md border bg-muted">
-        {product.featuredImageUrl ? (
-          <img
-            src={product.featuredImageUrl}
-            alt=""
-            className="size-full object-cover"
-            loading="lazy"
-          />
-        ) : (
-          <PackageOpen className="size-4 text-muted-foreground" />
-        )}
-      </div>
-      <div className="min-w-0">
-        <p className="truncate font-medium">{product.title}</p>
-        <p className="mt-1 truncate text-xs text-muted-foreground">
-          {product.handle} · {product.variantCount} variante
-          {product.variantCount === 1 ? "" : "s"}
-        </p>
-      </div>
+      <ProductThumbnail product={product} />
+      <ProductDetails product={product} />
+    </div>
+  );
+}
+
+function ProductThumbnail({ product }: { product: GoogleFeedCatalogProduct }) {
+  return (
+    <div className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-md border bg-muted">
+      {product.featuredImageUrl ? (
+        <img
+          src={product.featuredImageUrl}
+          alt=""
+          className="size-full object-cover"
+          loading="lazy"
+        />
+      ) : (
+        <PackageOpen className="size-4 text-muted-foreground" />
+      )}
+    </div>
+  );
+}
+
+function ProductDetails({ product }: { product: GoogleFeedCatalogProduct }) {
+  return (
+    <div className="min-w-0">
+      <p className="truncate font-medium">{product.title}</p>
+      <p className="mt-1 truncate text-xs text-muted-foreground">
+        {product.handle} · {product.variantCount} variante
+        {product.variantCount === 1 ? "" : "s"}
+      </p>
     </div>
   );
 }
