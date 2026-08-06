@@ -35,6 +35,11 @@ import {
 } from "./shopify/productMapping";
 import { submitShopifyMediaReorder } from "./shopify/reorder";
 import {
+  googleFeedQueryVariables,
+  productQueryVariables,
+  type GoogleFeedSyncCoordinates,
+} from "./shopify/productQuery";
+import {
   buildVariantMediaUpdates,
   imageForPromptOne,
   promptOneImageType,
@@ -58,23 +63,6 @@ type ProductsResponse = {
     nodes: Array<any>;
   };
 };
-
-type GoogleFeedSyncCoordinates = {
-  google_product_category: { namespace: string; key: string; type: string } | null;
-  gender: { namespace: string; key: string; type: string } | null;
-  age_group: { namespace: string; key: string; type: string } | null;
-};
-
-function googleFeedQueryVariables(coordinates: GoogleFeedSyncCoordinates) {
-  return {
-    categoryNamespace: coordinates.google_product_category?.namespace ?? "google_feed_missing",
-    categoryKey: coordinates.google_product_category?.key ?? "missing_category",
-    genderNamespace: coordinates.gender?.namespace ?? "google_feed_missing",
-    genderKey: coordinates.gender?.key ?? "missing_gender",
-    ageGroupNamespace: coordinates.age_group?.namespace ?? "google_feed_missing",
-    ageGroupKey: coordinates.age_group?.key ?? "missing_age_group",
-  };
-}
 
 async function loadRemainingGoogleFeedVariants(
   product: any,
@@ -416,10 +404,10 @@ export const syncProduct = action({
     )) as ShopifyCredentials;
     const data = await shopifyGraphql<{ product: any | null }>(
       PRODUCT_QUERY,
-      {
-        id: product.shopifyProductId,
-        ...googleFeedQueryVariables(googleFeedContext.coordinates),
-      },
+      productQueryVariables(
+        product.shopifyProductId,
+        googleFeedContext.coordinates,
+      ),
       undefined,
       credentials,
     );
@@ -473,10 +461,14 @@ export const reorderProductImages = action({
         userId,
       },
     )) as ShopifyCredentials;
+    const coordinates = (await ctx.runQuery(
+      internal.googleFeed.getSyncCoordinates,
+      { shopId: product.shopId ?? null },
+    )) as GoogleFeedSyncCoordinates;
     const accessToken = await getAccessToken(credentials);
     const before = await shopifyGraphql<{ product: any | null }>(
       PRODUCT_QUERY,
-      { id: product.shopifyProductId },
+      productQueryVariables(product.shopifyProductId, coordinates),
       accessToken,
       credentials,
     );
@@ -513,7 +505,7 @@ export const reorderProductImages = action({
     if (completed) {
       const after = await shopifyGraphql<{ product: any | null }>(
         PRODUCT_QUERY,
-        { id: product.shopifyProductId },
+        productQueryVariables(product.shopifyProductId, coordinates),
         accessToken,
         credentials,
       );
@@ -729,6 +721,7 @@ async function publishAsSeparateProducts(args: {
   promptOneImageType: string | null;
   replaceVariantMedia: boolean;
   credentials: ShopifyCredentials;
+  coordinates: GoogleFeedSyncCoordinates;
 }) {
   const existingFamily = (await args.ctx.runQuery(
     internal.visualGroups.familyForSource,
@@ -759,7 +752,10 @@ async function publishAsSeparateProducts(args: {
     if (existingMember) {
       const existing = await shopifyGraphql<{ product: any | null }>(
         PRODUCT_QUERY,
-        { id: existingMember.shopifyProductId },
+        productQueryVariables(
+          existingMember.shopifyProductId,
+          args.coordinates,
+        ),
         undefined,
         args.credentials,
       );
@@ -911,6 +907,10 @@ export const pushProductImages = action({
         userId,
       },
     )) as ShopifyCredentials;
+    const coordinates = (await ctx.runQuery(
+      internal.googleFeed.getSyncCoordinates,
+      { shopId: product.shopId ?? null },
+    )) as GoogleFeedSyncCoordinates;
     const allImages = (await ctx.runQuery(
       internal.shopify.generatedImagesForPush,
       { productId: args.productId },
@@ -1004,6 +1004,7 @@ export const pushProductImages = action({
         promptOneImageType: primaryVariantImageType,
         replaceVariantMedia,
         credentials,
+        coordinates,
       });
       await ctx.runMutation(internal.shopify.markProductPushed, {
         productId: product._id,
@@ -1104,7 +1105,7 @@ export const pushProductImages = action({
     });
     const synced = await shopifyGraphql<{ product: any | null }>(
       PRODUCT_QUERY,
-      { id: product.shopifyProductId },
+      productQueryVariables(product.shopifyProductId, coordinates),
       undefined,
       credentials,
     );

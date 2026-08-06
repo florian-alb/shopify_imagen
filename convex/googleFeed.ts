@@ -36,6 +36,21 @@ const MAX_DRAFTS_PER_PRODUCT = 500
 const MAX_RULES = 100
 export const GOOGLE_FEED_METAFIELDS_SET_BATCH_SIZE = 25
 
+const googleFeedSyncCoordinatesValidator = v.object({
+  google_product_category: v.union(
+    v.object({ namespace: v.string(), key: v.string(), type: v.string() }),
+    v.null(),
+  ),
+  gender: v.union(
+    v.object({ namespace: v.string(), key: v.string(), type: v.string() }),
+    v.null(),
+  ),
+  age_group: v.union(
+    v.object({ namespace: v.string(), key: v.string(), type: v.string() }),
+    v.null(),
+  ),
+})
+
 type DbCtx = QueryCtx | MutationCtx
 
 async function requireOwnedActiveShop(ctx: DbCtx) {
@@ -64,6 +79,24 @@ function coordinateFor(
 ) {
   return config?.attributes.find((item) => item.attribute === attribute)
     ?.coordinate ?? null
+}
+
+function syncCoordinatesForConfig(config: Doc<"googleFeedConfigs"> | null) {
+  const simpleCoordinate = (attribute: GoogleFeedAttribute) => {
+    const coordinate = coordinateFor(config, attribute)
+    return coordinate
+      ? {
+          namespace: coordinate.namespace,
+          key: coordinate.key,
+          type: coordinate.type,
+        }
+      : null
+  }
+  return {
+    google_product_category: simpleCoordinate("google_product_category"),
+    gender: simpleCoordinate("gender"),
+    age_group: simpleCoordinate("age_group"),
+  }
 }
 
 function assertAttributeReady(
@@ -1053,11 +1086,7 @@ export const getActionContext = internalQuery({
     clientSecret: v.string(),
     accessToken: v.optional(v.string()),
     productQuery: v.string(),
-    coordinates: v.object({
-      google_product_category: v.union(v.object({ namespace: v.string(), key: v.string(), type: v.string() }), v.null()),
-      gender: v.union(v.object({ namespace: v.string(), key: v.string(), type: v.string() }), v.null()),
-      age_group: v.union(v.object({ namespace: v.string(), key: v.string(), type: v.string() }), v.null()),
-    }),
+    coordinates: googleFeedSyncCoordinatesValidator,
   }),
   handler: async (ctx, args) => {
     const user = await ctx.db.get(args.userId)
@@ -1072,12 +1101,6 @@ export const getActionContext = internalQuery({
       throw new ConvexError("Les identifiants Shopify de la boutique sont absents.")
     }
     const config = await configForShop(ctx, shop._id)
-    const simpleCoordinate = (attribute: GoogleFeedAttribute) => {
-      const coordinate = coordinateFor(config, attribute)
-      return coordinate
-        ? { namespace: coordinate.namespace, key: coordinate.key, type: coordinate.type }
-        : null
-    }
     return {
       shopId: shop._id,
       domain: shop.domain,
@@ -1085,12 +1108,17 @@ export const getActionContext = internalQuery({
       clientSecret,
       ...(shop.accessToken ? { accessToken: shop.accessToken } : {}),
       productQuery: shop.productQuery ?? "status:active,draft,archived",
-      coordinates: {
-        google_product_category: simpleCoordinate("google_product_category"),
-        gender: simpleCoordinate("gender"),
-        age_group: simpleCoordinate("age_group"),
-      },
+      coordinates: syncCoordinatesForConfig(config),
     }
+  },
+})
+
+export const getSyncCoordinates = internalQuery({
+  args: { shopId: v.union(v.id("shops"), v.null()) },
+  returns: googleFeedSyncCoordinatesValidator,
+  handler: async (ctx, args) => {
+    const config = args.shopId ? await configForShop(ctx, args.shopId) : null
+    return syncCoordinatesForConfig(config)
   },
 })
 
