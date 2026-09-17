@@ -90,20 +90,6 @@ async function isVisualProductFamilyMember(
   return Boolean(member);
 }
 
-async function productWithVisibleWorkflow(
-  ctx: { db: any },
-  product: Doc<"products">,
-) {
-  const images = await ctx.db
-    .query("generatedImages")
-    .withIndex("by_product", (q: any) => q.eq("productId", product._id))
-    .collect();
-  return {
-    ...product,
-    ...calculateProductWorkflow(visibleGeneratedImages(images)),
-  };
-}
-
 const productFilterArgs = {
   search: v.optional(v.string()),
   productType: v.optional(v.string()),
@@ -116,46 +102,104 @@ const productFilterArgs = {
   generationStatus: v.optional(productGenerationStatus)
 };
 
-async function filteredProducts(ctx: { db: any }, args: ProductFilters, scope: ShopScope) {
-  let products: Doc<"products">[];
+function productQueryForShop(
+  ctx: Pick<QueryCtx, "db">,
+  args: ProductFilters,
+  shopId: Id<"shops"> | undefined,
+) {
+  // Workflow fields are optional on historical rows, so keep those filters in
+  // productMatches until their indexes can be enabled after a verified backfill.
   if (!args.primaryAction && !args.generationState && !args.reviewState && !args.publishState && args.generationStatus && args.productType) {
-    products = await ctx.db
+    const generationStatus = args.generationStatus;
+    const productType = args.productType;
+    return ctx.db
       .query("products")
-      .withIndex("by_generation_status_and_product_type", (q: any) =>
-        q.eq("generationStatus", args.generationStatus).eq("productType", args.productType)
+      .withIndex("by_shop_and_generation_status_and_product_type", (q) =>
+        q
+          .eq("shopId", shopId)
+          .eq("generationStatus", generationStatus)
+          .eq("productType", productType)
       )
-      .collect();
-  } else if (!args.primaryAction && !args.generationState && !args.reviewState && !args.publishState && args.generationStatus) {
-    products = await ctx.db
+      .order("desc");
+  }
+  if (!args.primaryAction && !args.generationState && !args.reviewState && !args.publishState && args.generationStatus) {
+    const generationStatus = args.generationStatus;
+    return ctx.db
       .query("products")
-      .withIndex("by_generation_status", (q: any) => q.eq("generationStatus", args.generationStatus))
-      .collect();
-  } else if (!args.primaryAction && !args.generationState && !args.reviewState && !args.publishState && args.productType) {
-    products = await ctx.db
+      .withIndex("by_shop_and_generation_status", (q) =>
+        q.eq("shopId", shopId).eq("generationStatus", generationStatus)
+      )
+      .order("desc");
+  }
+  if (!args.primaryAction && !args.generationState && !args.reviewState && !args.publishState && args.productType) {
+    const productType = args.productType;
+    return ctx.db
       .query("products")
-      .withIndex("by_product_type", (q: any) => q.eq("productType", args.productType))
-      .collect();
-  } else if (!args.primaryAction && !args.generationState && !args.reviewState && !args.publishState && args.shopifyStatus) {
-    products = await ctx.db
+      .withIndex("by_shop_and_product_type", (q) =>
+        q.eq("shopId", shopId).eq("productType", productType)
+      )
+      .order("desc");
+  }
+  if (!args.primaryAction && !args.generationState && !args.reviewState && !args.publishState && args.shopifyStatus) {
+    const shopifyStatus = args.shopifyStatus;
+    return ctx.db
       .query("products")
-      .withIndex("by_shopify_status", (q: any) => q.eq("shopifyStatus", args.shopifyStatus))
-      .collect();
-  } else {
-    products = await ctx.db.query("products").withIndex("by_created").order("desc").take(250);
+      .withIndex("by_shop_and_shopify_status", (q) =>
+        q.eq("shopId", shopId).eq("shopifyStatus", shopifyStatus)
+      )
+      .order("desc");
   }
 
+  return ctx.db
+    .query("products")
+    .withIndex("by_shop", (q) => q.eq("shopId", shopId))
+    .order("desc");
+}
+
+function productShopIds(scope: ShopScope) {
+  const shopIds: Array<Id<"shops"> | undefined> = [];
+  if (scope.shopId) shopIds.push(scope.shopId);
+  if (scope.includeLegacy) shopIds.push(undefined);
+  return shopIds;
+}
+
+async function filteredProductsForShop(
+  ctx: Pick<QueryCtx, "db">,
+  args: ProductFilters,
+  shopId: Id<"shops"> | undefined,
+  maxResults?: number,
+) {
   const needle = (args.search ?? "").trim().toLowerCase();
   const filtered: Doc<"products">[] = [];
-  for (const product of products) {
-    if (!shopMatchesScope(product, scope)) continue;
+
+  for await (const product of productQueryForShop(ctx, args, shopId)) {
     if (await isVisualProductFamilyMember(ctx, product)) continue;
-    const currentProduct = await productWithVisibleWorkflow(ctx, product);
-    if (!productMatches(currentProduct, args, needle)) continue;
-    filtered.push(currentProduct);
+    // Workflow counters are maintained on the product write path. Recomputing
+    // them here would read every generated image for every catalogue row.
+    if (!productMatches(product, args, needle)) continue;
+    filtered.push(product);
+    if (maxResults !== undefined && filtered.length >= maxResults) break;
   }
-  filtered.sort((a, b) => b._creationTime - a._creationTime);
 
   return filtered;
+}
+
+async function filteredProducts(
+  ctx: Pick<QueryCtx, "db">,
+  args: ProductFilters,
+  scope: ShopScope,
+  maxResults?: number,
+) {
+  const batches = await Promise.all(
+    productShopIds(scope).map((shopId) =>
+      filteredProductsForShop(ctx, args, shopId, maxResults),
+    ),
+  );
+  const products = batches.flat();
+
+  products.sort((a, b) => b._creationTime - a._creationTime);
+
+  return maxResults === undefined ? products : products.slice(0, maxResults);
 }
 
 export const list = query({
@@ -165,45 +209,15 @@ export const list = query({
     const scope = await getActiveShopScope(ctx, userId);
     const offset = Math.max(0, Math.floor(args.offset ?? 0));
     const limit = Math.max(1, Math.min(Math.floor(args.limit ?? DEFAULT_PAGE_SIZE), MAX_PAGE_SIZE));
-    const needle = (args.search ?? "").trim().toLowerCase();
-    let queryBuilder;
-    if (!args.primaryAction && !args.generationState && !args.reviewState && !args.publishState && args.generationStatus && args.productType) {
-      const generationStatus = args.generationStatus;
-      const productType = args.productType;
-      queryBuilder = ctx.db
-        .query("products")
-        .withIndex("by_generation_status_and_product_type", (q) =>
-          q.eq("generationStatus", generationStatus).eq("productType", productType)
-        );
-    } else if (!args.primaryAction && !args.generationState && !args.reviewState && !args.publishState && args.generationStatus) {
-      const generationStatus = args.generationStatus;
-      queryBuilder = ctx.db.query("products").withIndex("by_generation_status", (q) => q.eq("generationStatus", generationStatus));
-    } else if (!args.primaryAction && !args.generationState && !args.reviewState && !args.publishState && args.productType) {
-      queryBuilder = ctx.db.query("products").withIndex("by_product_type", (q) => q.eq("productType", args.productType));
-    } else if (!args.primaryAction && !args.generationState && !args.reviewState && !args.publishState && args.shopifyStatus) {
-      queryBuilder = ctx.db.query("products").withIndex("by_shopify_status", (q) => q.eq("shopifyStatus", args.shopifyStatus));
-    } else {
-      queryBuilder = ctx.db.query("products").withIndex("by_created").order("desc");
-    }
-
-  const page: Doc<"products">[] = [];
-  let matched = 0;
-    for await (const product of queryBuilder) {
-      if (!shopMatchesScope(product, scope)) continue;
-      if (await isVisualProductFamilyMember(ctx, product)) continue;
-      const currentProduct = await productWithVisibleWorkflow(ctx, product);
-    if (!productMatches(currentProduct, args, needle)) continue;
-    if (matched >= offset && page.length < limit + 1) page.push(currentProduct);
-    matched += 1;
-    if (page.length >= limit + 1) break;
-  }
+    const products = await filteredProducts(ctx, args, scope, offset + limit + 1);
+    const page = products.slice(offset, offset + limit);
 
     return {
-      page: page.slice(0, limit).map(lightProduct),
+      page: page.map(lightProduct),
       offset,
       limit,
       hasPrevious: offset > 0,
-      hasNext: page.length > limit
+      hasNext: products.length > offset + limit
     };
   }
 });
@@ -232,8 +246,23 @@ export const facets = query({
   handler: async (ctx) => {
     const userId = await requireUserId(ctx);
     const scope = await getActiveShopScope(ctx, userId);
-    const rows = await ctx.db.query("appSettings").collect();
-    const cached = rows.find((row) => row.key === PRODUCT_FACETS_KEY && shopMatchesScope(row, scope));
+    let cached: Doc<"appSettings"> | null = null;
+    if (scope.shopId) {
+      cached = await ctx.db
+        .query("appSettings")
+        .withIndex("by_shop_and_key", (q) =>
+          q.eq("shopId", scope.shopId).eq("key", PRODUCT_FACETS_KEY),
+        )
+        .unique();
+    }
+    if (!cached && scope.includeLegacy) {
+      cached = await ctx.db
+        .query("appSettings")
+        .withIndex("by_shop_and_key", (q) =>
+          q.eq("shopId", undefined).eq("key", PRODUCT_FACETS_KEY),
+        )
+        .unique();
+    }
     return (cached?.value as ProductFacets | undefined) ?? { productTypes: [], shopifyStatuses: [], collections: [] };
   }
 });
