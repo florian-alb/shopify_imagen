@@ -1,3 +1,4 @@
+import { shopifyOAuthCallbackUrl } from "./shopify/oauth";
 import { v } from "convex/values";
 import { internalQuery, mutation, query } from "./_generated/server";
 import { requireUserId } from "./authz";
@@ -83,4 +84,18 @@ export const set = mutation({
       updatedAt: Date.now()
     });
   }
+});
+
+// Resolve on the backend so explicit overrides and the active deployment stay in sync with OAuth.
+export const shopifyOnboarding = query({
+  args: {},
+  returns: v.object({ redirectUrl: v.union(v.string(), v.null()) }),
+  handler: async (ctx) => {
+    await requireUserId(ctx);
+    try {
+      return { redirectUrl: shopifyOAuthCallbackUrl() };
+    } catch {
+      return { redirectUrl: null };
+    }
+  },
 });

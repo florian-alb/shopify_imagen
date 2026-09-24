@@ -75,7 +75,7 @@ describe("Shopify settings helpers", () => {
       "https://ajcna0-3c.myshopify.com/admin/oauth/authorize",
     );
     url.searchParams.set("client_id", "public-id");
-    url.searchParams.set("scope", "write_products,write_files");
+    url.searchParams.set("scope", "write_products,write_files,write_online_store_navigation");
     url.searchParams.set(
       "redirect_uri",
       "https://example.convex.site/shopify/oauth/callback",
@@ -85,6 +85,10 @@ describe("Shopify settings helpers", () => {
     expect(
       safeShopifyAuthorizationUrl(url.toString(), "ajcna0-3c.myshopify.com"),
     ).toBe(url.toString());
+
+    const unexpectedScopeUrl = new URL(url);
+    unexpectedScopeUrl.searchParams.set("scope", `${url.searchParams.get("scope")},write_orders`);
+    expect(safeShopifyAuthorizationUrl(unexpectedScopeUrl.toString(), "ajcna0-3c.myshopify.com")).toBeNull();
 
     url.hostname = "other-shop.myshopify.com";
     expect(

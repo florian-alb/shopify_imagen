@@ -1,9 +1,10 @@
+import { REQUIRED_SHOPIFY_ADMIN_SCOPES } from "../../../convex/shopify/scopes";
 import type { SettingDefinition } from "./types";
 
 export const APP_NAME = "Image Studio";
 export const DEFAULT_PRODUCT_QUERY = "status:active,draft,archived";
 export const SHOPIFY_ONBOARDING_SCOPES =
-  "write_products,write_files";
+  REQUIRED_SHOPIFY_ADMIN_SCOPES.join(",");
 
 export const modelSettings: SettingDefinition[] = [
   {

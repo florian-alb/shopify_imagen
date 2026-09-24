@@ -1,3 +1,4 @@
+import { SHOPIFY_IMAGE_SCOPES } from "./shopify/scopes";
 import { v } from "convex/values";
 
 import { internal } from "./_generated/api";
@@ -40,7 +41,6 @@ import {
 } from "./shopScope";
 import {
   fetchShopifyAuthorizationStatus,
-  REQUIRED_SHOPIFY_ADMIN_SCOPES,
   requireShopifyAdminScopes,
 } from "./shopify/authorization";
 
@@ -537,7 +537,7 @@ async function requireShopifyPublicationScopes(
   credentials: ShopifyCredentials,
 ) {
   const status = await fetchShopifyAuthorizationStatus(credentials);
-  requireShopifyAdminScopes(status, REQUIRED_SHOPIFY_ADMIN_SCOPES);
+  requireShopifyAdminScopes(status, SHOPIFY_IMAGE_SCOPES);
 }
 
 export const start = action({

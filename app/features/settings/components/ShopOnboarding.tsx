@@ -1,3 +1,5 @@
+import { useQuery } from "convex/react";
+import { api } from "@/lib/convex";
 import { useState, type FormEvent, type ReactNode } from "react";
 import {
   Check,
@@ -40,10 +42,7 @@ export function ShopOnboarding({
   normalizedDomain: string;
   saving: boolean;
   step: number;
-  onFieldChange: <K extends keyof ShopForm>(
-    key: K,
-    value: ShopForm[K],
-  ) => void;
+  onFieldChange: <K extends keyof ShopForm>(key: K, value: ShopForm[K]) => void;
   onResetForm: () => void;
   onStepChange: (step: number) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
@@ -281,6 +280,7 @@ function StepTwo({
 }
 
 function StepThree({ appUrl }: { appUrl: string }) {
+  const config = useQuery(api.settings.shopifyOnboarding);
   return (
     <div className="grid gap-4">
       <div>
@@ -292,11 +292,13 @@ function StepThree({ appUrl }: { appUrl: string }) {
       </div>
       <div className="grid gap-2 text-sm text-muted-foreground">
         <InstructionLine index={1}>
-          Configure les scopes Admin API indiqués ci-dessous et publie une
-          nouvelle version de l’application.
+          Dans la version de l’application, renseigne l’URL de l’application,
+          les URL de redirection autorisées (Allowed redirection URLs) et les
+          scopes Admin API indiqués ci-dessous.
         </InstructionLine>
         <InstructionLine index={2}>
-          Garde le flux d’installation géré par Shopify avec{" "}
+          Publie la nouvelle version en gardant le flux d’installation géré par
+          Shopify avec{" "}
           <code className="font-mono text-foreground">
             use_legacy_install_flow = false
           </code>
@@ -310,6 +312,21 @@ function StepThree({ appUrl }: { appUrl: string }) {
       </div>
       <div className="overflow-hidden rounded-lg border border-border">
         <CopyRow label="URL de l'application" value={appUrl} />
+        {config?.redirectUrl ? (
+          <CopyRow
+            label="URL de redirection OAuth autorisée"
+            value={config.redirectUrl}
+          />
+        ) : (
+          <p
+            role="status"
+            className="border-b border-border p-3 text-sm text-muted-foreground"
+          >
+            {config === undefined
+              ? "Chargement de l’URL de redirection…"
+              : "URL de redirection indisponible : configure SHOPIFY_OAUTH_REDIRECT_URL ou CONVEX_SITE_URL sur le backend Convex."}
+          </p>
+        )}
         <CopyRow
           label="Scopes Admin API à publier"
           value={SHOPIFY_ONBOARDING_SCOPES}

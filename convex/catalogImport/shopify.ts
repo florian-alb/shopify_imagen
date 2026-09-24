@@ -1,5 +1,6 @@
 "use node"
 
+import { REQUIRED_SHOPIFY_ADMIN_SCOPES } from "../shopify/scopes"
 import { load } from "cheerio"
 import type { ActionCtx } from "../_generated/server"
 import type { Doc } from "../_generated/dataModel"
@@ -67,11 +68,7 @@ export async function diagnoseShop(shop: Doc<"shops">) {
   }>(gql.DIAGNOSTIC, {}, undefined, shopifyCredentialsForShop(shop))
   const granted = r.currentAppInstallation.accessScopes.map((s) => s.handle)
   return {
-    missing: [
-      "write_products",
-      "write_files",
-      "write_online_store_navigation",
-    ].filter((s) => !granted.includes(s)),
+    missing: REQUIRED_SHOPIFY_ADMIN_SCOPES.filter((s) => !granted.includes(s)),
     currency: r.shop.currencyCode,
     domain: r.shop.primaryDomain.url,
   }

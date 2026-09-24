@@ -21,7 +21,8 @@ import type { ShopAuthorizationState } from "../types";
 
 const SCOPE_LABELS: Record<string, string> = {
   write_files: "Importer et gérer les fichiers",
-  write_products: "Modifier les produits",
+  write_products: "Gérer les produits, collections et médias",
+  write_online_store_navigation: "Gérer les menus et la navigation",
 };
 
 const CHECKED_AT_FORMATTER = new Intl.DateTimeFormat("fr-FR", {

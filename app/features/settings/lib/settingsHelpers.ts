@@ -1,3 +1,4 @@
+import { SHOPIFY_ONBOARDING_SCOPES } from "../settingsData";
 import type { SettingDefinition, SettingsMap, ShopRow } from "../types";
 
 const SHOP_HANDLE_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
@@ -124,7 +125,7 @@ export function safeShopifyAuthorizationUrl(
     oauthClientIds.length === 1 &&
     Boolean(oauthClientIds[0]?.trim()) &&
     oauthScopes.length === 1 &&
-    oauthScopes[0] === "write_products,write_files" &&
+    oauthScopes[0] === SHOPIFY_ONBOARDING_SCOPES &&
     oauthRedirectUris.length === 1 &&
     hasSafeOauthRedirect &&
     oauthStates.length === 1 &&

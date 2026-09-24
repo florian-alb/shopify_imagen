@@ -88,6 +88,7 @@ import type * as shopify_oauth from "../shopify/oauth.js";
 import type * as shopify_productMapping from "../shopify/productMapping.js";
 import type * as shopify_productQuery from "../shopify/productQuery.js";
 import type * as shopify_reorder from "../shopify/reorder.js";
+import type * as shopify_scopes from "../shopify/scopes.js";
 import type * as shopify_variantMedia from "../shopify/variantMedia.js";
 import type * as shops from "../shops.js";
 import type * as userAccess from "../userAccess.js";
@@ -184,6 +185,7 @@ declare const fullApi: ApiFromModules<{
   "shopify/productMapping": typeof shopify_productMapping;
   "shopify/productQuery": typeof shopify_productQuery;
   "shopify/reorder": typeof shopify_reorder;
+  "shopify/scopes": typeof shopify_scopes;
   "shopify/variantMedia": typeof shopify_variantMedia;
   shops: typeof shops;
   userAccess: typeof userAccess;
