@@ -15,10 +15,12 @@ import { Route as SettingsIndexRouteImport } from './routes/settings/index'
 import { Route as ProductsIndexRouteImport } from './routes/products/index'
 import { Route as JobsIndexRouteImport } from './routes/jobs/index'
 import { Route as GoogleFeedIndexRouteImport } from './routes/google-feed/index'
+import { Route as CatalogImportIndexRouteImport } from './routes/catalog-import/index'
 import { Route as BulkOperationsIndexRouteImport } from './routes/bulk-operations/index'
 import { Route as SettingsPromptsRouteImport } from './routes/settings/prompts'
 import { Route as ProductsProductIdRouteImport } from './routes/products/$productId'
 import { Route as JobsJobIdRouteImport } from './routes/jobs/$jobId'
+import { Route as CatalogImportExportIdRouteImport } from './routes/catalog-import/$exportId'
 import { Route as GoogleFeedRulesIndexRouteImport } from './routes/google-feed/rules/index'
 import { Route as GoogleFeedPreviewIndexRouteImport } from './routes/google-feed/preview/index'
 import { Route as GoogleFeedHistoryIndexRouteImport } from './routes/google-feed/history/index'
@@ -53,6 +55,11 @@ const GoogleFeedIndexRoute = GoogleFeedIndexRouteImport.update({
   path: '/google-feed/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CatalogImportIndexRoute = CatalogImportIndexRouteImport.update({
+  id: '/catalog-import/',
+  path: '/catalog-import/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const BulkOperationsIndexRoute = BulkOperationsIndexRouteImport.update({
   id: '/bulk-operations/',
   path: '/bulk-operations/',
@@ -71,6 +78,11 @@ const ProductsProductIdRoute = ProductsProductIdRouteImport.update({
 const JobsJobIdRoute = JobsJobIdRouteImport.update({
   id: '/jobs/$jobId',
   path: '/jobs/$jobId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CatalogImportExportIdRoute = CatalogImportExportIdRouteImport.update({
+  id: '/catalog-import/$exportId',
+  path: '/catalog-import/$exportId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const GoogleFeedRulesIndexRoute = GoogleFeedRulesIndexRouteImport.update({
@@ -92,10 +104,12 @@ const GoogleFeedHistoryIndexRoute = GoogleFeedHistoryIndexRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/catalog-import/$exportId': typeof CatalogImportExportIdRoute
   '/jobs/$jobId': typeof JobsJobIdRoute
   '/products/$productId': typeof ProductsProductIdRoute
   '/settings/prompts': typeof SettingsPromptsRoute
   '/bulk-operations/': typeof BulkOperationsIndexRoute
+  '/catalog-import/': typeof CatalogImportIndexRoute
   '/google-feed/': typeof GoogleFeedIndexRoute
   '/jobs/': typeof JobsIndexRoute
   '/products/': typeof ProductsIndexRoute
@@ -107,10 +121,12 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/catalog-import/$exportId': typeof CatalogImportExportIdRoute
   '/jobs/$jobId': typeof JobsJobIdRoute
   '/products/$productId': typeof ProductsProductIdRoute
   '/settings/prompts': typeof SettingsPromptsRoute
   '/bulk-operations': typeof BulkOperationsIndexRoute
+  '/catalog-import': typeof CatalogImportIndexRoute
   '/google-feed': typeof GoogleFeedIndexRoute
   '/jobs': typeof JobsIndexRoute
   '/products': typeof ProductsIndexRoute
@@ -123,10 +139,12 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/catalog-import/$exportId': typeof CatalogImportExportIdRoute
   '/jobs/$jobId': typeof JobsJobIdRoute
   '/products/$productId': typeof ProductsProductIdRoute
   '/settings/prompts': typeof SettingsPromptsRoute
   '/bulk-operations/': typeof BulkOperationsIndexRoute
+  '/catalog-import/': typeof CatalogImportIndexRoute
   '/google-feed/': typeof GoogleFeedIndexRoute
   '/jobs/': typeof JobsIndexRoute
   '/products/': typeof ProductsIndexRoute
@@ -140,10 +158,12 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/login'
+    | '/catalog-import/$exportId'
     | '/jobs/$jobId'
     | '/products/$productId'
     | '/settings/prompts'
     | '/bulk-operations/'
+    | '/catalog-import/'
     | '/google-feed/'
     | '/jobs/'
     | '/products/'
@@ -155,10 +175,12 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/login'
+    | '/catalog-import/$exportId'
     | '/jobs/$jobId'
     | '/products/$productId'
     | '/settings/prompts'
     | '/bulk-operations'
+    | '/catalog-import'
     | '/google-feed'
     | '/jobs'
     | '/products'
@@ -170,10 +192,12 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/login'
+    | '/catalog-import/$exportId'
     | '/jobs/$jobId'
     | '/products/$productId'
     | '/settings/prompts'
     | '/bulk-operations/'
+    | '/catalog-import/'
     | '/google-feed/'
     | '/jobs/'
     | '/products/'
@@ -186,10 +210,12 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LoginRoute: typeof LoginRoute
+  CatalogImportExportIdRoute: typeof CatalogImportExportIdRoute
   JobsJobIdRoute: typeof JobsJobIdRoute
   ProductsProductIdRoute: typeof ProductsProductIdRoute
   SettingsPromptsRoute: typeof SettingsPromptsRoute
   BulkOperationsIndexRoute: typeof BulkOperationsIndexRoute
+  CatalogImportIndexRoute: typeof CatalogImportIndexRoute
   GoogleFeedIndexRoute: typeof GoogleFeedIndexRoute
   JobsIndexRoute: typeof JobsIndexRoute
   ProductsIndexRoute: typeof ProductsIndexRoute
@@ -243,6 +269,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof GoogleFeedIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/catalog-import/': {
+      id: '/catalog-import/'
+      path: '/catalog-import'
+      fullPath: '/catalog-import/'
+      preLoaderRoute: typeof CatalogImportIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/bulk-operations/': {
       id: '/bulk-operations/'
       path: '/bulk-operations'
@@ -269,6 +302,13 @@ declare module '@tanstack/react-router' {
       path: '/jobs/$jobId'
       fullPath: '/jobs/$jobId'
       preLoaderRoute: typeof JobsJobIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/catalog-import/$exportId': {
+      id: '/catalog-import/$exportId'
+      path: '/catalog-import/$exportId'
+      fullPath: '/catalog-import/$exportId'
+      preLoaderRoute: typeof CatalogImportExportIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/google-feed/rules/': {
@@ -298,10 +338,12 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LoginRoute: LoginRoute,
+  CatalogImportExportIdRoute: CatalogImportExportIdRoute,
   JobsJobIdRoute: JobsJobIdRoute,
   ProductsProductIdRoute: ProductsProductIdRoute,
   SettingsPromptsRoute: SettingsPromptsRoute,
   BulkOperationsIndexRoute: BulkOperationsIndexRoute,
+  CatalogImportIndexRoute: CatalogImportIndexRoute,
   GoogleFeedIndexRoute: GoogleFeedIndexRoute,
   JobsIndexRoute: JobsIndexRoute,
   ProductsIndexRoute: ProductsIndexRoute,

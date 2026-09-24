@@ -2,6 +2,7 @@ import { cronJobs } from "convex/server";
 import { internal } from "./_generated/api";
 
 const crons = cronJobs();
+crons.interval("resume catalogue imports", { minutes: 5 }, internal.catalogImport.resumeStale, {});
 
 // Active batch jobs schedule their own provider polls with adaptive backoff.
 // This slower watchdog only recovers work if a scheduled poll was interrupted.
