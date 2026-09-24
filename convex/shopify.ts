@@ -234,7 +234,7 @@ export const completeShopifyOauthAttempt = internalMutation({
 });
 
 export const beginAuthorization = action({
-  args: { shopId: v.optional(v.id("shops")) },
+  args: { shopId: v.optional(v.id("shops")), catalog: v.optional(v.boolean()) },
   returns: v.object({ authorizationUrl: v.string() }),
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
@@ -247,9 +247,9 @@ export const beginAuthorization = action({
         internal.shops.getShopifyCredentials,
         { shopId: args.shopId, userId },
       )) as ShopifyCredentials;
-      return await createAuthorizationAttempt(ctx, userId, selectedCredentials);
+      return await createAuthorizationAttempt(ctx, userId, selectedCredentials, args.catalog);
     }
-    return await createAuthorizationAttempt(ctx, userId, credentials);
+    return await createAuthorizationAttempt(ctx, userId, credentials, args.catalog);
   },
 });
 
@@ -257,6 +257,7 @@ async function createAuthorizationAttempt(
   ctx: ActionCtx,
   userId: Id<"users">,
   credentials: ShopifyCredentials,
+  catalog = false,
 ) {
   if (!credentials.shopId) {
     throw new ConvexError(
@@ -269,7 +270,7 @@ async function createAuthorizationAttempt(
       `Publie d'abord les scopes Shopify manquants : ${status.scopes.missing.join(", ")}.`,
     );
   }
-  if (status.status === "granted") {
+  if (status.status === "granted" && !catalog) {
     throw new ConvexError(
       "Les accès Shopify sont déjà à jour pour cette boutique.",
     );
@@ -296,7 +297,7 @@ async function createAuthorizationAttempt(
       credentials,
       state,
       shopifyOAuthCallbackUrl(),
-      REQUIRED_SHOPIFY_ADMIN_SCOPES,
+      catalog ? [...REQUIRED_SHOPIFY_ADMIN_SCOPES, "write_online_store_navigation"] : REQUIRED_SHOPIFY_ADMIN_SCOPES,
     ),
   };
 }

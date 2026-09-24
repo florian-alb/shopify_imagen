@@ -1,5 +1,6 @@
 import { authTables } from "@convex-dev/auth/server";
 import { defineSchema, defineTable } from "convex/server";
+import { operationStatus, taskKind } from "./catalogImport/validators";
 import { v } from "convex/values";
 
 const generationStatus = v.union(
@@ -241,6 +242,27 @@ const googleFeedCondition = v.object({
 
 export default defineSchema({
   ...authTables,
+  catalogOperations: defineTable({
+    ownerId: v.id("users"), origin: v.string(), mode: v.union(v.literal("menu"), v.literal("all")),
+    type: v.union(v.literal("export"), v.literal("import")),
+    sourceExportId: v.optional(v.id("catalogOperations")), shopId: v.optional(v.id("shops")),
+    status: operationStatus, phase: v.string(), root: v.string(), preparationKey: v.optional(v.string()),
+    revision: v.number(), total: v.number(), done: v.number(), failed: v.number(),
+    activeTaskId: v.optional(v.id("catalogTasks")), leaseUntil: v.optional(v.number()),
+    generation: v.number(), finalKey: v.optional(v.string()), error: v.optional(v.string()),
+    selection: v.optional(v.array(v.string())),
+    sourceSnapshot: v.optional(v.string()), aiBudget: v.optional(v.number()), aiUsed: v.optional(v.number()),
+    editToken: v.optional(v.string()), editUntil: v.optional(v.number()),
+    createdAt: v.number(), updatedAt: v.number(),
+  }).index("by_ownerId", ["ownerId"]).index("by_status_and_updatedAt", ["status", "updatedAt"]).index("by_shopId_and_status", ["shopId", "status"]),
+  catalogTasks: defineTable({
+    operationId: v.id("catalogOperations"), key: v.string(), kind: taskKind, inputKey: v.string(),
+    status: v.union(v.literal("queued"), v.literal("running"), v.literal("done"), v.literal("failed")),
+    attempts: v.number(), generation: v.number(), nextAt: v.number(), resultKey: v.optional(v.string()),
+    error: v.optional(v.string()), createdAt: v.number(), updatedAt: v.number(),
+  }).index("by_operationId_and_key", ["operationId", "key"])
+    .index("by_operationId_and_status", ["operationId", "status"]),
+  catalogDomainLeases: defineTable({ domain: v.string(), operationId: v.id("catalogOperations"), generation: v.number(), expiresAt: v.number() }).index("by_domain", ["domain"]),
   users: defineTable({
     name: v.optional(v.string()),
     image: v.optional(v.string()),
