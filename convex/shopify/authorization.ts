@@ -7,10 +7,8 @@ import {
 import { shopifyGraphql } from "./client";
 import { SHOPIFY_AUTHORIZATION_STATUS_QUERY } from "./graphql";
 
-export const REQUIRED_SHOPIFY_ADMIN_SCOPES = [
-  "write_products",
-  "write_files",
-] as const;
+import { REQUIRED_SHOPIFY_ADMIN_SCOPES } from "./scopes";
+export { REQUIRED_SHOPIFY_ADMIN_SCOPES } from "./scopes";
 
 export type RequiredShopifyAdminScope =
   (typeof REQUIRED_SHOPIFY_ADMIN_SCOPES)[number];

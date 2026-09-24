@@ -19,12 +19,14 @@ function installation(
     accessScopes: [
       { handle: "write_products" },
       { handle: "write_files" },
+      { handle: "write_online_store_navigation" },
     ],
     ...overrides,
     app: {
       requestedAccessScopes: [
         { handle: "write_products" },
         { handle: "write_files" },
+        { handle: "write_online_store_navigation" },
       ],
       ...overrides.app,
     },
@@ -32,6 +34,16 @@ function installation(
 }
 
 describe("buildShopifyAuthorizationStatus", () => {
+  it("requires menu authorization for shops previously connected for images only", () => {
+    const result = buildShopifyAuthorizationStatus(
+      installation({ accessScopes: [{ handle: "write_products" }, { handle: "write_files" }] }),
+      SHOP_DOMAIN,
+    );
+    expect(result.status).toBe("requested");
+    expect(result.scopes.requested).toEqual(["write_online_store_navigation"]);
+    expect(() => requireShopifyAdminScopes(result, ["write_products", "write_files"])).not.toThrow();
+  });
+
   it("classifies an unconfigured scope as missing even if it was granted before", () => {
     const result = buildShopifyAuthorizationStatus(
       installation({
@@ -47,7 +59,7 @@ describe("buildShopifyAuthorizationStatus", () => {
       shopDomain: SHOP_DOMAIN,
       status: "missing",
       scopes: {
-        missing: ["write_files"],
+        missing: ["write_files", "write_online_store_navigation"],
         requested: [],
         granted: ["write_products"],
       },
@@ -68,8 +80,10 @@ describe("buildShopifyAuthorizationStatus", () => {
         app: {
           requestedAccessScopes: [
             { handle: "write_files" },
+            { handle: "write_online_store_navigation" },
             { handle: "WRITE_PRODUCTS" },
             { handle: "write_files" },
+            { handle: "write_online_store_navigation" },
             { handle: "read_products" },
           ],
         },
@@ -79,14 +93,14 @@ describe("buildShopifyAuthorizationStatus", () => {
 
     expect(result.status).toBe("requested");
     expect(result.scopes.missing).toEqual([]);
-    expect(result.scopes.requested).toEqual(["write_files"]);
+    expect(result.scopes.requested).toEqual(["write_files", "write_online_store_navigation"]);
     expect(result.scopes.granted).toEqual(["write_products"]);
     expect(result.authorizationUrl).toBeNull();
     expect([
       ...result.scopes.missing,
       ...result.scopes.requested,
       ...result.scopes.granted,
-    ]).toEqual(["write_files", "write_products"]);
+    ]).toEqual(["write_files", "write_online_store_navigation", "write_products"]);
   });
 
   it("returns granted without exposing an authorization URL", () => {
@@ -101,6 +115,7 @@ describe("buildShopifyAuthorizationStatus", () => {
     expect(result.scopes.granted).toEqual([
       "write_products",
       "write_files",
+      "write_online_store_navigation",
     ]);
     expect(result.authorizationUrl).toBeNull();
   });
@@ -144,7 +159,7 @@ describe("buildShopifyAuthorizationRequiredStatus", () => {
       status: "requested",
       scopes: {
         missing: [],
-        requested: ["write_products", "write_files"],
+        requested: ["write_products", "write_files", "write_online_store_navigation"],
         granted: [],
       },
       authorizationUrl: null,

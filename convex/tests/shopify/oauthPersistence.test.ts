@@ -47,7 +47,7 @@ describe("Shopify OAuth persistence", () => {
       stateHash,
       shopDomain: "demo-store.myshopify.com",
       accessToken: "authorized-token",
-      scopes: ["write_files", "write_products", "read_products"],
+      scopes: ["write_files", "write_products", "read_products", "write_online_store_navigation"],
     });
 
     const result = await t.run(async (ctx) => ({
@@ -64,6 +64,7 @@ describe("Shopify OAuth persistence", () => {
       "write_files",
       "write_products",
       "read_products",
+      "write_online_store_navigation",
     ]);
     expect(result.attempt).toBeNull();
 

@@ -297,7 +297,7 @@ async function createAuthorizationAttempt(
       credentials,
       state,
       shopifyOAuthCallbackUrl(),
-      catalog ? [...REQUIRED_SHOPIFY_ADMIN_SCOPES, "write_online_store_navigation"] : REQUIRED_SHOPIFY_ADMIN_SCOPES,
+      REQUIRED_SHOPIFY_ADMIN_SCOPES,
     ),
   };
 }

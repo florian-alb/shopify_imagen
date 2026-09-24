@@ -13,6 +13,26 @@ afterEach(() => {
 });
 
 describe("Shopify authorization action access", () => {
+  test("onboarding requires an approved user and resolves the active backend callback", async () => {
+    const t = convexTest(schema, modules);
+    await expect(t.query(api.settings.shopifyOnboarding, {})).rejects.toThrow("Authentication required");
+    const userId = await t.run((ctx) => ctx.db.insert("users", { approvalStatus: "approved" }));
+    const client = t.withIdentity({ subject: userId });
+    vi.stubEnv("SHOPIFY_OAUTH_REDIRECT_URL", "");
+    for (const deployment of ["curious-greyhound-437", "youthful-bandicoot-479"]) {
+      vi.stubEnv("CONVEX_SITE_URL", `https://${deployment}.convex.site`);
+      expect(await client.query(api.settings.shopifyOnboarding, {})).toEqual({
+        redirectUrl: `https://${deployment}.convex.site/shopify/oauth/callback`,
+      });
+    }
+    vi.stubEnv("SHOPIFY_OAUTH_REDIRECT_URL", "https://custom.example/shopify/oauth/callback");
+    expect(await client.query(api.settings.shopifyOnboarding, {})).toEqual({
+      redirectUrl: "https://custom.example/shopify/oauth/callback",
+    });
+    vi.stubEnv("SHOPIFY_OAUTH_REDIRECT_URL", "http://unsafe.example/callback");
+    expect(await client.query(api.settings.shopifyOnboarding, {})).toEqual({ redirectUrl: null });
+  });
+
   test("rejects unauthenticated and unapproved callers before Shopify access", async () => {
     const t = convexTest(schema, modules);
     const pendingUserId = await t.run((ctx) =>
@@ -88,7 +108,7 @@ describe("Shopify authorization action access", () => {
       status: "requested",
       scopes: {
         missing: [],
-        requested: ["write_products", "write_files"],
+        requested: ["write_products", "write_files", "write_online_store_navigation"],
         granted: [],
       },
       authorizationUrl: null,
@@ -108,7 +128,7 @@ describe("Shopify authorization action access", () => {
     );
     expect(authorizationUrl.pathname).toBe("/admin/oauth/authorize");
     expect(authorizationUrl.searchParams.get("scope")).toBe(
-      "write_products,write_files",
+      "write_products,write_files,write_online_store_navigation",
     );
     expect(authorizationUrl.searchParams.get("redirect_uri")).toBe(
       "https://example.convex.site/shopify/oauth/callback",

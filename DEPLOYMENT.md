@@ -164,3 +164,22 @@ Shopify dev store rather than the production one.
 
 Run `npx convex env list` (without `--prod`) to see what's currently set on
 your dev deployment.
+
+### Shopify onboarding and permissions
+
+The connection wizard reads its allowed OAuth redirect URL from the active Convex
+backend (`SHOPIFY_OAUTH_REDIRECT_URL`, otherwise
+`${CONVEX_SITE_URL}/shopify/oauth/callback`). Add that exact URL to the Shopify
+app version's **Allowed redirection URLs**, separately from the frontend App URL.
+If one Shopify app serves multiple environments, allow each environment's callback,
+for example:
+
+- `https://curious-greyhound-437.convex.site/shopify/oauth/callback`
+- `https://youthful-bandicoot-479.convex.site/shopify/oauth/callback`
+
+Publish these Admin API scopes: `write_products,write_files,write_online_store_navigation`.
+They cover products/variants/collections/product media, files/images, and menus
+respectively; write scopes include read access. Publish the updated Shopify app
+version, then use **Paramètres > Boutique > Accès Shopify** to reauthorize existing
+shops. Deploy both the frontend and Convex changes together so the wizard can
+retrieve the callback configuration.
