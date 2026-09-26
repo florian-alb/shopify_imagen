@@ -11,6 +11,7 @@ import {
 import type { Doc, Id } from "./_generated/dataModel"
 import { internal } from "./_generated/api"
 import { requireUserId } from "./authz"
+import { assertWorkspaceUnlocked } from "./catalogWorkspace"
 import { sourceOrigin } from "./catalogImport/model"
 import { taskSpec } from "./catalogImport/validators"
 
@@ -71,6 +72,7 @@ export const create = mutation({
       origin,
       mode: args.mode,
       type: "export",
+      storageMode: "convex",
       status: "queued",
       phase: "menu",
       root: "",
@@ -125,6 +127,7 @@ export const control = mutation({
   },
   handler: async (ctx, args) => {
     const op = await ownedOperation(ctx, args.id, await requireUserId(ctx))
+    await assertWorkspaceUnlocked(ctx, op._id)
     if (args.command === "cancel" && op.type === "import" && op.activeTaskId)
       throw new ConvexError(
         "Mettez en pause et attendez la sauvegarde du lot Shopify avant d’arrêter.",
@@ -272,6 +275,7 @@ export const claim = internalMutation({
     const op = await ctx.db.get(id)
     const now = Date.now()
     if (!op || !["queued", "running"].includes(op.status)) return null
+    await assertWorkspaceUnlocked(ctx, id)
     if (op.activeTaskId && (op.leaseUntil ?? 0) > now) return null
     const lockDomain = op.shopId ? `shop:${op.shopId}` : op.origin
     const domain = await ctx.db
@@ -424,7 +428,9 @@ export const settle = internalMutation({
       ...(args.total !== undefined ? { total: args.total } : {}),
       ...(args.done !== undefined ? { done: op.done + args.done } : {}),
       ...(args.failed !== undefined ? { failed: op.failed + args.failed } : {}),
-      ...(args.finalKey ? { finalKey: args.finalKey } : {}),
+      ...(args.finalKey
+        ? { finalKey: args.finalKey, snapshotRevision: undefined }
+        : {}),
       updatedAt: Date.now(),
       error: undefined,
     })
@@ -506,6 +512,9 @@ export const editLock = internalMutation({
   },
   handler: async (ctx, args) => {
     const op = await ownedOperation(ctx, args.id, args.owner)
+    await assertWorkspaceUnlocked(ctx, op._id)
+    if (op.storageMode === "convex")
+      throw new Error("Utilisez les éditions du catalogue Convex.")
     if (op.type !== "export" || op.activeTaskId)
       throw new ConvexError(
         "Cette opération ne peut pas être modifiée maintenant.",
@@ -567,16 +576,23 @@ export const enqueue = internalMutation({
   },
   handler: async (ctx, args) => {
     const op = await ownedOperation(ctx, args.id, args.owner)
+    await assertWorkspaceUnlocked(ctx, op._id)
     if (op.type !== "export")
       throw new ConvexError("Action réservée aux exports.")
     if ((op.editUntil ?? 0) > Date.now())
       throw new ConvexError("Une sauvegarde est en cours.")
     if (op.activeTaskId || ["running", "queued"].includes(op.status))
       throw new ConvexError("Une opération est déjà en cours.")
+    if (op.snapshotRevision !== undefined)
+      throw new Error(
+        "Reprenez le snapshot en cours avant de lancer une autre opération.",
+      )
     for (const task of args.tasks) await addTask(ctx, op._id, task)
     await ctx.db.patch(op._id, {
       status: "queued",
       phase: args.phase,
+      snapshotRevision:
+        args.phase === "assemble" ? op.revision + 1 : op.snapshotRevision,
       finalKey: undefined,
       revision: op.revision + 1,
       updatedAt: Date.now(),

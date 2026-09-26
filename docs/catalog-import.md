@@ -2,6 +2,8 @@
 
 Le module est accessible dans **Import de catalogue**, à `/catalog-import`. Il collecte une boutique publique Shopify, prépare ses règles SEO, génère un JSON privé et importe les collections choisies dans une boutique connectée. Il ne publie pas les produits et n’affecte pas le menu au thème.
 
+Pour reprendre le développement du module avec une IA, lire [le contexte technique du catalogue de travail](catalog-workspace-context.md) : architecture Convex/R2, contrats, parcours, pièges connus et validations restantes.
+
 ## Configuration
 
 Configurer côté **Convex**, jamais dans des variables `VITE_` :
@@ -34,9 +36,11 @@ Les titres et contenus conservent leur langue. Les certifications et âges recom
 
 ## Stockage et reprise
 
-Convex contient les opérations, les baux et les tâches de coordination ; aucun corps de produit n’est stocké dans ses tables. Les tâches de produits regroupent 25 références et avancent par cinq fiches. La découverte des collections est planifiée par groupes de 50 et l’index est partitionné en 256 compartiments.
+Depuis la refonte, Convex contient le catalogue de travail des nouveaux exports et des exports migrés, en plus des opérations, baux et tâches. Les catalogues non migrés conservent le lecteur legacy R2. Voir [la procédure de migration et le contrat du stockage](catalog-workspace-migration.md). Les tâches de produits regroupent 25 références et avancent par cinq fiches. La découverte des collections est planifiée par groupes de 50 et l’index est partitionné en 256 compartiments.
 
-R2 conserve notamment :
+R2 conserve les sources brutes, checkpoints, reçus et snapshots immuables. Les chemins `products/`, `summaries/`, `preparation/`, `overrides/` et `identities/` ci-dessous sont des archives legacy pour un catalogue migré ; la collecte migrée écrit les données normalisées dans Convex. La racine effective vient de l’opération, elle ne doit pas être reconstruite depuis son identifiant.
+
+Organisation legacy et archives :
 
 ```text
 catalog-exports/{owner}/{export}/
@@ -67,7 +71,7 @@ L’assemblage écrit des parties multipart bornées, avec buffers intermédiair
 
 ## Import et identités
 
-L’identité distante est le metafield unique `imagen_catalog.source_id` : domaine source sans `www` + identifiant Shopify source. Sa définition est vérifiée avant import. Les produits existants reçoivent les tags manquants via `tagsAdd` ; leurs tags manuels et leurs listes de variantes ne sont pas remplacés.
+L’identité distante produit est le metafield `imagen_catalog.source_id` de type Shopify **`id`** (unicité automatique) : domaine source sans `www` + identifiant Shopify source. Sa définition est vérifiée avant import. Un `single_line_text_field`, même doté de `uniqueValues`, est incompatible avec `productByIdentifier(customId)` et `productSet(identifier.customId)`. Une ancienne définition texte doit être réparée explicitement en préservant ses valeurs ; le code ne la supprime pas automatiquement. Le marqueur de collection portant la même clé reste un champ texte sur le propriétaire `COLLECTION` et ne doit pas être confondu avec cette définition `PRODUCT`. Les produits existants reçoivent les tags manquants via `tagsAdd` ; leurs tags manuels et leurs listes de variantes ne sont pas remplacés.
 
 Les collections utilisent un handle déterministe composé du handle source et d’un suffixe lié aux règles. Un marqueur vérifie qu’une collection retrouvée appartient à cet import. Une modification des règles génère une nouvelle collection plutôt que d’écraser une collection existante. Chaque import crée son propre menu, sans remplacer celui de la boutique.
 
@@ -98,7 +102,7 @@ Les tests couvrent la fixture réelle Kuscheltierland, les menus Dawn/Horizon, l
 
 Validation du 24 septembre 2026 : 242 tests réussis, dont 36 pour le module catalogue ; typecheck, build, contrat public Convex et schéma GraphQL Shopify validés. Le lint conserve 59 avertissements préexistants, sans erreur ni avertissement dans les nouveaux fichiers catalogue. Le backend a été validé sur le déploiement Convex de développement. Les tests de réimport vérifient aussi l’attente du recalcul des collections automatiques et le signalement d’un échec après un délai borné.
 
-La lecture de produits reste bornée à 50 résultats et 500 résumés examinés par requête. Une recherche très sélective peut donc nécessiter plusieurs tranches. Les collections sont affichées par pages de 20. La structure éditable est limitée à 500 collections, 1 000 nœuds de menu, 12 niveaux et 300 Ko UTF-8, vérifiés dès la découverte puis à l’enregistrement. Ces limites maintiennent les échanges de structure sous le plafond Convex ; elles ne limitent pas le nombre de produits stockés dans R2. Un menu dépassant ces limites est refusé avec un message explicite. Les thèmes entièrement différents demandent une adaptation des sélecteurs ; un contenu non reconnu est signalé.
+Pour le lecteur **legacy seulement**, la lecture de produits reste bornée à 50 résultats et 500 résumés examinés par requête. Une recherche très sélective peut donc nécessiter plusieurs tranches. Les collections sont affichées par pages de 20. La structure éditable est limitée à 500 collections, 1 000 nœuds de menu, 12 niveaux et 300 Ko UTF-8, vérifiés dès la découverte puis à l’enregistrement. Ces limites maintiennent les échanges de structure sous le plafond Convex ; elles ne limitent pas le nombre de produits stockés dans R2. Un menu dépassant ces limites est refusé avec un message explicite. Les thèmes entièrement différents demandent une adaptation des sélecteurs ; un contenu non reconnu est signalé.
 
 L’interface a été vérifiée sur ordinateur et à 390 × 844 dans une prévisualisation isolée utilisant les composants réels et des données publiques du pilote. Cette vérification couvre la présentation et les interactions ; elle ne remplace pas une session authentifiée connectée à R2 et Shopify. Les deux audits Impeccable indépendants (conception et contrôle mécanique) ont été réalisés, puis leurs corrections d’accessibilité, de pagination et de mise en page intégrées.
 

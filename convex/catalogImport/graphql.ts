@@ -7,7 +7,7 @@ export const DEFINITION = `mutation CatalogImportDefinition($definition: Metafie
 }`
 export const DEFINITIONS = `query CatalogImportDefinitions($ownerType: MetafieldOwnerType!) {
   metafieldDefinitions(first: 10, ownerType: $ownerType, namespace: "imagen_catalog", key: "source_id") {
-    nodes { id type { name } capabilities { uniqueValues { enabled } } }
+    nodes { id type { name } metafieldsCount capabilities { uniqueValues { enabled } } }
   }
 }`
 export const FIND_PRODUCT = `query CatalogImportFindProduct($identifier: ProductIdentifierInput!) {

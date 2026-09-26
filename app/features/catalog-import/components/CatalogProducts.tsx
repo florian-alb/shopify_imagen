@@ -15,7 +15,11 @@ import type {
   Preparation,
   PreparedProduct,
 } from "../../../../convex/catalogImport/model"
-import { useCatalogRemote } from "../hooks/use-catalog-remote"
+import {
+  useCatalogProduct,
+  useCatalogProducts,
+} from "../hooks/use-catalog-data"
+import { useCatalogNavigation } from "../hooks/use-catalog-query"
 import { CatalogError, SourceStatus, Working } from "./CatalogShared"
 
 export function CatalogProducts({
@@ -27,25 +31,37 @@ export function CatalogProducts({
   prep: Preparation
   onSaved: () => void
 }) {
-  const [collection, setCollection] = useState("")
-  const [search, setSearch] = useState("")
-  const [query, setQuery] = useState("")
-  const [issues, setIssues] = useState(false)
-  const [cursors, setCursors] = useState<Array<string | undefined>>([undefined])
-  const [selected, setSelected] = useState<string | null>(null)
-  const read = useAction(api.catalogImportActions.products)
-  const cursor = cursors[cursors.length - 1]
-  const page = useCatalogRemote(
-    () =>
-      read({
-        id: op._id,
-        cursor,
-        collection: collection || undefined,
-        search: query || undefined,
-        onlyIssues: issues,
-      }),
-    `${op._id}:${op.revision}:${cursor}:${collection}:${query}:${issues}:${op.status}`,
+  const [collection, setCollection] = useCatalogNavigation(
+    `${op.ownerId}:${op._id}:collection`,
+    "",
   )
+  const [search, setSearch] = useCatalogNavigation(
+    `${op.ownerId}:${op._id}:search`,
+    "",
+  )
+  const [query, setQuery] = useCatalogNavigation(
+    `${op.ownerId}:${op._id}:query`,
+    "",
+  )
+  const [issues, setIssues] = useCatalogNavigation(
+    `${op.ownerId}:${op._id}:issues`,
+    false,
+  )
+  const [savedCursors, setCursors] = useCatalogNavigation<
+    Array<string | undefined>
+  >(`${op.ownerId}:${op._id}:${op.revision}:cursors`, [undefined])
+  const [selected, setSelected] = useState<string | null>(null)
+  const cursor = savedCursors[savedCursors.length - 1]
+  const page = useCatalogProducts(op, {
+    cursor,
+    collection: collection || undefined,
+    search: query || undefined,
+    onlyIssues: issues,
+  })
+  const cursors =
+    page.value && "reset" in page.value && page.value.reset
+      ? [undefined]
+      : savedCursors
   function changeCollection(key: string) {
     setCollection(key)
     setCursors([undefined])
@@ -133,6 +149,11 @@ export function CatalogProducts({
               À vérifier
             </label>
           </div>
+          {"refreshing" in page && page.refreshing === true && (
+            <p role="status" className="mb-2 text-xs text-muted-foreground">
+              Actualisation…
+            </p>
+          )}
           {page.loading ? (
             <Working />
           ) : page.error ? (
@@ -234,13 +255,13 @@ export function CatalogProducts({
               </div>
               <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
                 <span className="text-xs text-muted-foreground">
-                  Tranche {cursors.length} · lecture progressive du catalogue
+                  Page {cursors.length}
                 </span>
                 <div className="flex gap-2">
                   <Button
                     variant="outline"
                     disabled={cursors.length === 1}
-                    onClick={() => setCursors((c) => c.slice(0, -1))}
+                    onClick={() => setCursors(cursors.slice(0, -1))}
                   >
                     <ChevronLeft className="size-4" />
                     Précédent
@@ -249,7 +270,7 @@ export function CatalogProducts({
                     variant="outline"
                     disabled={!page.value?.cursor}
                     onClick={() =>
-                      setCursors((c) => [...c, page.value!.cursor!])
+                      setCursors([...cursors, page.value!.cursor!])
                     }
                   >
                     Suivant
@@ -297,11 +318,7 @@ function ProductInspector({
     () => window.matchMedia("(min-width: 1536px)").matches,
     () => false,
   )
-  const read = useAction(api.catalogImportActions.product)
-  const data = useCatalogRemote(
-    () => read({ id: op._id, handle }),
-    `${op._id}:${handle}:${op.revision}`,
-  )
+  const data = useCatalogProduct(op, handle)
   const content = data.loading ? (
     <Working />
   ) : data.error ? (

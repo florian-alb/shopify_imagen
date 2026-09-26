@@ -1,0 +1,13 @@
+{
+  "deployment": "curious-greyhound-437",
+  "sourceId": "q17317nba9s76hgmxhdeydsbrx8ezbdg",
+  "checks": [
+    "product edit, lost-response replay and stale revision rejection",
+    "scheduled rule rebuild publishes matching membership and search together",
+    "R2 snapshot equals current Convex detail and rules",
+    "snapshot remains immutable after later edit; unsafe legacy rollback refused"
+  ],
+  "id": "q177kbtc61xzttgjbnn0fhfx4x8f35nv",
+  "finalKey": "catalog-rehearsals/kh79a14wfhn2hy42rk291dvfdh87e67y/q177kbtc61xzttgjbnn0fhfx4x8f35nv/final/3/catalogue.json",
+  "finishedAt": "2026-09-25T12:20:47.324Z"
+}

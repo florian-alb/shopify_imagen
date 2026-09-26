@@ -61,7 +61,7 @@ vi.mock("./storage", () => ({
     )
   },
 }))
-import { runExportTask, spec } from "./pipeline"
+import { runExportTask, spec, type WorkspaceIO } from "./pipeline"
 const base = {
   root: "catalog/test",
   origin: "https://source.example",
@@ -209,4 +209,79 @@ test("a completed multipart object recovers a lost receipt and freezes import pr
   expect(mock.objects.has(`${base.root}/final/1/products/plush.json`)).toBe(
     true,
   )
+})
+
+test("Convex collection replays checkpoints without maintaining an editable R2 product copy", async () => {
+  mock.fetch.mockImplementation(async (url: string) =>
+    url.endsWith(".json") ? JSON.stringify(productJson) : page,
+  )
+  let stored: import("./model").CatalogProduct | null = null
+  let interrupted = true
+  const io: WorkspaceIO = {
+    preparation: async () => ({ revision: 1, collections: [], menu: [] }),
+    previous: async () => stored,
+    collected: async (product) => {
+      stored = product
+      if (interrupted) {
+        interrupted = false
+        throw new Error("lost mutation response")
+      }
+    },
+    collection: async () => {},
+    page: async () => ({ products: [], cursor: null }),
+  }
+  const t = await task()
+  await expect(runExportTask(base, t, io)).rejects.toThrow(
+    "lost mutation response",
+  )
+  expect(await runExportTask(base, t, io)).toMatchObject({ done: 1, failed: 0 })
+  expect(mock.fetch).toHaveBeenCalledTimes(2)
+  expect(mock.objects.has(`${base.root}/products/plush.json`)).toBe(false)
+  expect(mock.objects.has(`${base.root}/summaries/plush.json`)).toBe(false)
+  expect(stored).toMatchObject({ handle: "plush" })
+})
+
+test("snapshot uses only prepared Convex pages and stays immutable after later edits", async () => {
+  mock.fetch.mockImplementation(async (url: string) =>
+    url.endsWith(".json") ? JSON.stringify(productJson) : page,
+  )
+  await runExportTask(base, await task())
+  const source = JSON.parse(
+    mock.objects.get(`${base.root}/products/plush.json`)!,
+  )
+  const prepared = {
+    ...source,
+    title: "Manual correction",
+    tags: ["rabbit"],
+    reviewed: true,
+    excluded: false,
+  }
+  mock.objects.delete(`${base.root}/products/plush.json`)
+  const readPage = vi.fn(async () => ({ products: [prepared], cursor: null }))
+  const io: WorkspaceIO = {
+    preparation: async () => ({ revision: 1, collections: [], menu: [] }),
+    previous: async () => null,
+    collected: async () => {},
+    collection: async () => {},
+    page: readPage,
+  }
+  const assembly = await spec(base.root, "assemble-1", "assemble", {})
+  const first = await runExportTask(
+    { ...base, done: 1 },
+    assembly as Doc<"catalogTasks">,
+    io,
+  )
+  expect(
+    JSON.parse(mock.objects.get(first.finalKey!)!).products[0],
+  ).toMatchObject({
+    title: "Manual correction",
+    tags: ["rabbit"],
+    reviewed: true,
+  })
+  prepared.title = "Later edit"
+  await runExportTask({ ...base, done: 1 }, assembly as Doc<"catalogTasks">, io)
+  expect(JSON.parse(mock.objects.get(first.finalKey!)!).products[0].title).toBe(
+    "Manual correction",
+  )
+  expect(readPage).toHaveBeenCalledTimes(1)
 })

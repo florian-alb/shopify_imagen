@@ -1,0 +1,288 @@
+{
+  "deployment": "curious-greyhound-437",
+  "id": "q17317nba9s76hgmxhdeydsbrx8ezbdg",
+  "samples": [
+    {
+      "name": "all",
+      "iteration": 0,
+      "cliMs": 13197,
+      "metrics": {
+        "name": "products",
+        "gets": 101,
+        "lists": 1,
+        "bytes": 328812,
+        "ioMs": 51520.672520999986,
+        "totalMs": 9841
+      },
+      "payloadBytes": 33455,
+      "rows": 50,
+      "hasNext": true
+    },
+    {
+      "name": "rare",
+      "iteration": 0,
+      "cliMs": 15590,
+      "metrics": {
+        "name": "products",
+        "gets": 546,
+        "lists": 22,
+        "bytes": 451403,
+        "ioMs": 109616.75577500009,
+        "totalMs": 14394
+      },
+      "payloadBytes": 25897,
+      "rows": 35,
+      "hasNext": true
+    },
+    {
+      "name": "errors",
+      "iteration": 0,
+      "cliMs": 8706,
+      "metrics": {
+        "name": "products",
+        "gets": 536,
+        "lists": 11,
+        "bytes": 269074,
+        "ioMs": 161681.1221909998,
+        "totalMs": 7530
+      },
+      "payloadBytes": 3715,
+      "rows": 5,
+      "hasNext": true
+    },
+    {
+      "name": "collection",
+      "iteration": 0,
+      "cliMs": 6723,
+      "metrics": {
+        "name": "products",
+        "gets": 501,
+        "lists": 10,
+        "bytes": 240601,
+        "ioMs": 119508.85152299982,
+        "totalMs": 5526
+      },
+      "payloadBytes": 385,
+      "rows": 0,
+      "hasNext": true
+    },
+    {
+      "name": "detail",
+      "iteration": 0,
+      "cliMs": 1772,
+      "metrics": {
+        "name": "product",
+        "gets": 2,
+        "lists": 0,
+        "bytes": 42073,
+        "ioMs": 263.8854569999967,
+        "totalMs": 328
+      },
+      "payloadBytes": 6580,
+      "hasNext": false
+    },
+    {
+      "name": "structure",
+      "iteration": 0,
+      "cliMs": 1374,
+      "metrics": {
+        "name": "structure",
+        "gets": 1,
+        "lists": 0,
+        "bytes": 36292,
+        "ioMs": 127.52829699999711,
+        "totalMs": 148
+      },
+      "payloadBytes": 53903,
+      "hasNext": false
+    },
+    {
+      "name": "all",
+      "iteration": 1,
+      "cliMs": 8944,
+      "metrics": {
+        "name": "products",
+        "gets": 101,
+        "lists": 1,
+        "bytes": 328812,
+        "ioMs": 22016.796154000018,
+        "totalMs": 7823
+      },
+      "payloadBytes": 33455,
+      "rows": 50,
+      "hasNext": true
+    },
+    {
+      "name": "rare",
+      "iteration": 1,
+      "cliMs": 14243,
+      "metrics": {
+        "name": "products",
+        "gets": 546,
+        "lists": 22,
+        "bytes": 451403,
+        "ioMs": 97131.187371,
+        "totalMs": 13007
+      },
+      "payloadBytes": 25897,
+      "rows": 35,
+      "hasNext": true
+    },
+    {
+      "name": "errors",
+      "iteration": 1,
+      "cliMs": 8162,
+      "metrics": {
+        "name": "products",
+        "gets": 536,
+        "lists": 11,
+        "bytes": 269074,
+        "ioMs": 140255.43286799995,
+        "totalMs": 6974
+      },
+      "payloadBytes": 3715,
+      "rows": 5,
+      "hasNext": true
+    },
+    {
+      "name": "collection",
+      "iteration": 1,
+      "cliMs": 6962,
+      "metrics": {
+        "name": "products",
+        "gets": 501,
+        "lists": 10,
+        "bytes": 240601,
+        "ioMs": 147548.06254499996,
+        "totalMs": 5717
+      },
+      "payloadBytes": 385,
+      "rows": 0,
+      "hasNext": true
+    },
+    {
+      "name": "detail",
+      "iteration": 1,
+      "cliMs": 1432,
+      "metrics": {
+        "name": "product",
+        "gets": 2,
+        "lists": 0,
+        "bytes": 42073,
+        "ioMs": 237.32206700001552,
+        "totalMs": 290
+      },
+      "payloadBytes": 6580,
+      "hasNext": false
+    },
+    {
+      "name": "structure",
+      "iteration": 1,
+      "cliMs": 1426,
+      "metrics": {
+        "name": "structure",
+        "gets": 1,
+        "lists": 0,
+        "bytes": 36292,
+        "ioMs": 126.18831599999976,
+        "totalMs": 148
+      },
+      "payloadBytes": 53903,
+      "hasNext": false
+    },
+    {
+      "name": "all",
+      "iteration": 2,
+      "cliMs": 13299,
+      "metrics": {
+        "name": "products",
+        "gets": 101,
+        "lists": 1,
+        "bytes": 328812,
+        "ioMs": 62197.61447300001,
+        "totalMs": 9208
+      },
+      "payloadBytes": 33455,
+      "rows": 50,
+      "hasNext": true
+    },
+    {
+      "name": "rare",
+      "iteration": 2,
+      "cliMs": 14928,
+      "metrics": {
+        "name": "products",
+        "gets": 546,
+        "lists": 22,
+        "bytes": 451403,
+        "ioMs": 105587.02742000032,
+        "totalMs": 13606
+      },
+      "payloadBytes": 25897,
+      "rows": 35,
+      "hasNext": true
+    },
+    {
+      "name": "errors",
+      "iteration": 2,
+      "cliMs": 7602,
+      "metrics": {
+        "name": "products",
+        "gets": 536,
+        "lists": 11,
+        "bytes": 269074,
+        "ioMs": 121569.22772300008,
+        "totalMs": 6190
+      },
+      "payloadBytes": 3715,
+      "rows": 5,
+      "hasNext": true
+    },
+    {
+      "name": "collection",
+      "iteration": 2,
+      "cliMs": 6483,
+      "metrics": {
+        "name": "products",
+        "gets": 501,
+        "lists": 10,
+        "bytes": 240601,
+        "ioMs": 113739.90162800014,
+        "totalMs": 5261
+      },
+      "payloadBytes": 385,
+      "rows": 0,
+      "hasNext": true
+    },
+    {
+      "name": "detail",
+      "iteration": 2,
+      "cliMs": 1601,
+      "metrics": {
+        "name": "product",
+        "gets": 2,
+        "lists": 0,
+        "bytes": 42073,
+        "ioMs": 254.5175299999828,
+        "totalMs": 313
+      },
+      "payloadBytes": 6580,
+      "hasNext": false
+    },
+    {
+      "name": "structure",
+      "iteration": 2,
+      "cliMs": 1418,
+      "metrics": {
+        "name": "structure",
+        "gets": 1,
+        "lists": 0,
+        "bytes": 36292,
+        "ioMs": 130.56896100001177,
+        "totalMs": 148
+      },
+      "payloadBytes": 53903,
+      "hasNext": false
+    }
+  ]
+}

@@ -2,22 +2,24 @@ import { useState } from "react"
 import { useAction } from "convex/react"
 import { api, type Doc } from "@/lib/convex"
 import { Button } from "@/components/ui/button"
-import { useCatalogRemote } from "../hooks/use-catalog-remote"
+import { useCatalogNavigation } from "../hooks/use-catalog-query"
+import { useCatalogProducts } from "../hooks/use-catalog-data"
 import { CatalogError, SourceStatus, Working } from "./CatalogShared"
 import { CatalogActivity } from "./CatalogActivity"
 
 export function CatalogExportErrors({ op }: { op: Doc<"catalogOperations"> }) {
-  const read = useAction(api.catalogImportActions.products)
   const retry = useAction(api.catalogImportActions.retryProduct)
-  const [cursors, setCursors] = useState<Array<string | undefined>>([undefined])
+  const [savedCursors, setCursors] = useCatalogNavigation<
+    Array<string | undefined>
+  >(`${op.ownerId}:${op._id}:${op.revision}:errors-cursors`, [undefined])
   const [pending, setPending] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const cursor = cursors[cursors.length - 1]
-  const page = useCatalogRemote(
-    () => read({ id: op._id, cursor, onlyErrors: true }),
-    `${op._id}:${op.status}:${op.done}:${op.failed}:${cursor}`,
-    Boolean(op.preparationKey),
-  )
+  const cursor = savedCursors[savedCursors.length - 1]
+  const page = useCatalogProducts(op, { cursor, onlyErrors: true })
+  const cursors =
+    page.value && "reset" in page.value && page.value.reset
+      ? [undefined]
+      : savedCursors
   const running = ["running", "queued"].includes(op.status)
   async function retryProduct(handle: string) {
     setPending(handle)
@@ -123,18 +125,18 @@ export function CatalogExportErrors({ op }: { op: Doc<"catalogOperations"> }) {
                   <Button
                     variant="outline"
                     disabled={cursors.length === 1}
-                    onClick={() => setCursors((values) => values.slice(0, -1))}
+                    onClick={() => setCursors(cursors.slice(0, -1))}
                   >
                     Précédent
                   </Button>
                   <span className="text-sm text-muted-foreground">
-                    Tranche {cursors.length}
+                    Page {cursors.length}
                   </span>
                   <Button
                     variant="outline"
                     disabled={!page.value.cursor}
                     onClick={() =>
-                      setCursors((values) => [...values, page.value!.cursor!])
+                      setCursors([...cursors, page.value!.cursor!])
                     }
                   >
                     Erreurs suivantes

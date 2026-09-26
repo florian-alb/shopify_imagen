@@ -242,6 +242,34 @@ const googleFeedCondition = v.object({
 
 export default defineSchema({
   ...authTables,
+  catalogWorkspaces: defineTable({
+    operationId: v.id("catalogOperations"),
+    mode: v.union(v.literal("migration"), v.literal("active"), v.literal("legacy")),
+    activeVersion: v.number(), pendingVersion: v.optional(v.number()),
+    preparation: v.string(), pendingPreparation: v.optional(v.string()), pendingCollectInput: v.optional(v.string()),
+    sourceRevision: v.number(), sourceGeneration: v.number(), sourcePreparationKey: v.string(),
+    sourceFingerprint: v.string(), sourceRoot: v.string(),
+    cursor: v.optional(v.string()), count: v.number(), validated: v.number(),
+    stage: v.union(v.literal("copy"), v.literal("validate"), v.literal("ready"), v.literal("rebuild")),
+    edited: v.boolean(), dataVersion: v.number(), searchGroups: v.optional(v.array(v.number())), error: v.optional(v.string()),
+    lastRequest: v.optional(v.string()), lastResult: v.optional(v.number()),
+  }).index("by_operationId", ["operationId"]),
+  catalogSources: defineTable({
+    operationId: v.id("catalogOperations"), handle: v.string(), identity: v.string(),
+    override: v.string(), fingerprint: v.string(), chunks: v.number(),
+  }).index("by_operationId_and_handle", ["operationId", "handle"])
+    .index("by_operationId_and_identity", ["operationId", "identity"]),
+  catalogBodies: defineTable({ sourceId: v.id("catalogSources"), part: v.number(), json: v.string() })
+    .index("by_sourceId_and_part", ["sourceId", "part"]),
+  catalogRows: defineTable({
+    operationId: v.id("catalogOperations"), version: v.number(), handle: v.string(),
+    sourceId: v.id("catalogSources"), row: v.string(), titleLower: v.string(),
+  }).index("by_operationId_and_version_and_handle", ["operationId", "version", "handle"]),
+  catalogPostings: defineTable({
+    operationId: v.id("catalogOperations"), version: v.number(), scope: v.string(), sort: v.string(),
+    rowId: v.id("catalogRows"), position: v.number(), minLength: v.number(),
+  }).index("by_operationId_and_version_and_scope_and_minLength_and_sort", ["operationId", "version", "scope", "minLength", "sort"])
+    .index("by_rowId", ["rowId"]),
   catalogOperations: defineTable({
     ownerId: v.id("users"), origin: v.string(), mode: v.union(v.literal("menu"), v.literal("all")),
     type: v.union(v.literal("export"), v.literal("import")),
@@ -253,6 +281,9 @@ export default defineSchema({
     selection: v.optional(v.array(v.string())),
     sourceSnapshot: v.optional(v.string()), aiBudget: v.optional(v.number()), aiUsed: v.optional(v.number()),
     editToken: v.optional(v.string()), editUntil: v.optional(v.number()),
+    rehearsal: v.optional(v.boolean()),
+    snapshotRevision: v.optional(v.number()),
+    storageMode: v.optional(v.union(v.literal("migration"), v.literal("convex"))),
     createdAt: v.number(), updatedAt: v.number(),
   }).index("by_ownerId", ["ownerId"]).index("by_status_and_updatedAt", ["status", "updatedAt"]).index("by_shopId_and_status", ["shopId", "status"]),
   catalogTasks: defineTable({

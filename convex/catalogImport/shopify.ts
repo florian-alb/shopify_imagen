@@ -71,6 +71,9 @@ export async function diagnoseShop(shop: Doc<"shops">) {
     missing: REQUIRED_SHOPIFY_ADMIN_SCOPES.filter((s) => !granted.includes(s)),
     currency: r.shop.currencyCode,
     domain: r.shop.primaryDomain.url,
+    identityDefinition: await readIdentityDefinition(
+      shopifyCredentialsForShop(shop),
+    ),
   }
 }
 export function uniqueIdentifier(origin: string, id: string) {
@@ -151,12 +154,34 @@ export function productInput(
       alt: img.alt,
       contentType: "IMAGE",
     })),
-    metafields: [
-      {
-        ...uniqueIdentifier(origin, product.sourceId),
-        type: "single_line_text_field",
-      },
-    ],
+    // The definition supplies the type. Keep the custom ID tuple identical
+    // in both arguments (Shopify rejects extra fields with METAFIELD_MISMATCH).
+    metafields: [uniqueIdentifier(origin, product.sourceId)],
+  }
+}
+
+export function productSetVariables(line: {
+  input: unknown
+  identifier: unknown
+  sourceId: string
+}, origin: string) {
+  const expected = uniqueIdentifier(origin, line.sourceId)
+  const input = line.input as { metafields?: Array<Record<string, unknown>> }
+  const identifier = line.identifier as { customId?: Record<string, unknown> }
+  const matches = (value: Record<string, unknown> | undefined) =>
+    value?.namespace === expected.namespace && value?.key === expected.key &&
+    value?.value === expected.value
+  const fields = input?.metafields
+  if (!line.sourceId || !matches(identifier?.customId) || !Array.isArray(fields) ||
+      fields.filter(matches).length !== 1)
+    throw new Error("Identifiant Shopify incohérent dans le lot ; envoi interrompu.")
+  return {
+    input: {
+      ...input,
+      // Normalize legacy, not-yet-submitted checkpoints without changing identity.
+      metafields: fields.map((field) => matches(field) ? expected : field),
+    },
+    identifier: { customId: expected },
   }
 }
 export function targetMenu(
@@ -262,24 +287,29 @@ export async function remapDescription(
   return { html: cleanHtml($.html()), unresolved: [...new Set(unresolved)] }
 }
 
-async function ensureDefinition(credentials: ShopifyCredentials) {
+export async function readIdentityDefinition(credentials: ShopifyCredentials) {
   const result = await shopifyGraphql<{
     metafieldDefinitions: {
       nodes: Array<{
         id: string
         type: { name: string }
+        metafieldsCount: number
         capabilities: { uniqueValues: { enabled: boolean } }
       }>
     }
   }>(gql.DEFINITIONS, { ownerType: "PRODUCT" }, undefined, credentials)
-  const existing = result.metafieldDefinitions.nodes[0]
+  return result.metafieldDefinitions.nodes[0] ?? null
+}
+
+export async function ensureDefinition(credentials: ShopifyCredentials) {
+  const existing = await readIdentityDefinition(credentials)
   if (existing) {
     if (
-      existing.type.name !== "single_line_text_field" ||
+      existing.type.name !== "id" ||
       !existing.capabilities.uniqueValues.enabled
     )
       throw new Error(
-        "Le champ imagen_catalog.source_id existe sans unicité. Corrigez sa définition avant import.",
+        `La définition PRODUCT imagen_catalog.source_id doit être de type id avec des valeurs uniques (type actuel : ${existing.type.name}). Une définition texte, même unique, ne permet pas les custom IDs Shopify. Faites corriger la définition en conservant ses valeurs avant de reprendre l’import.`,
       )
     return
   }
@@ -293,9 +323,8 @@ async function ensureDefinition(credentials: ShopifyCredentials) {
         name: "Identifiant source Imagen",
         namespace: "imagen_catalog",
         key: "source_id",
-        type: "single_line_text_field",
+        type: "id",
         ownerType: "PRODUCT",
-        capabilities: { uniqueValues: { enabled: true } },
       },
     },
     undefined,
@@ -694,6 +723,8 @@ async function importProducts(
           )
         batch.bulkId = found.id
       } else {
+        // Validate before requesting an upload; never alter submitted checkpoints.
+        const variables = batch.lines.map((line) => productSetVariables(line, op.origin))
         const staged = await shopifyGraphql<{
           stagedUploadsCreate: {
             stagedTargets: Array<{
@@ -727,10 +758,8 @@ async function importProducts(
           "file",
           new Blob(
             [
-              batch.lines
-                .map((l) =>
-                  JSON.stringify({ input: l.input, identifier: l.identifier }),
-                )
+              variables
+                .map((line) => JSON.stringify(line))
                 .join("\n"),
             ],
             { type: "text/jsonl" },

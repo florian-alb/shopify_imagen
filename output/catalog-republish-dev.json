@@ -1,0 +1,29 @@
+{
+  "deployment": "curious-greyhound-437",
+  "id": "q17317nba9s76hgmxhdeydsbrx8ezbdg",
+  "command": "publish",
+  "startedAt": "2026-09-25T12:29:43.737Z",
+  "products": 0,
+  "postings": 0,
+  "bytes": [],
+  "variants": [],
+  "batches": [],
+  "ready": true,
+  "result": null,
+  "checkpoint": {
+    "mode": "active",
+    "stage": "ready",
+    "count": 964,
+    "validated": 964,
+    "version": 2,
+    "sourceRevision": 2,
+    "sourceGeneration": 774,
+    "error": null
+  },
+  "finishedAt": "2026-09-25T12:29:46.668Z",
+  "sizeSummary": {
+    "p50": 0,
+    "p95": 0,
+    "max": 0
+  }
+}

@@ -132,9 +132,22 @@ async function htmlWithFallback(url: string, parse: (html: string) => unknown) {
   }
 }
 
+export type WorkspaceIO = {
+  preparation: () => Promise<Preparation>
+  previous: (product: CatalogProduct) => Promise<CatalogProduct | null>
+  collected: (product: CatalogProduct) => Promise<void>
+  collection: (key: string, detail: unknown) => Promise<void>
+  page: (
+    cursor?: string,
+  ) => Promise<{
+    products: ReturnType<typeof prepareProduct>[]
+    cursor: string | null
+  }>
+}
 export async function runExportTask(
   op: Doc<"catalogOperations">,
   task: Doc<"catalogTasks">,
+  workspace?: WorkspaceIO,
 ): Promise<Outcome> {
   const input = task.inputKey
     ? ((await getJson<TaskInput>(task.inputKey)) ?? {})
@@ -152,7 +165,9 @@ export async function runExportTask(
     return { complete: true, tasks: [], preparationKey: key, selecting: true }
   }
   if (task.kind === "discover") {
-    const prep = await preparation(op)
+    const prep = workspace
+      ? await workspace.preparation()
+      : await preparation(op)
     const selected = prep.collections.filter((c) => c.selected && c.url)
     const offset = Number(input.cursor ?? 0)
     const tasks: TaskSpec[] = []
@@ -203,6 +218,8 @@ export async function runExportTask(
         `${root}/collection-details/${safeKey(key)}.json`,
         result.details,
       )
+    if ((input.page ?? 1) === 1 && workspace)
+      await workspace.collection(key, result.details)
     const tasks: TaskSpec[] = []
     if (result.nextUrl) {
       const next = new URL(result.nextUrl)
@@ -332,13 +349,15 @@ export async function runExportTask(
         const identityKey = product.sourceId
           ? `${root}/identities/${safeKey(product.sourceId)}.json`
           : null
-        const identity = identityKey
-          ? await getJson<{ handle: string }>(identityKey)
-          : null
+        const identity =
+          identityKey && !workspace
+            ? await getJson<{ handle: string }>(identityKey)
+            : null
         if (identity) product.handle = identity.handle
-        const previous = await getJson<CatalogProduct>(
-          productPath(root, product.handle),
-        )
+        const previous = workspace
+          ? await workspace.previous(product)
+          : await getJson<CatalogProduct>(productPath(root, product.handle))
+        if (previous) product.handle = previous.handle
         if (previous)
           product.collections = [
             ...new Set([...previous.collections, ...product.collections]),
@@ -355,26 +374,32 @@ export async function runExportTask(
         await putJson(itemReceipt, checkpoint)
       }
       const { product } = checkpoint
-      await putJson(productPath(root, product.handle), product)
-      if (product.sourceId)
-        await putJson(`${root}/identities/${safeKey(product.sourceId)}.json`, {
+      if (workspace) await workspace.collected(product)
+      else {
+        await putJson(productPath(root, product.handle), product)
+        if (product.sourceId)
+          await putJson(
+            `${root}/identities/${safeKey(product.sourceId)}.json`,
+            {
+              handle: product.handle,
+            },
+          )
+        await putJson(`${root}/summaries/${safeKey(product.handle)}.json`, {
           handle: product.handle,
+          title: product.title,
+          collections: product.collections,
+          sourceId: product.sourceId,
+          image: product.images[0]?.url ?? null,
+          variants: product.variants.length,
+          partial: product.errors.length > 0,
+          warnings: product.warnings.length,
         })
-      await putJson(`${root}/summaries/${safeKey(product.handle)}.json`, {
-        handle: product.handle,
-        title: product.title,
-        collections: product.collections,
-        sourceId: product.sourceId,
-        image: product.images[0]?.url ?? null,
-        variants: product.variants.length,
-        partial: product.errors.length > 0,
-        warnings: product.warnings.length,
-      })
-      for (const collection of product.collections)
-        await putJson(
-          `${root}/collection-index/${safeKey(collection)}/${safeKey(product.handle)}.json`,
-          { handle: product.handle, title: product.title },
-        )
+        for (const collection of product.collections)
+          await putJson(
+            `${root}/collection-index/${safeKey(collection)}/${safeKey(product.handle)}.json`,
+            { handle: product.handle, title: product.title },
+          )
+      }
       done += checkpoint.done
       failed += checkpoint.failed
       duplicates += checkpoint.duplicate
@@ -398,7 +423,7 @@ export async function runExportTask(
       ...(duplicates ? { total: op.total - duplicates } : {}),
     }
   }
-  if (task.kind === "assemble") return assemble(op, task, input)
+  if (task.kind === "assemble") return assemble(op, task, input, workspace)
   throw new Error(`Étape inconnue : ${task.kind}`)
 }
 
@@ -406,8 +431,11 @@ async function assemble(
   op: Doc<"catalogOperations">,
   task: Doc<"catalogTasks">,
   input: TaskInput,
+  workspace?: WorkspaceIO,
 ): Promise<Outcome> {
-  const prep = await preparation(op, true)
+  const prep = workspace
+    ? await workspace.preparation()
+    : await preparation(op, true)
   const key = `${op.root}/final/${op.revision}/catalogue.json`
   if (await objectExists(key))
     return { complete: true, tasks: [], finalKey: key }
@@ -442,14 +470,26 @@ async function assemble(
   const deadline = Date.now() + 3 * 60_000
   let finished = false
   while (bytes < 8 * 1024 * 1024 && Date.now() < deadline) {
-    const listing = await listKeys(`${op.root}/products/`, cursor, 25)
-    for (const path of listing.keys) {
-      const product = await getJson<CatalogProduct>(path)
-      if (!product) throw new Error("Une fiche référencée a disparu de R2.")
-      const override = await readOverride(prep, product.handle)
-      const prepared = prepareProduct(product, prep.collections, override)
+    const page = workspace ? await workspace.page(cursor) : null
+    const listing = page
+      ? null
+      : await listKeys(`${op.root}/products/`, cursor, 25)
+    const preparedProducts = page?.products ?? []
+    if (listing)
+      for (const path of listing.keys) {
+        const product = await getJson<CatalogProduct>(path)
+        if (!product) throw new Error("Une fiche référencée a disparu de R2.")
+        preparedProducts.push(
+          prepareProduct(
+            product,
+            prep.collections,
+            await readOverride(prep, product.handle),
+          ),
+        )
+      }
+    for (const prepared of preparedProducts) {
       await putJson(
-        `${op.root}/final/${op.revision}/products/${safeKey(product.handle)}.json`,
+        `${op.root}/final/${op.revision}/products/${safeKey(prepared.handle)}.json`,
         prepared,
       )
       const line = (count ? "," : "") + JSON.stringify(prepared)
@@ -457,7 +497,7 @@ async function assemble(
       bytes += Buffer.byteLength(line)
       count++
     }
-    cursor = listing.cursor
+    cursor = page ? (page.cursor ?? undefined) : listing!.cursor
     if (!cursor) {
       body += "]}"
       finished = true

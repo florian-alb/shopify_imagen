@@ -4,10 +4,11 @@ import { randomUUID } from "node:crypto"
 import { v } from "convex/values"
 import { action, internalAction, type ActionCtx } from "./_generated/server"
 import type { Doc, Id } from "./_generated/dataModel"
-import { internal } from "./_generated/api"
+import { api, internal } from "./_generated/api"
 import { requireUserId } from "./authz"
 import {
   type Preparation,
+  type PreparedProduct,
   type ProductOverride,
   type CatalogProduct,
   type MenuNode,
@@ -28,6 +29,7 @@ import {
   listKeys,
   downloadUrl,
   withCatalogWrites,
+  measureReads,
 } from "./catalogImport/storage"
 import {
   digest,
@@ -37,6 +39,7 @@ import {
   runExportTask,
   spec,
   type Outcome,
+  type WorkspaceIO,
 } from "./catalogImport/pipeline"
 import { CollectionHttpError } from "./catalogImport/network"
 import { runImportTask, diagnoseShop } from "./catalogImport/shopify"
@@ -48,6 +51,32 @@ async function authorized(
 ): Promise<Doc<"catalogOperations">> {
   const owner = await requireUserId(ctx)
   return ctx.runQuery(internal.catalogImport.context, { id, owner })
+}
+async function currentPreparation(
+  ctx: ActionCtx,
+  op: Doc<"catalogOperations">,
+): Promise<Preparation> {
+  if (op.storageMode !== "convex") return preparation(op)
+  const state: Doc<"catalogWorkspaces"> | null = await ctx.runQuery(
+    internal.catalogWorkspace.context,
+    { id: op._id },
+  )
+  if (!state || state.mode !== "active")
+    throw new Error("Catalogue de travail indisponible.")
+  return { ...JSON.parse(state.preparation), revision: op.revision } as Preparation
+}
+async function currentProduct(
+  ctx: ActionCtx,
+  op: Doc<"catalogOperations">,
+  handle: string,
+): Promise<CatalogProduct | null> {
+  if (op.storageMode !== "convex")
+    return getJson<CatalogProduct>(productPath(op.root, handle))
+  const source: { product: CatalogProduct } | null = await ctx.runQuery(
+    internal.catalogWorkspace.inspectSource,
+    { id: op._id, handle },
+  )
+  return source?.product ?? null
 }
 export const configuration = action({
   args: {},
@@ -73,10 +102,12 @@ export const configuration = action({
 export const structure = action({
   args: { id: v.id("catalogOperations") },
   handler: async (ctx, { id }): Promise<Preparation> => {
-    const op = await authorized(ctx, id)
-    const prep = await preparation(op)
-    validateStructureBudget(prep)
-    return prep
+    return measureReads("structure", async () => {
+      const op = await authorized(ctx, id)
+      const prep = await currentPreparation(ctx, op)
+      validateStructureBudget(prep)
+      return prep
+    })
   },
 })
 export const saveStructure = action({
@@ -95,6 +126,42 @@ export const saveStructure = action({
     validateStructureBudget(candidate)
     validatePlans(candidate.collections)
     const owner = await requireUserId(ctx)
+    const current = await authorized(ctx, args.id)
+    if (current.storageMode === "convex") {
+      const previous = await currentPreparation(ctx, current)
+      const next: Preparation = {
+        ...previous,
+        collections: candidate.collections,
+        menu: validateMenu(candidate.menu),
+        revision: current.revision + 1,
+      }
+      let collectInput: string | undefined
+      if (args.collect) {
+        if (current.phase !== "menu")
+          throw new Error("La collecte a déjà été démarrée.")
+        const selected = next.collections.filter((c) => c.selected && c.url)
+        if (
+          !selected.length ||
+          selected.some(
+            (c) =>
+              new URL(c.url).origin !== current.origin ||
+              !collectionKey(c.url, current.origin),
+          )
+        )
+          throw new Error("Sélection de collections source invalide.")
+        collectInput = (await spec(current.root, "discover-0", "discover", {}))
+          .inputKey
+      }
+      await ctx.runMutation(internal.catalogWorkspace.saveStructure, {
+        id: args.id,
+        owner,
+        revision: args.revision,
+        json: JSON.stringify(next),
+        request: digest(JSON.stringify(args)),
+        collectInput,
+      })
+      return next
+    }
     const token = randomUUID()
     const op = await ctx.runMutation(internal.catalogImport.editLock, {
       id: args.id,
@@ -103,7 +170,7 @@ export const saveStructure = action({
       token,
     })
     try {
-      const previous = await preparation(op)
+      const previous = await currentPreparation(ctx, op)
       // Only editable structure crosses the public boundary; internal R2 pointers are always server-owned.
       const prep: Preparation = {
         ...previous,
@@ -176,112 +243,138 @@ export const products = action({
     onlyIssues: v.optional(v.boolean()),
     onlyErrors: v.optional(v.boolean()),
   },
-  handler: async (ctx, args) => {
-    const op = await authorized(ctx, args.id)
-    const prep = await preparation(op)
-    let cursor = args.cursor
-    let scanned = 0
-    const rows = []
-    const plan = prep.collections.find((c) => c.key === args.collection)
-    const overrideCache = new Map<string, Record<string, ProductOverride>>()
-    do {
-      const listing = await listKeys(
-        `${op.root}/summaries/`,
-        cursor,
-        50 - rows.length,
-      )
-      const summaries = await Promise.all(
-        listing.keys.map((key) =>
-          getJson<{
-            handle: string
-            title: string
-            collections: string[]
-            partial?: boolean
-          }>(key),
-        ),
-      )
-      for (const summary of summaries) {
-        if (!summary) continue
-        if (args.onlyErrors && summary.partial === false) continue
-        const bucket = String(bucketFor(summary.handle))
-        const overrideKey = prep.overrideBuckets?.[bucket]
-        if (overrideKey && !overrideCache.has(bucket))
-          overrideCache.set(
-            bucket,
-            (await getJson<Record<string, ProductOverride>>(overrideKey)) ?? {},
-          )
-        const override = overrideCache.get(bucket)?.[summary.handle] ?? {}
-        if (
-          args.search &&
-          !(override.title ?? summary.title)
-            .toLowerCase()
-            .includes(args.search.toLowerCase())
-        )
-          continue
-        // Candidate filtering uses automatic target rules, including collections created after discovery.
-        const tags =
-          override.tags ??
-          prep.collections
-            .filter(
-              (c) =>
-                c.selected && c.approved && summary.collections.includes(c.key),
-            )
-            .flatMap((c) => c.tags)
-        if (plan && !matchesCollection(tags, plan)) continue
-        const product = await getJson<CatalogProduct>(
-          productPath(op.root, summary.handle),
-        )
-        if (!product) continue
-        const prepared = prepareProduct(product, prep.collections, override)
-        if (
-          args.onlyErrors &&
-          !prepared.errors.length &&
-          prepared.jsonStatus === "complete" &&
-          prepared.htmlStatus === "complete"
-        )
-          continue
-        if (
-          args.onlyIssues &&
-          (prepared.reviewed ||
-            (!prepared.errors.length && !prepared.warnings.length))
-        )
-          continue
-        rows.push({
-          handle: prepared.handle,
-          title: prepared.title,
-          url: prepared.url,
-          errors: prepared.errors,
-          image: prepared.images[0]?.url ?? null,
-          variants: prepared.variants.length,
-          tags: prepared.tags,
-          collections: prepared.collections,
-          jsonStatus: prepared.jsonStatus,
-          htmlStatus: prepared.htmlStatus,
-          issues: prepared.errors.length + prepared.warnings.length,
-          excluded: prepared.excluded,
-          reviewed: prepared.reviewed,
-        })
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    rows: import("./catalogImport/workspaceModel").WorkspaceRow[]
+    cursor: string | null
+    scanned: number
+  }> => {
+    return measureReads("products", async () => {
+      const op = await authorized(ctx, args.id)
+      if (op.storageMode === "convex") {
+        const page = await ctx.runQuery(api.catalogWorkspace.products, args)
+        return {
+          rows: JSON.parse(
+            page.json,
+          ) as import("./catalogImport/workspaceModel").WorkspaceRow[],
+          cursor: page.cursor,
+          scanned: page.scanned,
+        }
       }
-      cursor = listing.cursor
-      scanned += listing.keys.length
-    } while (cursor && rows.length < 50 && scanned < 500)
-    return { rows, cursor: cursor ?? null, scanned }
+      const prep = await currentPreparation(ctx, op)
+      let cursor = args.cursor
+      let scanned = 0
+      const rows = []
+      const plan = prep.collections.find((c) => c.key === args.collection)
+      const overrideCache = new Map<string, Record<string, ProductOverride>>()
+      do {
+        const listing = await listKeys(
+          `${op.root}/summaries/`,
+          cursor,
+          50 - rows.length,
+        )
+        const summaries = await Promise.all(
+          listing.keys.map((key) =>
+            getJson<{
+              handle: string
+              title: string
+              collections: string[]
+              partial?: boolean
+            }>(key),
+          ),
+        )
+        for (const summary of summaries) {
+          if (!summary) continue
+          if (args.onlyErrors && summary.partial === false) continue
+          const bucket = String(bucketFor(summary.handle))
+          const overrideKey = prep.overrideBuckets?.[bucket]
+          if (overrideKey && !overrideCache.has(bucket))
+            overrideCache.set(
+              bucket,
+              (await getJson<Record<string, ProductOverride>>(overrideKey)) ??
+                {},
+            )
+          const override = overrideCache.get(bucket)?.[summary.handle] ?? {}
+          if (
+            args.search &&
+            !(override.title ?? summary.title)
+              .toLowerCase()
+              .includes(args.search.toLowerCase())
+          )
+            continue
+          // Candidate filtering uses automatic target rules, including collections created after discovery.
+          const tags =
+            override.tags ??
+            prep.collections
+              .filter(
+                (c) =>
+                  c.selected &&
+                  c.approved &&
+                  summary.collections.includes(c.key),
+              )
+              .flatMap((c) => c.tags)
+          if (plan && !matchesCollection(tags, plan)) continue
+          const product = await getJson<CatalogProduct>(
+            productPath(op.root, summary.handle),
+          )
+          if (!product) continue
+          const prepared = prepareProduct(product, prep.collections, override)
+          if (
+            args.onlyErrors &&
+            !prepared.errors.length &&
+            prepared.jsonStatus === "complete" &&
+            prepared.htmlStatus === "complete"
+          )
+            continue
+          if (
+            args.onlyIssues &&
+            (prepared.reviewed ||
+              (!prepared.errors.length && !prepared.warnings.length))
+          )
+            continue
+          rows.push({
+            handle: prepared.handle,
+            title: prepared.title,
+            url: prepared.url,
+            errors: prepared.errors,
+            image: prepared.images[0]?.url ?? null,
+            variants: prepared.variants.length,
+            tags: prepared.tags,
+            collections: prepared.collections,
+            jsonStatus: prepared.jsonStatus,
+            htmlStatus: prepared.htmlStatus,
+            issues: prepared.errors.length + prepared.warnings.length,
+            excluded: prepared.excluded,
+            reviewed: prepared.reviewed,
+          })
+        }
+        cursor = listing.cursor
+        scanned += listing.keys.length
+      } while (cursor && rows.length < 50 && scanned < 500)
+      return { rows, cursor: cursor ?? null, scanned }
+    })
   },
 })
 export const product = action({
   args: { id: v.id("catalogOperations"), handle: v.string() },
-  handler: async (ctx, args) => {
-    const op = await authorized(ctx, args.id)
-    const prep = await preparation(op)
-    const product = await getJson<CatalogProduct>(
-      productPath(op.root, args.handle),
-    )
-    if (!product) throw new Error("Produit introuvable.")
-    return prepareProduct(
-      product,
-      prep.collections,
-      await readOverride(prep, args.handle),
-    )
+  handler: async (ctx, args): Promise<PreparedProduct> => {
+    return measureReads("product", async () => {
+      const op = await authorized(ctx, args.id)
+      if (op.storageMode === "convex")
+        return JSON.parse(
+          await ctx.runQuery(api.catalogWorkspace.product, args),
+        ) as PreparedProduct
+      const prep = await currentPreparation(ctx, op)
+      const product = await currentProduct(ctx, op, args.handle)
+      if (!product) throw new Error("Produit introuvable.")
+      return prepareProduct(
+        product,
+        prep.collections,
+        await readOverride(prep, args.handle),
+      )
+    })
   },
 })
 export const saveProduct = action({
@@ -309,6 +402,16 @@ export const saveProduct = action({
     )
       throw new Error("Tags trop nombreux ou trop longs.")
     const owner = await requireUserId(ctx)
+    const current = await authorized(ctx, args.id)
+    if (current.storageMode === "convex")
+      return ctx.runMutation(internal.catalogWorkspace.saveProduct, {
+        id: args.id,
+        owner,
+        revision: args.revision,
+        handle: args.handle,
+        patch: JSON.stringify(args.patch),
+        request: digest(JSON.stringify(args)),
+      })
     const token = randomUUID()
     const op = await ctx.runMutation(internal.catalogImport.editLock, {
       id: args.id,
@@ -319,7 +422,7 @@ export const saveProduct = action({
     try {
       if (!(await getJson(productPath(op.root, args.handle))))
         throw new Error("Produit introuvable.")
-      const prep = await preparation(op)
+      const prep = await currentPreparation(ctx, op)
       const bucket = String(bucketFor(args.handle))
       const overrides = prep.overrideBuckets?.[bucket]
         ? ((await getJson<Record<string, ProductOverride>>(
@@ -355,7 +458,7 @@ export const proposeRules = action({
   args: { id: v.id("catalogOperations"), offset: v.number() },
   handler: async (ctx, args) => {
     const op = await authorized(ctx, args.id)
-    const prep = await preparation(op)
+    const prep = await currentPreparation(ctx, op)
     const offset = Math.max(0, Math.floor(args.offset))
     const plans = prep.collections.slice(offset, offset + 40)
     await ctx.runMutation(internal.catalogImport.reserveAi, {
@@ -380,10 +483,8 @@ export const proposeProduct = action({
   args: { id: v.id("catalogOperations"), handle: v.string() },
   handler: async (ctx, args) => {
     const op = await authorized(ctx, args.id)
-    const prep = await preparation(op)
-    const product = await getJson<CatalogProduct>(
-      productPath(op.root, args.handle),
-    )
+    const prep = await currentPreparation(ctx, op)
+    const product = await currentProduct(ctx, op, args.handle)
     if (!product) throw new Error("Produit introuvable.")
     await ctx.runMutation(internal.catalogImport.reserveAi, {
       id: op._id,
@@ -433,7 +534,7 @@ export const retryProduct = action({
   args: { id: v.id("catalogOperations"), handle: v.string() },
   handler: async (ctx, args) => {
     const op = await authorized(ctx, args.id)
-    const p = await getJson<CatalogProduct>(productPath(op.root, args.handle))
+    const p = await currentProduct(ctx, op, args.handle)
     if (!p) throw new Error("Produit introuvable.")
     await ctx.runMutation(internal.catalogImport.enqueue, {
       id: op._id,
@@ -476,7 +577,7 @@ export const startImport = action({
   },
   handler: async (ctx, args): Promise<Id<"catalogOperations">> => {
     const op = await authorized(ctx, args.id)
-    const prep = await preparation(op)
+    const prep = await currentPreparation(ctx, op)
     if (!op.finalKey)
       throw new Error("Générez l’export final avant de lancer un import.")
     const selected = prep.collections.filter((c) =>
@@ -512,6 +613,46 @@ export const work = internalAction({
     } | null = await ctx.runMutation(internal.catalogImport.claim, { id })
     if (!claim) return
     const { op, task } = claim
+    const workspace: WorkspaceIO | undefined =
+      op.storageMode === "convex"
+        ? {
+            preparation: () => currentPreparation(ctx, op),
+            previous: async (product) =>
+              ctx.runQuery(internal.catalogWorkspace.previousCollected, {
+                id: op._id,
+                handle: product.handle,
+                sourceId: product.sourceId,
+              }),
+            collected: async (product) => {
+              await ctx.runMutation(internal.catalogWorkspace.collected, {
+                id: op._id,
+                taskId: task._id,
+                generation: op.generation,
+                json: JSON.stringify(product),
+                fingerprint: digest(JSON.stringify(product)),
+              })
+            },
+            collection: async (collection, detail) => {
+              await ctx.runMutation(
+                internal.catalogWorkspace.collectStructure,
+                {
+                  id: op._id,
+                  taskId: task._id,
+                  generation: op.generation,
+                  collection,
+                  json: JSON.stringify(detail),
+                },
+              )
+            },
+            page: async (cursor) =>
+              ctx.runQuery(internal.catalogWorkspace.snapshotPage, {
+                id: op._id,
+                revision: op.revision,
+                generation: op.generation,
+                cursor,
+              }),
+          }
+        : undefined
     const receipt = `${op.root}/receipts/${safeKey(task.key)}/${digest(task.inputKey)}.json`
     try {
       let outcome = await getJson<Outcome>(receipt)
@@ -519,13 +660,28 @@ export const work = internalAction({
         outcome = await withCatalogWrites(op.root, op.generation, () =>
           op.type === "import"
             ? runImportTask(ctx, op, task)
-            : runExportTask(op, task),
+            : runExportTask(op, task, workspace),
         )
         // A poll without a checkpoint must observe Shopify again next time, not replay an old pending result.
         if (outcome.complete || outcome.inputKey)
           await withCatalogWrites(op.root, op.generation, () =>
             putJson(receipt, outcome),
           )
+      }
+      if (
+        op.storageMode === "convex" &&
+        task.kind === "menu" &&
+        outcome.preparationKey
+      ) {
+        const prep = await getJson<Preparation>(outcome.preparationKey)
+        if (!prep) throw new Error("Préparation initiale absente.")
+        await ctx.runMutation(internal.catalogWorkspace.initialize, {
+          id: op._id,
+          taskId: task._id,
+          generation: op.generation,
+          key: outcome.preparationKey,
+          preparation: JSON.stringify(prep),
+        })
       }
       await ctx.runMutation(internal.catalogImport.settle, {
         id,

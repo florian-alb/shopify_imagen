@@ -2,10 +2,10 @@ import { useState } from "react"
 import { Link } from "@tanstack/react-router"
 import { useAction, useMutation, useQuery } from "convex/react"
 import { ArrowLeft, Download, Pause, Play, RefreshCw } from "lucide-react"
-import { api, type Id } from "@/lib/convex"
+import { api, type Id, type Doc } from "@/lib/convex"
 import { PageHeader, pageContentClass } from "@/components/page"
 import { Button } from "@/components/ui/button"
-import { useCatalogRemote } from "../hooks/use-catalog-remote"
+import { useCatalogStructure } from "../hooks/use-catalog-data"
 import { CatalogError, OperationBadge, Working } from "./CatalogShared"
 import { CatalogStructure } from "./CatalogStructure"
 import { CatalogProducts } from "./CatalogProducts"
@@ -17,11 +17,13 @@ import { number, phaseLabels } from "../lib/labels"
 type Tab = "structure" | "products" | "errors" | "activity" | "import"
 export function CatalogWorkspace({ id }: { id: Id<"catalogOperations"> }) {
   const op = useQuery(api.catalogImport.get, { id })
-  const read = useAction(api.catalogImportActions.structure)
-  const structure = useCatalogRemote(
-    () => read({ id }),
-    `${id}:${op?.revision}:${op?.status}`,
-    Boolean(op?.preparationKey),
+  const structure = useCatalogStructure(op)
+  const state = useQuery(api.catalogWorkspace.state, op ? { id } : "skip") as
+    | Doc<"catalogWorkspaces">
+    | null
+    | undefined
+  const retryClassification = useMutation(
+    api.catalogWorkspace.retryClassification,
   )
   const control = useMutation(api.catalogImport.control)
   const finalize = useAction(api.catalogImportActions.finalize)
@@ -59,7 +61,7 @@ export function CatalogWorkspace({ id }: { id: Id<"catalogOperations"> }) {
         Tous les exports
       </Link>
       <PageHeader
-        title={new URL(op.origin).hostname}
+        title={`${new URL(op.origin).hostname}${op.rehearsal ? " · Catalogue de test" : ""}`}
         eyebrow={
           op.type === "import" ? "Import Shopify" : "Préparation du catalogue"
         }
@@ -154,6 +156,31 @@ export function CatalogWorkspace({ id }: { id: Id<"catalogOperations"> }) {
           </span>
         </div>
       </PageHeader>
+      {state?.pendingVersion !== undefined && (
+        <p
+          role="status"
+          className="mb-4 rounded-md border bg-muted/30 p-3 text-sm"
+        >
+          Mise à jour des classements · {state.validated} produits traités. La
+          dernière version cohérente reste affichée.
+        </p>
+      )}
+      {state?.error && (
+        <CatalogError
+          message={state.error}
+          retry={
+            state.mode === "active"
+              ? () => void run(() => retryClassification({ id }))
+              : undefined
+          }
+        />
+      )}
+      {op.storageMode === "migration" && (
+        <p role="status" className="mb-4 text-sm">
+          Migration du catalogue en cours. La consultation reste disponible ;
+          les modifications reprendront après validation.
+        </p>
+      )}
       {error && <CatalogError message={error} />}
       {op.error && <CatalogError message={op.error} />}
       {op.type === "export" && (op.failed > 0 || op.status === "partial") && (

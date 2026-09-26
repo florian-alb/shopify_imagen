@@ -14,6 +14,30 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 import { AsyncLocalStorage } from "node:async_hooks"
 
+const reads = new AsyncLocalStorage<{
+  gets: number
+  lists: number
+  bytes: number
+  ioMs: number
+}>()
+export async function measureReads<T>(name: string, run: () => Promise<T>) {
+  const metrics = { gets: 0, lists: 0, bytes: 0, ioMs: 0 }
+  const started = performance.now()
+  return reads.run(metrics, async () => {
+    try {
+      return await run()
+    } finally {
+      console.info(
+        "catalog-read",
+        JSON.stringify({
+          name,
+          ...metrics,
+          totalMs: Math.round(performance.now() - started),
+        }),
+      )
+    }
+  })
+}
 const writes = new AsyncLocalStorage<{ root: string; generation: number }>()
 export function withCatalogWrites<T>(
   root: string,
@@ -23,6 +47,9 @@ export function withCatalogWrites<T>(
   return writes.run({ root, generation }, run)
 }
 
+let cachedConfig:
+  | { signature: string; bucket: string; client: S3Client }
+  | undefined
 function config() {
   const account = process.env.R2_ACCOUNT_ID
   const bucket = process.env.CATALOG_R2_BUCKET
@@ -36,7 +63,16 @@ function config() {
     throw new Error(
       "Le bucket des catalogues doit être distinct du bucket public des images.",
     )
-  return {
+  const signature = JSON.stringify([
+    account,
+    bucket,
+    accessKeyId,
+    secretAccessKey,
+  ])
+  if (cachedConfig?.signature === signature) return cachedConfig
+  cachedConfig?.client.destroy()
+  cachedConfig = {
+    signature,
     bucket,
     client: new S3Client({
       region: "auto",
@@ -44,6 +80,7 @@ function config() {
       credentials: { accessKeyId, secretAccessKey },
     }),
   }
+  return cachedConfig
 }
 export function rootKey(owner: string, operation: string) {
   return `catalog-exports/${owner}/${operation}`
@@ -99,6 +136,9 @@ export async function putJson(key: string, value: unknown) {
   await putText(key, JSON.stringify(value))
 }
 export async function getText(key: string): Promise<string | null> {
+  const metrics = reads.getStore()
+  const started = performance.now()
+  if (metrics) metrics.gets++
   const { client, bucket } = config()
   try {
     const response = await client.send(
@@ -106,7 +146,9 @@ export async function getText(key: string): Promise<string | null> {
     )
     if ((response.ContentLength ?? 0) > 32 * 1024 * 1024)
       throw new Error("Objet R2 trop volumineux pour une lecture unitaire.")
-    return await response.Body!.transformToString()
+    const body = await response.Body!.transformToString()
+    if (metrics) metrics.bytes += Buffer.byteLength(body)
+    return body
   } catch (error) {
     if (
       error instanceof Error &&
@@ -114,6 +156,8 @@ export async function getText(key: string): Promise<string | null> {
     )
       return null
     throw error
+  } finally {
+    if (metrics) metrics.ioMs += performance.now() - started
   }
 }
 export async function getJson<T>(key: string): Promise<T | null> {
@@ -121,6 +165,9 @@ export async function getJson<T>(key: string): Promise<T | null> {
   return raw === null ? null : (JSON.parse(raw) as T)
 }
 export async function listKeys(prefix: string, cursor?: string, limit = 100) {
+  const metrics = reads.getStore()
+  const started = performance.now()
+  if (metrics) metrics.lists++
   const { client, bucket } = config()
   const r = await client.send(
     new ListObjectsV2Command({
@@ -130,6 +177,7 @@ export async function listKeys(prefix: string, cursor?: string, limit = 100) {
       MaxKeys: Math.min(1000, limit),
     }),
   )
+  if (metrics) metrics.ioMs += performance.now() - started
   return {
     keys: (r.Contents ?? []).flatMap((v) => (v.Key ? [v.Key] : [])),
     cursor: r.IsTruncated ? r.NextContinuationToken : undefined,
