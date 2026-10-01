@@ -6,6 +6,7 @@ const appFiles = findFiles(join(root, "app"), /\.(ts|tsx)$/);
 
 const hookToKind = {
   Query: "query",
+  PaginatedQuery: "query",
   Mutation: "mutation",
   Action: "action",
 };
@@ -15,7 +16,7 @@ const references = new Map();
 for (const file of appFiles) {
   const source = readFileSync(file, "utf8");
   const hookPattern =
-    /use(Query|Mutation|Action)\s*\(\s*api\.([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)/gs;
+    /use(Query|PaginatedQuery|Mutation|Action)\s*\(\s*api\.([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)/gs;
   for (const match of source.matchAll(hookPattern)) {
     const [, hook, moduleName, functionName] = match;
     const key = `${moduleName}.${functionName}`;

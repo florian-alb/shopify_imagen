@@ -1,3 +1,5 @@
+> Historique du moteur remplacé. Mesures et travaux conservés ; ils ne qualifient pas la refonte du 1er octobre 2026. Voir [qualification courante](catalog-refonte-qualification.md).
+
 # Collecte et import de catalogue — diagnostic et plan d’optimisation
 
 Date : 25 septembre 2026. Document de passation pour une prochaine session Codex.
@@ -328,3 +330,7 @@ Aucun nouveau service payant n’est nécessaire. Moins de soumissions, de polli
 - Préserver les produits en brouillon, les tags manuels, les identités distantes, l’absence de doublons, les règles des collections et le snapshot source figé. Lire aussi [le contexte de réparation des identités](catalog-identity-repair.md) ; ne pas réexécuter sa procédure historique.
 - Qualifier séparément première création et réimport de produits existants ; leurs chemins et coûts diffèrent. Un réimport rapide ne prouve pas le débit de première création.
 - Une qualification réelle écrit dans Shopify, même si le backend est en dev : demander une autorisation spécifique pour la boutique et l’essai envisagés si elle n’est pas déjà fournie dans la session d’implémentation. Le présent ajout au CR n’autorise aucune exécution d’import.
+
+## 12. Suite d’implémentation du 26 septembre 2026
+
+Ce diagnostic demeure une archive du 25 septembre. L’implémentation, les essais froids isolés en dev, les simulations d’import et leurs limites sont décrits dans [catalog-performance-qualification.md](catalog-performance-qualification.md). La configuration courante et les garanties de compatibilité sont dans [catalog-import.md](catalog-import.md#performance-lots-et-exploitation-26-septembre-2026). Ne pas convertir les projections de ce document en gains mesurés.

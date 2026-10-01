@@ -5,7 +5,10 @@ import {
   type ShopifyCredentials,
 } from "../shopScope";
 
+export type ShopifyCost = { requestedQueryCost?: number; actualQueryCost?: number; throttleStatus?: { maximumAvailable: number; currentlyAvailable: number; restoreRate: number } };
+
 type GraphQlResponse<T> = {
+  extensions?: { cost?: ShopifyCost };
   data?: T;
   errors?: Array<{ message: string }>;
 };
@@ -88,6 +91,7 @@ export async function shopifyGraphql<T>(
   variables: Record<string, unknown>,
   accessToken?: string,
   credentials?: ShopifyCredentials,
+  options?: { onCost?: (cost: ShopifyCost) => void; timeoutMs?: number },
 ) {
   const domain = normalizeShopDomain(
     credentials?.domain ?? env("SHOPIFY_SHOP_DOMAIN"),
@@ -104,6 +108,7 @@ export async function shopifyGraphql<T>(
         "X-Shopify-Access-Token": token,
       },
       body: JSON.stringify({ query, variables }),
+      ...(options?.timeoutMs ? { signal: AbortSignal.timeout(options.timeoutMs) } : {}),
     });
   } catch (error) {
     throw new ConvexError(
@@ -116,6 +121,8 @@ export async function shopifyGraphql<T>(
   const payload = (await response.json().catch(() => null)) as
     | GraphQlResponse<T>
     | null;
+
+  if (payload?.extensions?.cost) options?.onCost?.(payload.extensions.cost);
 
   if (!response.ok) {
     const details = payload?.errors?.map((error) => error.message).join("; ");

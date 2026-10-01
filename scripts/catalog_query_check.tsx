@@ -36,8 +36,8 @@ const client = {
 function Fixture({ id }: { id: string }) {
   // Each access returns a new api proxy, just like the actual catalogue components.
   const result = useCatalogQuery(
-    api.catalogWorkspace.structure,
-    { id: id as Id<"catalogOperations"> },
+    api.catalogues.get,
+    { id: id as Id<"catalogues"> },
     "owner",
   )
   return <p>{result.value}</p>

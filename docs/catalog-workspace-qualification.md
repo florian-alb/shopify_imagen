@@ -1,3 +1,5 @@
+> Historique du moteur remplacé. Mesures et travaux conservés ; ils ne qualifient pas la refonte du 1er octobre 2026. Voir [qualification courante](catalog-refonte-qualification.md).
+
 # Qualification du catalogue de travail — 25 septembre 2026
 
 ## Périmètre et état
@@ -73,3 +75,7 @@ rtk proxy npx vite --config scripts/vite.catalog-query.config.ts
 ```
 
 Ouvrir `http://127.0.0.1:3001/scripts/catalog_query_check.html` : les cinq contrôles doivent afficher `PASS`. Le serveur de test est distinct du routeur de l’application sur le port 3000.
+
+## Extension du 26 septembre : collecte et import
+
+Les essais et optimisations de collecte/import sont consignés séparément dans [catalog-performance-qualification.md](catalog-performance-qualification.md). Les mesures ci-dessus concernent la lecture et la migration du catalogue de travail ; elles ne constituent pas une référence de débit de scraping ou d’import Shopify.
