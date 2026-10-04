@@ -46,6 +46,7 @@ function ProductsPageForShop({ search }: { search: ProductSearch }) {
     facets,
     imageTypes,
     imageTypeSelection,
+    variants,
     loaded,
     page,
     pageSize,
@@ -177,6 +178,7 @@ function ProductsPageForShop({ search }: { search: ProductSearch }) {
           onOpenChange={setChooserOpen}
           types={imageTypes}
           selectedTypes={imageTypeSelection.selectedTypes}
+          variants={variants}
           busy={creatingJob}
           title="Types d'images"
           description={`${selected.size} produit${

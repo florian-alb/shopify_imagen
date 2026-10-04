@@ -2,6 +2,8 @@ import { authTables } from "@convex-dev/auth/server";
 import { defineSchema, defineTable } from "convex/server";
 import { catalogueTables } from "./catalogue/schema";
 import { v } from "convex/values";
+import { promptConditionValidator } from "./promptConditions";
+import { generationTargetValidator, promptBranchValidator, variantSelectionValidator } from "./generationTargets";
 
 const generationStatus = v.union(
   v.literal("not_started"),
@@ -640,6 +642,8 @@ export default defineSchema({
     imageType: v.string(),
     label: v.string(),
     content: v.string(),
+    condition: v.optional(promptConditionValidator),
+    alternativeContent: v.optional(v.string()),
     defaultContent: v.string(),
     isActive: v.boolean(),
     // When true, this template is pre-checked in the generation chooser.
@@ -697,6 +701,7 @@ export default defineSchema({
     imageModel: v.optional(v.string()),
     productIds: v.array(v.id("products")),
     selectedImageTypes: v.array(v.string()),
+    variantSelection: v.optional(variantSelectionValidator),
     forceRegenerate: v.boolean(),
     totalTasks: v.number(),
     completedTasks: v.number(),
@@ -754,6 +759,8 @@ export default defineSchema({
     visualGroupKey: v.optional(v.union(v.string(), v.null())),
     visualGroupLabel: v.optional(v.union(v.string(), v.null())),
     imageType: v.string(),
+    generationTarget: v.optional(generationTargetValidator),
+    promptBranch: v.optional(promptBranchValidator),
     imageProvider: v.optional(
       v.union(v.literal("openai"), v.literal("gemini")),
     ),

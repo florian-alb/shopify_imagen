@@ -1,8 +1,14 @@
+import type { ConditionalPromptDraft } from "./conditionalPromptDraft";
 import type { Doc } from "@/lib/convex";
 
 export const supportedVariables = [
   "{{PRODUCT_TITLE}}",
   "{{PRODUCT_HANDLE}}",
+  "{{VARIANT_TITLE}}",
+  "{{VARIANT_OPTIONS}}",
+  "{{OPTION_VALUE:Taille}}",
+  "{{VISUAL_GROUP_LABEL}}",
+  "{{VISUAL_GROUP_VALUES}}",
   "{{IMAGE_TYPE}}",
   "{{PROMPT_KIND}}",
   "{{TARGET_AUDIENCE}}",
@@ -47,6 +53,7 @@ export type PromptAiDraft = {
 };
 
 export type NewPromptDraft = {
+  conditional?: ConditionalPromptDraft;
   imageType: string;
   content: string;
   promptKind: string;

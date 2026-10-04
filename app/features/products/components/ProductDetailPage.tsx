@@ -252,6 +252,7 @@ export function ProductDetailPage({
         onOpenChange={generation.setOpen}
         types={viewModel.availableTypes}
         selectedTypes={generation.selectedTypes}
+        variants={generation.variants}
         visualGroupsData={visualGroupsData}
         selectedGroupIds={generation.selectedGroupIds}
         focusedGroupId={generation.focusedGroupId}

@@ -17,6 +17,7 @@ import type {
 } from "../types";
 import { useBulkImageReorder } from "./useBulkImageReorder";
 import { useBulkImageTransform } from "./useBulkImageTransform";
+import { useVariantGenerationSelection } from "./useVariantGenerationSelection";
 import { useImageTypeSelection } from "./useImageTypeSelection";
 
 export function useProductsListPage(search: ProductSearch) {
@@ -99,6 +100,11 @@ export function useProductsListPage(search: ProductSearch) {
     [prompts],
   );
   const imageTypeSelection = useImageTypeSelection(imageTypes);
+  const variants = useVariantGenerationSelection({
+    open: chooserOpen,
+    productIds: selectedProductIds,
+    selectedImageTypes: Array.from(imageTypeSelection.selectedTypes),
+  });
   const loaded = productPage !== undefined && facets !== undefined;
   const allVisibleSelected = products.length
     ? products.every((product) => selected.has(product._id))
@@ -168,11 +174,13 @@ export function useProductsListPage(search: ProductSearch) {
 
   function openChooser() {
     imageTypeSelection.resetSelection();
+    variants.resetVariantSelection();
     setChooserOpen(true);
   }
 
   function openChooserForProduct(product: ProductListItem) {
     imageTypeSelection.resetSelection();
+    variants.resetVariantSelection();
     setSelected(new Set([product._id]));
     setChooserOpen(true);
   }
@@ -185,6 +193,7 @@ export function useProductsListPage(search: ProductSearch) {
       const jobId = await createJob({
         productIds: Array.from(selected),
         selectedImageTypes: Array.from(imageTypeSelection.selectedTypes),
+        variantSelection: variants.variantSelection,
         forceRegenerate: true,
       });
       setChooserOpen(false);
@@ -210,6 +219,7 @@ export function useProductsListPage(search: ProductSearch) {
   return {
     allVisibleSelected,
     bulkLocksByProductId,
+    variants,
     chooserOpen,
     creatingJob,
     facets,

@@ -1,13 +1,13 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { requireUserId } from "./authz";
+import { promptConditionValidator, validateConditionalPrompt } from "./promptConditions";
 import {
   backgroundConfigArgValidators,
   backgroundConfigFrom,
   hasBackgroundConfigInput,
 } from "./background";
 import {
-  resolvePromptRuntime,
   validatePromptKind,
   validateReferenceImageCount,
 } from "./promptRuntime";
@@ -172,12 +172,15 @@ export const create = mutation({
     imageType: v.string(),
     label: v.string(),
     content: v.string(),
+    condition: v.optional(promptConditionValidator),
+    alternativeContent: v.optional(v.string()),
     isPreset: v.optional(v.boolean()),
     promptKind: v.optional(v.string()),
     useVibeAnalysis: v.optional(v.boolean()),
     referenceImageCount: v.optional(v.number()),
     ...backgroundConfigArgValidators,
   },
+  returns: v.id("promptTemplates"),
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
     const shop = await ensureActiveShop(ctx, userId);
@@ -185,6 +188,7 @@ export const create = mutation({
     const imageType = args.imageType.trim();
     const label = args.label.trim();
     const content = args.content.trim();
+    validateConditionalPrompt(args.condition, args.alternativeContent);
     if (!imageType || !label || !content)
       throw new Error("Image type, label, and content are required.");
     const promptKind = validatePromptKind(args.promptKind);
@@ -209,6 +213,7 @@ export const create = mutation({
       imageType,
       label,
       content,
+      ...(args.condition ? { condition: args.condition, alternativeContent: args.alternativeContent!.trim() } : {}),
       defaultContent: content,
       isActive: true,
       isPreset: args.isPreset ?? false,
@@ -256,11 +261,14 @@ export const update = mutation({
     promptId: v.id("promptTemplates"),
     imageType: v.optional(v.string()),
     content: v.string(),
+    condition: v.optional(v.union(promptConditionValidator, v.null())),
+    alternativeContent: v.optional(v.string()),
     promptKind: v.optional(v.string()),
     useVibeAnalysis: v.optional(v.boolean()),
     referenceImageCount: v.optional(v.number()),
     ...backgroundConfigArgValidators,
   },
+  returns: v.null(),
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
     const shop = await ensureActiveShop(ctx, userId);
@@ -271,6 +279,10 @@ export const update = mutation({
     );
     const imageType = args.imageType?.trim() ?? prompt.imageType;
     const content = args.content.trim();
+    const conditionalChanged = Object.prototype.hasOwnProperty.call(args, "condition");
+    const condition = conditionalChanged ? args.condition : prompt.condition;
+    const alternativeContent = args.alternativeContent ?? prompt.alternativeContent;
+    validateConditionalPrompt(condition, alternativeContent);
     const shouldPatchPromptKind = Object.prototype.hasOwnProperty.call(
       args,
       "promptKind",
@@ -307,6 +319,9 @@ export const update = mutation({
       imageType,
       label: imageType,
       content,
+      ...(conditionalChanged || args.alternativeContent !== undefined
+        ? { condition: condition ?? undefined, alternativeContent: condition ? alternativeContent!.trim() : undefined }
+        : {}),
       ...(shouldPatchPromptKind ? { promptKind } : {}),
       ...(args.useVibeAnalysis !== undefined
         ? { useVibeAnalysis: args.useVibeAnalysis }

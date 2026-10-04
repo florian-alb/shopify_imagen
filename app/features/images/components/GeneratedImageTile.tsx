@@ -58,7 +58,10 @@ export function GeneratedImageTile({
     !retryActive && image.retryError && image.retryError !== image.error
       ? image.retryError
       : null;
-  const imageLabel = [image.visualGroupLabel, image.imageType]
+  const imageLabel = [
+    image.generationTarget?.variantTitle || image.visualGroupLabel,
+    image.imageType,
+  ]
     .filter(Boolean)
     .join(" · ");
   const reviewable = isReviewable(image);
@@ -109,7 +112,7 @@ export function GeneratedImageTile({
         <Button
           variant="outline"
           size="icon-sm"
-          aria-label={`Retoucher ${image.imageType}`}
+          aria-label={`Retoucher ${imageLabel}`}
           title="Retoucher"
           disabled={!image.storageUrl}
           onClick={onRetouch}
@@ -122,7 +125,7 @@ export function GeneratedImageTile({
         <Button
           variant="destructive"
           size="icon-sm"
-          aria-label="Delete image"
+          aria-label={`Delete ${imageLabel}`}
           onClick={onDelete}
           className="absolute top-1.5 right-1.5 bg-background/80 opacity-0 backdrop-blur-sm transition group-hover:opacity-100 focus-visible:opacity-100"
         >
@@ -136,6 +139,11 @@ export function GeneratedImageTile({
           </p>
           <ImageStateBadge image={image} />
         </div>
+        {image.promptBranch && image.promptBranch !== "main" ? (
+          <Badge variant="outline" className="w-fit text-[0.65rem]">
+            {image.promptBranch === "if_true" ? "Condition vraie" : "Sinon"}
+          </Badge>
+        ) : null}
         {image.retouchSourceImageId ? (
           <Badge variant="outline" className="w-fit text-[0.65rem]">
             Retouche
@@ -153,17 +161,13 @@ export function GeneratedImageTile({
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
-                aria-label={`Retry ${image.imageType}`}
+                aria-label={`Retry ${imageLabel}`}
                 variant="outline"
                 size="icon-sm"
                 disabled={busy}
                 onClick={onRetry}
               >
-                {busy ? (
-                  <Loader2 className="animate-spin" />
-                ) : (
-                  <RefreshCw />
-                )}
+                {busy ? <Loader2 className="animate-spin" /> : <RefreshCw />}
               </Button>
             </TooltipTrigger>
             <TooltipContent>retry</TooltipContent>
@@ -179,7 +183,7 @@ export function GeneratedImageTile({
             {showReviewActions && onReview ? (
               <>
                 <Button
-                  aria-label={`Approve ${image.imageType}`}
+                  aria-label={`Approve ${imageLabel}`}
                   title="Approve"
                   variant={
                     getReviewStatus(image) === "approved"
@@ -193,7 +197,7 @@ export function GeneratedImageTile({
                   <Check />
                 </Button>
                 <Button
-                  aria-label={`Reject ${image.imageType}`}
+                  aria-label={`Reject ${imageLabel}`}
                   title="Reject"
                   variant={
                     getReviewStatus(image) === "rejected"
@@ -210,7 +214,7 @@ export function GeneratedImageTile({
             ) : null}
             {showRegenerateAction && onRegenerate ? (
               <Button
-                aria-label={`Regenerate ${image.imageType}`}
+                aria-label={`Regenerate ${imageLabel}`}
                 title="Regenerate"
                 variant="outline"
                 size="icon-sm"
@@ -226,7 +230,7 @@ export function GeneratedImageTile({
             ) : null}
             {showInlineRetouchAction && onRetouch ? (
               <Button
-                aria-label={`Retoucher ${image.imageType}`}
+                aria-label={`Retoucher ${imageLabel}`}
                 title="Retoucher"
                 variant="outline"
                 size="icon-sm"
@@ -238,7 +242,7 @@ export function GeneratedImageTile({
             ) : null}
             {showInlineDeleteAction && onDelete ? (
               <Button
-                aria-label={`Delete ${image.imageType}`}
+                aria-label={`Delete ${imageLabel}`}
                 title="Delete"
                 variant="destructive"
                 size="icon-sm"

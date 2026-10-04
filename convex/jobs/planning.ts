@@ -1,4 +1,15 @@
 import type { Doc, Id } from "../_generated/dataModel";
+import type { GenerationTarget, VariantSelection } from "../generationTargets";
+import {
+  evaluatePromptCondition,
+  validateConditionalPrompt,
+} from "../promptConditions";
+import {
+  selectImageTargets,
+  type ImageTarget,
+  type VisualGroupTaskTarget,
+} from "./targets";
+export type { VisualGroupTaskTarget } from "./targets";
 import { backgroundConfigFrom, type BackgroundConfig } from "../background";
 import { compilePrompt, renderPrompt } from "../lib";
 import {
@@ -6,10 +17,7 @@ import {
   resolveModelReference,
   visualContextPromptVariables,
 } from "../productVisualContext";
-import {
-  resolvePromptRuntime,
-  type PromptKind,
-} from "../promptRuntime";
+import { resolvePromptRuntime, type PromptKind } from "../promptRuntime";
 import type {
   ModelReferenceKey,
   StoredModelReference,
@@ -22,6 +30,8 @@ export type PlannedImageTask = {
   visualGroupLabel: string | null;
   imageType: string;
   promptUsed: string;
+  generationTarget: GenerationTarget;
+  promptBranch: "main" | "if_true" | "otherwise";
   promptKind: PromptKind;
   modelReferenceKey: ModelReferenceKey | null;
   modelReferenceStorageId: Id<"_storage"> | null;
@@ -34,15 +44,6 @@ export type PlannedImageTask = {
   background: BackgroundConfig;
 };
 
-export type VisualGroupTaskTarget = {
-  productId: Id<"products">;
-  groupId: Id<"visualGroups">;
-  key: string;
-  label: string;
-  optionValues: Array<{ name: string; value: string }>;
-  referenceUrls: string[];
-};
-
 export function buildImageTasks(args: {
   products: Doc<"products">[];
   prompts: Doc<"promptTemplates">[];
@@ -51,6 +52,9 @@ export function buildImageTasks(args: {
   selectedImageTypes: string[];
   regenerationInstructions?: string;
   visualTargets?: VisualGroupTaskTarget[];
+  variantSelection?: VariantSelection;
+  separatedProductIds?: Id<"products">[];
+  restoredTarget?: ImageTarget;
 }) {
   const masterPrompt = args.promptSettings?.masterPrompt ?? "";
   const promptByType = new Map(
@@ -68,21 +72,14 @@ export function buildImageTasks(args: {
   const planned: PlannedImageTask[] = [];
   for (const product of args.products) {
     const visualContext = inferProductVisualContext(product);
-    const productVisualTargets = args.visualTargets?.filter(
-      (target) => target.productId === product._id,
-    );
-    const targets = productVisualTargets?.length
-      ? productVisualTargets
-      : [
-          {
-            productId: product._id,
-            groupId: null,
-            key: null,
-            label: null,
-            optionValues: [],
-            referenceUrls: referenceImageUrls(product),
-          },
-        ];
+    const targets = args.restoredTarget
+      ? [args.restoredTarget]
+      : selectImageTargets({
+          product,
+          visualTargets: args.visualTargets,
+          variantSelection: args.variantSelection,
+          separated: args.separatedProductIds?.includes(product._id),
+        });
 
     for (const target of targets) {
       for (const imageType of selectedImageTypes) {
@@ -96,22 +93,44 @@ export function buildImageTasks(args: {
           visualContext,
           runtime.promptKind,
         );
-        const compiledPrompt = compilePrompt(masterPrompt, template.content);
+        validateConditionalPrompt(
+          template.condition,
+          template.alternativeContent,
+        );
+        const promptBranch = template.condition
+          ? evaluatePromptCondition(template.condition, target.generationTarget)
+            ? "if_true"
+            : "otherwise"
+          : "main";
+        const compiledPrompt = compilePrompt(
+          masterPrompt,
+          promptBranch === "otherwise"
+            ? template.alternativeContent!
+            : template.content,
+        );
         const promptUsed = appendRegenerationInstructions(
-          appendVisualGroupContract(
-            renderPrompt(compiledPrompt, {
-              PRODUCT_TITLE: product.title,
-              PRODUCT_HANDLE: product.handle,
-              IMAGE_TYPE: imageType,
-              VISUAL_GROUP_LABEL: target.label ?? "",
-              VISUAL_GROUP_VALUES: target.optionValues
-                .map((option) => `${option.name}: ${option.value}`)
-                .join(", "),
-              ...visualContextPromptVariables(
-                visualContext,
-                runtime.promptKind,
-              ),
-            }),
+          appendTargetContract(
+            renderPrompt(
+              compiledPrompt,
+              {
+                PRODUCT_TITLE: target.generationTarget.productTitle,
+                PRODUCT_HANDLE: product.handle,
+                IMAGE_TYPE: imageType,
+                VARIANT_TITLE: target.generationTarget.variantTitle,
+                VARIANT_OPTIONS: target.generationTarget.selectedOptions
+                  .map((option) => `${option.name}: ${option.value}`)
+                  .join(", "),
+                VISUAL_GROUP_LABEL: target.label ?? "",
+                VISUAL_GROUP_VALUES: target.optionValues
+                  .map((option) => `${option.name}: ${option.value}`)
+                  .join(", "),
+                ...visualContextPromptVariables(
+                  visualContext,
+                  runtime.promptKind,
+                ),
+              },
+              target.generationTarget.selectedOptions,
+            ),
             target,
           ),
           args.regenerationInstructions,
@@ -127,6 +146,8 @@ export function buildImageTasks(args: {
           visualGroupLabel: target.label,
           imageType,
           promptUsed,
+          generationTarget: target.generationTarget,
+          promptBranch,
           promptKind: runtime.promptKind,
           modelReferenceKey: modelReference?.key ?? null,
           modelReferenceStorageId: modelReference?.storageId ?? null,
@@ -147,13 +168,13 @@ export function buildImageTasks(args: {
   return { planned, selectedImageTypes };
 }
 
-function appendVisualGroupContract(
-  prompt: string,
-  target: {
-    label: string | null;
-    optionValues: Array<{ name: string; value: string }>;
-  },
-) {
+function appendTargetContract(prompt: string, target: ImageTarget) {
+  if (target.generationTarget.kind === "variant") {
+    const options = target.generationTarget.selectedOptions
+      .map((option) => `${option.name}: ${option.value}`)
+      .join(", ");
+    prompt = `${prompt}\n\nGENERATION VARIANT:\nGenerate the product variant "${target.generationTarget.variantTitle}" (${options}). Match these selected option values; do not substitute another variant.`;
+  }
   if (!target.label) return prompt;
   const values = target.optionValues
     .map((option) => `${option.name}: ${option.value}`)
@@ -167,20 +188,10 @@ Generate only the "${target.label}" product variant (${values}). Preserve its ex
 function appendRegenerationInstructions(prompt: string, instructions?: string) {
   const correction = instructions?.trim();
   if (!correction) return prompt;
-return `${prompt}
+  return `${prompt}
 
 IMPORTANT CORRECTION FOR THIS REGENERATION:
 ${correction}
 
 Apply this correction with priority while preserving all other product details from the reference image and the instructions above.`;
-}
-
-function referenceImageUrls(product: Doc<"products">): string[] {
-  const candidates = [
-    product.featuredImageUrl,
-    ...product.currentShopifyImages.map(
-      (image) => (image as { url?: string } | null)?.url,
-    ),
-  ].filter((url): url is string => typeof url === "string" && url.length > 0);
-  return Array.from(new Set(candidates));
 }
