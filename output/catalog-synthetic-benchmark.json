@@ -1,0 +1,127 @@
+{
+  "environment": "convex-test, local, not network latency",
+  "report": [
+    {
+      "count": 1000,
+      "filters": {},
+      "p50Ms": 38.912667000000056,
+      "p95Ms": 117.70950000000005,
+      "scanned": 51,
+      "payloadBytes": 12705
+    },
+    {
+      "count": 1000,
+      "filters": {
+        "search": "aa"
+      },
+      "p50Ms": 41.29345799999987,
+      "p95Ms": 52.67166600000019,
+      "scanned": 51,
+      "payloadBytes": 12701
+    },
+    {
+      "count": 1000,
+      "filters": {
+        "collection": "small"
+      },
+      "p50Ms": 34.92100000000005,
+      "p95Ms": 79.29224999999997,
+      "scanned": 11,
+      "payloadBytes": 2839
+    },
+    {
+      "count": 1000,
+      "filters": {
+        "search": "rare"
+      },
+      "p50Ms": 137.73533300000008,
+      "p95Ms": 186.77125000000024,
+      "scanned": 11,
+      "payloadBytes": 2839
+    },
+    {
+      "count": 1000,
+      "filters": {
+        "onlyErrors": true
+      },
+      "p50Ms": 35.676290999999765,
+      "p95Ms": 38.04716700000017,
+      "scanned": 11,
+      "payloadBytes": 2839
+    },
+    {
+      "count": 1000,
+      "filters": {
+        "collection": "small",
+        "search": "rare",
+        "onlyErrors": true,
+        "onlyIssues": true
+      },
+      "p50Ms": 171.17083400000047,
+      "p95Ms": 226.82279199999994,
+      "scanned": 11,
+      "payloadBytes": 2839
+    },
+    {
+      "count": 10000,
+      "filters": {},
+      "p50Ms": 476.6370829999996,
+      "p95Ms": 720.4994580000002,
+      "scanned": 51,
+      "payloadBytes": 12705
+    },
+    {
+      "count": 10000,
+      "filters": {
+        "search": "aa"
+      },
+      "p50Ms": 520.6682499999988,
+      "p95Ms": 1163.9352500000005,
+      "scanned": 51,
+      "payloadBytes": 12701
+    },
+    {
+      "count": 10000,
+      "filters": {
+        "collection": "small"
+      },
+      "p50Ms": 419.09116599999834,
+      "p95Ms": 524.3990420000009,
+      "scanned": 51,
+      "payloadBytes": 12901
+    },
+    {
+      "count": 10000,
+      "filters": {
+        "search": "rare"
+      },
+      "p50Ms": 424.1040409999987,
+      "p95Ms": 477.7899580000012,
+      "scanned": 51,
+      "payloadBytes": 12901
+    },
+    {
+      "count": 10000,
+      "filters": {
+        "onlyErrors": true
+      },
+      "p50Ms": 387.06483300000036,
+      "p95Ms": 449.0152500000004,
+      "scanned": 51,
+      "payloadBytes": 12901
+    },
+    {
+      "count": 10000,
+      "filters": {
+        "collection": "small",
+        "search": "rare",
+        "onlyErrors": true,
+        "onlyIssues": true
+      },
+      "p50Ms": 382.6444579999952,
+      "p95Ms": 396.59783400000015,
+      "scanned": 51,
+      "payloadBytes": 12901
+    }
+  ]
+}

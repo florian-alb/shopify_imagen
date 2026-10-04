@@ -1,0 +1,20 @@
+{
+  "synthetic": true,
+  "network": false,
+  "products": 964,
+  "ceiling": 1000,
+  "existing": false,
+  "invocations": 195,
+  "submissions": [
+    964
+  ],
+  "graphqlCalls": 1931,
+  "verifies": 964,
+  "storageHelperCallsAndBytes": {
+    "reads": 3096,
+    "writes": 4153,
+    "lists": 97,
+    "readBytes": 37215329,
+    "writeBytes": 42874294
+  }
+}

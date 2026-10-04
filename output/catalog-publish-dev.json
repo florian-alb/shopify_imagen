@@ -1,0 +1,19 @@
+{
+  "deployment": "curious-greyhound-437",
+  "id": "q17317nba9s76hgmxhdeydsbrx8ezbdg",
+  "command": "publish",
+  "startedAt": "2026-09-25T12:19:35.130Z",
+  "products": 0,
+  "postings": 0,
+  "bytes": [],
+  "variants": [],
+  "batches": [],
+  "ready": false,
+  "result": null,
+  "finishedAt": "2026-09-25T12:19:37.030Z",
+  "sizeSummary": {
+    "p50": 0,
+    "p95": 0,
+    "max": 0
+  }
+}

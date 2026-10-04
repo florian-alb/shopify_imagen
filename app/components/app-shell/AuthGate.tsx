@@ -3,10 +3,11 @@ import { useLocation, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "convex/react";
 import { Loader2 } from "lucide-react";
 import type { ReactNode } from "react";
-import { useEffect } from "react";
+import { useEffect, useLayoutEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { api } from "../../../convex/_generated/api";
 import { AppShell } from "./AppShell";
+import { resetCatalogSession } from "@/features/catalog-import/hooks/use-catalog-query";
 import { LogoutButton } from "./LogoutButton";
 
 export function AuthGate({ children }: { children: ReactNode }) {
@@ -14,6 +15,9 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const access = useQuery(api.users.currentAccess);
   const location = useLocation();
   const navigate = useNavigate();
+  useLayoutEffect(() => {
+    resetCatalogSession(auth.isAuthenticated ? access?.userId ?? null : null);
+  }, [auth.isAuthenticated, access?.userId]);
   const isLogin = location.pathname === "/login";
 
   useEffect(() => {

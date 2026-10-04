@@ -1,0 +1,68 @@
+{
+  "source": "Actual CLI tool output captured 2026-09-25 before S3 connection reuse; incomplete run",
+  "deployment": "curious-greyhound-437",
+  "samples": [
+    {
+      "name": "all",
+      "iteration": 0,
+      "totalMs": 12000,
+      "gets": 101,
+      "lists": 1,
+      "bytes": 328812,
+      "rows": 50
+    },
+    {
+      "name": "rare",
+      "iteration": 0,
+      "totalMs": 33372,
+      "gets": 546,
+      "lists": 22,
+      "bytes": 451403,
+      "rows": 35
+    },
+    {
+      "name": "errors",
+      "iteration": 0,
+      "totalMs": 23287,
+      "gets": 536,
+      "lists": 11,
+      "bytes": 269074,
+      "rows": 5
+    },
+    {
+      "name": "collection-unverified-key",
+      "iteration": 0,
+      "totalMs": 10621,
+      "gets": 101,
+      "lists": 1,
+      "bytes": 328812,
+      "rows": 50
+    },
+    {
+      "name": "detail",
+      "iteration": 0,
+      "totalMs": 402,
+      "gets": 2,
+      "lists": 0,
+      "bytes": 42073
+    },
+    {
+      "name": "structure",
+      "iteration": 0,
+      "totalMs": 249,
+      "gets": 1,
+      "lists": 0,
+      "bytes": 36292
+    },
+    {
+      "name": "all",
+      "iteration": 1,
+      "totalMs": 10430,
+      "gets": 101,
+      "lists": 1,
+      "bytes": 328812,
+      "rows": 50
+    }
+  ],
+  "failure": "Runtime exited unexpectedly during rare search, iteration 1"
+}

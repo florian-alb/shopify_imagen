@@ -1,0 +1,288 @@
+{
+  "deployment": "curious-greyhound-437",
+  "id": "q17317nba9s76hgmxhdeydsbrx8ezbdg",
+  "samples": [
+    {
+      "name": "all",
+      "iteration": 0,
+      "cliMs": 2280,
+      "metrics": {
+        "name": "products",
+        "gets": 0,
+        "lists": 0,
+        "bytes": 0,
+        "ioMs": 0,
+        "totalMs": 603
+      },
+      "payloadBytes": 33306,
+      "rows": 50,
+      "hasNext": true
+    },
+    {
+      "name": "rare",
+      "iteration": 0,
+      "cliMs": 1457,
+      "metrics": {
+        "name": "products",
+        "gets": 0,
+        "lists": 0,
+        "bytes": 0,
+        "ioMs": 0,
+        "totalMs": 290
+      },
+      "payloadBytes": 29081,
+      "rows": 40,
+      "hasNext": false
+    },
+    {
+      "name": "errors",
+      "iteration": 0,
+      "cliMs": 4209,
+      "metrics": {
+        "name": "products",
+        "gets": 0,
+        "lists": 0,
+        "bytes": 0,
+        "ioMs": 0,
+        "totalMs": 697
+      },
+      "payloadBytes": 6263,
+      "rows": 9,
+      "hasNext": false
+    },
+    {
+      "name": "collection",
+      "iteration": 0,
+      "cliMs": 1314,
+      "metrics": {
+        "name": "products",
+        "gets": 0,
+        "lists": 0,
+        "bytes": 0,
+        "ioMs": 0,
+        "totalMs": 86
+      },
+      "payloadBytes": 51,
+      "rows": 0,
+      "hasNext": false
+    },
+    {
+      "name": "detail",
+      "iteration": 0,
+      "cliMs": 1220,
+      "metrics": {
+        "name": "product",
+        "gets": 0,
+        "lists": 0,
+        "bytes": 0,
+        "ioMs": 0,
+        "totalMs": 65
+      },
+      "payloadBytes": 6580,
+      "hasNext": false
+    },
+    {
+      "name": "structure",
+      "iteration": 0,
+      "cliMs": 1368,
+      "metrics": {
+        "name": "structure",
+        "gets": 0,
+        "lists": 0,
+        "bytes": 0,
+        "ioMs": 0,
+        "totalMs": 44
+      },
+      "payloadBytes": 81162,
+      "hasNext": false
+    },
+    {
+      "name": "all",
+      "iteration": 1,
+      "cliMs": 1221,
+      "metrics": {
+        "name": "products",
+        "gets": 0,
+        "lists": 0,
+        "bytes": 0,
+        "ioMs": 0,
+        "totalMs": 28
+      },
+      "payloadBytes": 33306,
+      "rows": 50,
+      "hasNext": true
+    },
+    {
+      "name": "rare",
+      "iteration": 1,
+      "cliMs": 1216,
+      "metrics": {
+        "name": "products",
+        "gets": 0,
+        "lists": 0,
+        "bytes": 0,
+        "ioMs": 0,
+        "totalMs": 25
+      },
+      "payloadBytes": 29081,
+      "rows": 40,
+      "hasNext": false
+    },
+    {
+      "name": "errors",
+      "iteration": 1,
+      "cliMs": 1456,
+      "metrics": {
+        "name": "products",
+        "gets": 0,
+        "lists": 0,
+        "bytes": 0,
+        "ioMs": 0,
+        "totalMs": 156
+      },
+      "payloadBytes": 6263,
+      "rows": 9,
+      "hasNext": false
+    },
+    {
+      "name": "collection",
+      "iteration": 1,
+      "cliMs": 1297,
+      "metrics": {
+        "name": "products",
+        "gets": 0,
+        "lists": 0,
+        "bytes": 0,
+        "ioMs": 0,
+        "totalMs": 26
+      },
+      "payloadBytes": 51,
+      "rows": 0,
+      "hasNext": false
+    },
+    {
+      "name": "detail",
+      "iteration": 1,
+      "cliMs": 1448,
+      "metrics": {
+        "name": "product",
+        "gets": 0,
+        "lists": 0,
+        "bytes": 0,
+        "ioMs": 0,
+        "totalMs": 139
+      },
+      "payloadBytes": 6580,
+      "hasNext": false
+    },
+    {
+      "name": "structure",
+      "iteration": 1,
+      "cliMs": 1291,
+      "metrics": {
+        "name": "structure",
+        "gets": 0,
+        "lists": 0,
+        "bytes": 0,
+        "ioMs": 0,
+        "totalMs": 67
+      },
+      "payloadBytes": 81162,
+      "hasNext": false
+    },
+    {
+      "name": "all",
+      "iteration": 2,
+      "cliMs": 1197,
+      "metrics": {
+        "name": "products",
+        "gets": 0,
+        "lists": 0,
+        "bytes": 0,
+        "ioMs": 0,
+        "totalMs": 27
+      },
+      "payloadBytes": 33306,
+      "rows": 50,
+      "hasNext": true
+    },
+    {
+      "name": "rare",
+      "iteration": 2,
+      "cliMs": 1678,
+      "metrics": {
+        "name": "products",
+        "gets": 0,
+        "lists": 0,
+        "bytes": 0,
+        "ioMs": 0,
+        "totalMs": 151
+      },
+      "payloadBytes": 29081,
+      "rows": 40,
+      "hasNext": false
+    },
+    {
+      "name": "errors",
+      "iteration": 2,
+      "cliMs": 1407,
+      "metrics": {
+        "name": "products",
+        "gets": 0,
+        "lists": 0,
+        "bytes": 0,
+        "ioMs": 0,
+        "totalMs": 196
+      },
+      "payloadBytes": 6263,
+      "rows": 9,
+      "hasNext": false
+    },
+    {
+      "name": "collection",
+      "iteration": 2,
+      "cliMs": 1255,
+      "metrics": {
+        "name": "products",
+        "gets": 0,
+        "lists": 0,
+        "bytes": 0,
+        "ioMs": 0,
+        "totalMs": 73
+      },
+      "payloadBytes": 51,
+      "rows": 0,
+      "hasNext": false
+    },
+    {
+      "name": "detail",
+      "iteration": 2,
+      "cliMs": 1224,
+      "metrics": {
+        "name": "product",
+        "gets": 0,
+        "lists": 0,
+        "bytes": 0,
+        "ioMs": 0,
+        "totalMs": 35
+      },
+      "payloadBytes": 6580,
+      "hasNext": false
+    },
+    {
+      "name": "structure",
+      "iteration": 2,
+      "cliMs": 1511,
+      "metrics": {
+        "name": "structure",
+        "gets": 0,
+        "lists": 0,
+        "bytes": 0,
+        "ioMs": 0,
+        "totalMs": 116
+      },
+      "payloadBytes": 81162,
+      "hasNext": false
+    }
+  ]
+}
