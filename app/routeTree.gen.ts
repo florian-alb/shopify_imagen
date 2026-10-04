@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as PolicyGeneratorRouteImport } from './routes/policy-generator'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as SettingsIndexRouteImport } from './routes/settings/index'
@@ -25,6 +26,11 @@ import { Route as GoogleFeedRulesIndexRouteImport } from './routes/google-feed/r
 import { Route as GoogleFeedPreviewIndexRouteImport } from './routes/google-feed/preview/index'
 import { Route as GoogleFeedHistoryIndexRouteImport } from './routes/google-feed/history/index'
 
+const PolicyGeneratorRoute = PolicyGeneratorRouteImport.update({
+  id: '/policy-generator',
+  path: '/policy-generator',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
@@ -104,6 +110,7 @@ const GoogleFeedHistoryIndexRoute = GoogleFeedHistoryIndexRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/policy-generator': typeof PolicyGeneratorRoute
   '/catalog-import/$exportId': typeof CatalogImportExportIdRoute
   '/jobs/$jobId': typeof JobsJobIdRoute
   '/products/$productId': typeof ProductsProductIdRoute
@@ -121,6 +128,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/policy-generator': typeof PolicyGeneratorRoute
   '/catalog-import/$exportId': typeof CatalogImportExportIdRoute
   '/jobs/$jobId': typeof JobsJobIdRoute
   '/products/$productId': typeof ProductsProductIdRoute
@@ -139,6 +147,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/policy-generator': typeof PolicyGeneratorRoute
   '/catalog-import/$exportId': typeof CatalogImportExportIdRoute
   '/jobs/$jobId': typeof JobsJobIdRoute
   '/products/$productId': typeof ProductsProductIdRoute
@@ -158,6 +167,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/login'
+    | '/policy-generator'
     | '/catalog-import/$exportId'
     | '/jobs/$jobId'
     | '/products/$productId'
@@ -175,6 +185,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/login'
+    | '/policy-generator'
     | '/catalog-import/$exportId'
     | '/jobs/$jobId'
     | '/products/$productId'
@@ -192,6 +203,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/login'
+    | '/policy-generator'
     | '/catalog-import/$exportId'
     | '/jobs/$jobId'
     | '/products/$productId'
@@ -210,6 +222,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LoginRoute: typeof LoginRoute
+  PolicyGeneratorRoute: typeof PolicyGeneratorRoute
   CatalogImportExportIdRoute: typeof CatalogImportExportIdRoute
   JobsJobIdRoute: typeof JobsJobIdRoute
   ProductsProductIdRoute: typeof ProductsProductIdRoute
@@ -227,6 +240,13 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/policy-generator': {
+      id: '/policy-generator'
+      path: '/policy-generator'
+      fullPath: '/policy-generator'
+      preLoaderRoute: typeof PolicyGeneratorRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/login': {
       id: '/login'
       path: '/login'
@@ -338,6 +358,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LoginRoute: LoginRoute,
+  PolicyGeneratorRoute: PolicyGeneratorRoute,
   CatalogImportExportIdRoute: CatalogImportExportIdRoute,
   JobsJobIdRoute: JobsJobIdRoute,
   ProductsProductIdRoute: ProductsProductIdRoute,
