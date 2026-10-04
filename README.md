@@ -3,7 +3,7 @@
 Application **mobile-first** pour générer automatiquement des visuels produits Shopify (rideaux & voilages) avec **OpenAI Images** ou **Google Nano Banana Pro (Gemini)**, les optimiser en **WebP**, les stocker sur **Cloudflare R2**, les relire, puis les pousser dans Shopify — manuellement et en toute sécurité.
 
 > Stack : **TanStack Start + React 19** (front) · **Convex** (backend temps réel, jobs, crons) · **Tailwind v4 + shadcn/ui** · **sharp** (traitement image) · **Shopify Admin GraphQL** · **Cloudflare R2**.
-  
+
 ---
 
 ## ✨ Fonctionnalités
@@ -17,6 +17,17 @@ Application **mobile-first** pour générer automatiquement des visuels produits
 - ☁️ Binaires stockés sur **R2** ; Convex ne garde que les URLs et métadonnées.
 - 📤 Push vers Shopify **uniquement après confirmation explicite**, avec option de remplacement de la galerie.
 - ✏️ Édition/réinitialisation des templates de prompts dans `/settings/prompts`.
+- Générateur de six politiques à partir du modèle fourni dans `/policy-generator`, avec formulaire, aperçu, copie HTML et téléchargement.
+
+### Générateur de politiques
+
+La page **Générateur de politiques** adapte les documents de retour/remboursement, confidentialité, livraison, contact, mentions légales et CGV/CGU. Renseigner l’identité de la boutique et de l’éditeur, les coordonnées, les délais et frais, les horaires du service client et les liens des pages. Les passages propres aux produits sont éditables ; un profil chaussures reprend les consignes du modèle original et un profil générique les adapte à d’autres articles.
+
+Les modèles HTML sont versionnés dans `app/features/policy-generator/templates/`. Ils conservent le cadre français et les références Shopify du modèle fourni ; ce générateur ne réalise pas d’audit juridique. La livraison couvre une seule zone, en euros, et le modèle de retour prévoit une extension commerciale de 15 à 365 jours au-delà du délai légal fixe de 14 jours.
+
+Le sélecteur propose le français, l’anglais, l’allemand, l’espagnol, l’italien et le néerlandais (NL). Les six modèles HTML de chaque langue sont prétraduits dans `app/features/policy-generator/templates/` : français à la racine, autres langues dans `en/`, `de/`, `es/`, `it/` et `nl/`. Chaque sous-dossier contient également `locale.json` pour les profils produits, valeurs par défaut et phrases variables. Le changement de langue est immédiat, sans appel réseau ni clé API. L’identité, les coordonnées, nombres et liens sont communs aux langues ; les textes éditables conservent leurs modifications par langue. Le profil produits s’applique aux six langues. Tout est généré dans le navigateur, sans base de données ni stockage local. Les exports reprennent la langue HTML et un suffixe de langue dans le nom de fichier.
+
+Quitter ou actualiser la page réinitialise le formulaire. Les exports exigent des informations complètes : copier le HTML d’un document pour l’éditeur Shopify, télécharger un document HTML autonome ou télécharger les six réunis dans un fichier HTML. Aucune publication automatique sur Shopify n’est effectuée.
 
 ---
 

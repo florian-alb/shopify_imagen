@@ -20,6 +20,7 @@ type BreadcrumbRoute =
   | "/google-feed/rules"
   | "/google-feed/history"
   | "/settings"
+  | "/policy-generator"
   | "/settings/prompts";
 
 type AppBreadcrumbItem = {
@@ -34,6 +35,10 @@ function normalizePathname(pathname: string) {
 
 function routeBreadcrumbs(pathname: string): AppBreadcrumbItem[] {
   const normalizedPathname = normalizePathname(pathname);
+
+  if (normalizedPathname === "/policy-generator") {
+    return [{ label: "Générateur de politiques", to: "/policy-generator" }];
+  }
 
   if (normalizedPathname === "/products") {
     return [{ label: "Produits", to: "/products" }];

@@ -1,4 +1,4 @@
-import { Boxes, FolderInput, ImageIcon, Layers3, ListChecks, Tags } from "lucide-react";
+import { Boxes, FileText, FolderInput, ImageIcon, Layers3, ListChecks, Tags } from "lucide-react";
 
 export const navGroups = [
   {
@@ -10,6 +10,7 @@ export const navGroups = [
       { to: "/google-feed", label: "Flux Google", icon: Tags },
       { to: "/catalog-import", label: "Import de catalogue", icon: FolderInput },
       { to: "/settings/prompts", label: "Prompts", icon: ImageIcon },
+      { to: "/policy-generator", label: "Générateur de politiques", icon: FileText },
     ],
   },
 ] as const;
