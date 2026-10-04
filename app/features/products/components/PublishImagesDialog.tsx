@@ -1,6 +1,4 @@
 import type { Dispatch, SetStateAction } from "react";
-import { ImageIcon } from "lucide-react";
-import { ImageStateBadge } from "@/components/common/ImageStateBadge";
 import { BusyIcon } from "@/components/page";
 import {
   AlertDialog,
@@ -11,21 +9,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import type { Doc, Id } from "@/lib/convex";
 import { PublishImagesOptions } from "./PublishImagesOptions";
-import type { VisualGroupsData, VisualGroupWithRows } from "../types";
-
-type PublishProductGroup = {
-  key: string;
-  label: string;
-  images: Doc<"generatedImages">[];
-  group: VisualGroupWithRows | null;
-  member: Doc<"visualProductFamilyMembers"> | null;
-};
+import type { VisualGroupsData } from "../types";
+import { buildPublishProductGroups } from "../lib/publishProductGroups";
+import { PublishProductBlock } from "./PublishProductBlock";
 
 export function PublishImagesDialog({
   open,
@@ -66,26 +57,31 @@ export function PublishImagesDialog({
     focusedGroupId,
   );
   const focusedProductGroup = focusedGroupId ? productGroups[0] : null;
+  const hasVariantTargets = productGroups.some(
+    (group) => group.requiresVariantImage,
+  );
   const selectedProductCount = productGroups.filter((productGroup) =>
     productGroup.images.some((image) => selectedPushIds.has(image._id)),
   ).length;
   const groupsMissingPromptOne =
-    replaceVariantMedia && primaryVariantImageType
+    (replaceExisting || replaceVariantMedia) && primaryVariantImageType
       ? productGroups.filter(
           (productGroup) =>
-            productGroup.group &&
+            productGroup.requiresVariantImage &&
             productGroup.images.some((image) =>
               selectedPushIds.has(image._id),
             ) &&
-            !productGroup.images.some(
+            productGroup.images.filter(
               (image) =>
                 image.imageType === primaryVariantImageType &&
                 selectedPushIds.has(image._id),
-            ),
+            ).length !== 1,
         )
       : [];
   const promptOneConfigurationMissing =
-    replaceVariantMedia && hasVisualGroups && !primaryVariantImageType;
+    (replaceExisting || replaceVariantMedia) &&
+    productGroups.some((group) => group.requiresVariantImage) &&
+    !primaryVariantImageType;
 
   const toggleImage = (imageId: Id<"generatedImages">, checked: boolean) => {
     setSelectedPushIds((current) => {
@@ -109,7 +105,7 @@ export function PublishImagesDialog({
             {focusedProductGroup
               ? "Les images de cette déclinaison seront publiées et son image du prompt n° 1 sera assignée à ses variantes Shopify."
               : hasVisualGroups
-                ? "Chaque bloc correspond à une déclinaison du produit mère. L’image générée avec le prompt n° 1 sera assignée à ses variantes."
+                ? "Chaque bloc correspond à une cible de génération. L’image du prompt n° 1 sera assignée aux variantes Shopify correspondantes."
                 : "Choisissez les images approuvées à envoyer sur Shopify."}
           </AlertDialogDescription>
         </AlertDialogHeader>
@@ -125,7 +121,7 @@ export function PublishImagesDialog({
                   {selectedPushIds.size === 1 ? "" : "s"}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  {hasVisualGroups
+                  {hasVariantTargets
                     ? "Le prompt n° 1 détermine l’image des variantes."
                     : "L’ordre des images détermine l’image principale."}
                 </p>
@@ -167,7 +163,7 @@ export function PublishImagesDialog({
               </p>
             ) : groupsMissingPromptOne.length ? (
               <p role="alert" className="text-sm font-medium text-destructive">
-                Sélectionnez l’image du prompt n° 1 pour{" "}
+                Sélectionnez une seule image du prompt n° 1 pour{" "}
                 {groupsMissingPromptOne.length} déclinaison
                 {groupsMissingPromptOne.length === 1 ? "" : "s"} avant de
                 remplacer les images des variantes.
@@ -175,7 +171,7 @@ export function PublishImagesDialog({
             ) : null}
 
             <PublishImagesOptions
-              hasVisualGroups={hasVisualGroups}
+              hasVisualGroups={hasVisualGroups || hasVariantTargets}
               replaceExisting={replaceExisting}
               setReplaceExisting={setReplaceExisting}
               replaceVariantMedia={replaceVariantMedia}
@@ -205,189 +201,4 @@ export function PublishImagesDialog({
       </AlertDialogContent>
     </AlertDialog>
   );
-}
-
-function PublishProductBlock({
-  productGroup,
-  selectedPushIds,
-  primaryVariantImageType,
-  onToggleImage,
-}: {
-  productGroup: PublishProductGroup;
-  selectedPushIds: Set<Id<"generatedImages">>;
-  primaryVariantImageType: string | null;
-  onToggleImage: (imageId: Id<"generatedImages">, checked: boolean) => void;
-}) {
-  const selectedImages = productGroup.images.filter((image) =>
-    selectedPushIds.has(image._id),
-  );
-  const primaryImage = productGroup.group
-    ? productGroup.images.find(
-        (image) => image.imageType === primaryVariantImageType,
-      )
-    : selectedImages[0];
-  const secondaryImages = productGroup.images.filter(
-    (image) => image._id !== primaryImage?._id,
-  );
-
-  return (
-    <section className="overflow-hidden rounded-xl border bg-card">
-      <div className="flex flex-col gap-2 border-b px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex min-w-0 items-center gap-2.5">
-          {productGroup.group ? (
-            <span
-              className="size-5 shrink-0 rounded-full border"
-              style={{
-                background: productGroup.group.swatchCss ?? "var(--muted)",
-              }}
-              aria-hidden="true"
-            />
-          ) : null}
-          <div className="min-w-0">
-            <p className="truncate text-sm font-medium">
-              {productGroup.member?.title ?? productGroup.label}
-            </p>
-            <p className="truncate text-xs text-muted-foreground">
-              {productGroup.group
-                ? `${productGroup.group.variants.length} variante${productGroup.group.variants.length === 1 ? "" : "s"} Shopify`
-                : "Galerie produit"}
-            </p>
-          </div>
-        </div>
-        <Badge
-          variant={productGroup.member ? "secondary" : "outline"}
-          className="w-fit"
-        >
-          {productGroup.member ? "Produit Shopify créé" : "Produit enfant"}
-        </Badge>
-      </div>
-
-      <div className="grid gap-3 p-3 sm:grid-cols-[6rem_minmax(0,1fr)]">
-        {primaryImage ? (
-          <Label className="group relative block cursor-pointer overflow-hidden rounded-lg border bg-muted has-[:checked]:border-primary">
-            <span className="block aspect-[4/5]">
-              <img
-                src={primaryImage.storageUrl!}
-                alt={
-                  productGroup.group
-                    ? `Image du prompt n° 1 pour ${productGroup.label}`
-                    : `Image principale ${productGroup.label}`
-                }
-                className="size-full object-cover"
-              />
-            </span>
-            <span className="absolute left-2 top-2 grid size-6 place-items-center rounded-md bg-background/90">
-              <Checkbox
-                checked={selectedPushIds.has(primaryImage._id)}
-                onCheckedChange={(checked) =>
-                  onToggleImage(primaryImage._id, checked === true)
-                }
-                aria-label={`Sélectionner l’image ${
-                  productGroup.group ? "du prompt n° 1" : "principale"
-                } de ${productGroup.label}`}
-              />
-            </span>
-            <span className="absolute inset-x-0 bottom-0 bg-background/90 px-2 py-1.5 text-center text-[11px] font-medium">
-              {productGroup.group
-                ? "Prompt n° 1 · Variantes"
-                : "Image principale"}
-            </span>
-          </Label>
-        ) : (
-          <div className="grid aspect-[4/5] place-items-center gap-1 rounded-lg border bg-muted px-2 text-center text-xs text-muted-foreground">
-            <ImageIcon className="size-5" />
-            {productGroup.group ? "Prompt n° 1 absent" : null}
-          </div>
-        )}
-
-        <div className="min-w-0">
-          <p className="mb-2 text-xs font-medium text-muted-foreground">
-            Images de la galerie
-          </p>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {secondaryImages.map((image) => (
-              <Label
-                key={image._id}
-                className="flex min-w-0 items-center gap-2 rounded-lg border p-2 has-[:checked]:border-primary"
-              >
-                <Checkbox
-                  checked={selectedPushIds.has(image._id)}
-                  onCheckedChange={(checked) =>
-                    onToggleImage(image._id, checked === true)
-                  }
-                />
-                <span className="size-10 shrink-0 overflow-hidden rounded-md bg-muted">
-                  <img
-                    src={image.storageUrl!}
-                    alt={image.imageType}
-                    className="size-full object-cover"
-                  />
-                </span>
-                <span className="min-w-0 flex-1 truncate text-xs font-medium">
-                  {image.imageType}
-                </span>
-                <ImageStateBadge image={image} />
-              </Label>
-            ))}
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function buildPublishProductGroups(
-  images: Doc<"generatedImages">[],
-  visualGroupsData: VisualGroupsData | null | undefined,
-  focusedGroupId: Id<"visualGroups"> | null | undefined,
-): PublishProductGroup[] {
-  if (!visualGroupsData?.config) {
-    return [
-      {
-        key: "all",
-        label: "Images approuvées",
-        images,
-        group: null,
-        member: null,
-      },
-    ];
-  }
-
-  const memberByGroupId = new Map(
-    (visualGroupsData.family?.members ?? []).map((member) => [
-      member.groupId,
-      member,
-    ]),
-  );
-  const visibleGroups = focusedGroupId
-    ? visualGroupsData.groups.filter((group) => group._id === focusedGroupId)
-    : visualGroupsData.groups;
-  const groups: PublishProductGroup[] = visibleGroups
-    .map((group) => ({
-      key: group._id,
-      label: group.label,
-      images: images.filter((image) => image.visualGroupId === group._id),
-      group,
-      member: memberByGroupId.get(group._id) ?? null,
-    }))
-    .filter((group) => group.images.length);
-  const assignedGroupIds = new Set(groups.map((group) => group.key));
-  const unassignedImages = focusedGroupId
-    ? []
-    : images.filter(
-        (image) =>
-          !image.visualGroupId || !assignedGroupIds.has(image.visualGroupId),
-      );
-
-  if (unassignedImages.length) {
-    groups.push({
-      key: "unassigned",
-      label: "Sans déclinaison",
-      images: unassignedImages,
-      group: null,
-      member: null,
-    });
-  }
-
-  return groups;
 }

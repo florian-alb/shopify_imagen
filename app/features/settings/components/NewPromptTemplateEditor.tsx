@@ -13,7 +13,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { TabsContent } from "@/components/ui/tabs";
-import { Textarea } from "@/components/ui/textarea";
+import { PromptContentEditor } from "./PromptContentEditor";
+import { defaultConditionalDraft } from "../lib/conditionalPromptDraft";
 import {
   newPromptTabValue,
   promptKindBlankValue,
@@ -99,18 +100,13 @@ export function NewPromptTemplateEditor({
               </Select>
             </div>
           </div>
-          <div className="mt-3 grid gap-1.5">
-            <Label htmlFor="prompt-content">Prompt specifique</Label>
-            <Textarea
-              id="prompt-content"
-              className="min-h-[28rem] font-mono text-xs leading-relaxed"
-              placeholder="Decrivez l'image a generer. Utilisez {{PRODUCT_TITLE}} si besoin."
-              value={newPromptDraft.content}
-              onChange={(event) =>
-                onUpdateDraft({ content: event.target.value })
-              }
-            />
-          </div>
+          <PromptContentEditor
+            idPrefix="new-prompt"
+            content={newPromptDraft.content}
+            draft={newPromptDraft.conditional ?? defaultConditionalDraft}
+            onContentChange={(content) => onUpdateDraft({ content })}
+            onConditionalChange={(conditional) => onUpdateDraft({ conditional })}
+          />
           <PromptAiControls
             idPrefix="new-prompt-ai"
             draft={newPromptAiValue}

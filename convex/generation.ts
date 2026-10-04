@@ -1140,7 +1140,7 @@ async function processPostprocessingImage(
       imageType: image.imageType,
       extension: optimized.extension,
     });
-    const key = `generated/${safeHandle}/${Date.now().toString(36)}/${filename}`;
+    const key = `generated/${safeHandle}/${image._id}/${Date.now().toString(36)}/${filename}`;
     const storageUrl = await uploadToR2({
       bytes: optimized.bytes,
       key,
@@ -1412,7 +1412,7 @@ export const processJob = internalAction({
           imageType: image.imageType,
           extension: optimized.extension,
         });
-        const key = `generated/${safeHandle}/${Date.now().toString(36)}/${filename}`;
+        const key = `generated/${safeHandle}/${image._id}/${Date.now().toString(36)}/${filename}`;
         const storageUrl = await uploadToR2({
           bytes: optimized.bytes,
           key,

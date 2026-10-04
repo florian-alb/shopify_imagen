@@ -43,9 +43,11 @@ export function compilePrompt(
 export function renderPrompt(
   template: string,
   variables: Record<string, string>,
+  selectedOptions: Array<{ name: string; value: string }> = [],
 ): string {
   return template.replace(
-    /\{\{\s*([A-Z0-9_]+)\s*\}\}/g,
-    (_match, key: string) => variables[key] ?? "",
+    /\{\{\s*(?:OPTION_VALUE\s*:\s*([^{}]+?)|([A-Z0-9_]+))\s*\}\}/g,
+    (_match, name: string | undefined, key: string) => name !== undefined ? optionValue(selectedOptions, name) : variables[key] ?? "",
   );
 }
+import { optionValue } from "./promptConditions";

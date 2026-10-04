@@ -13,7 +13,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { TabsContent } from "@/components/ui/tabs";
-import { Textarea } from "@/components/ui/textarea";
+import { PromptContentEditor } from "./PromptContentEditor";
+import type { ConditionalPromptDraft } from "../lib/conditionalPromptDraft";
 import { type Doc, type Id } from "@/lib/convex";
 import type { PromptTemplateEditorState } from "../hooks/usePromptTemplateDraftWorkflow";
 import {
@@ -33,6 +34,7 @@ export function PromptTemplateEditor({
   onChangeAi,
   onChangeBackground,
   onChangeContent,
+  onChangeConditional,
   onChangeImageType,
   onChangePromptKind,
   onDelete,
@@ -54,6 +56,7 @@ export function PromptTemplateEditor({
     prompt: Doc<"promptTemplates">,
     values: Partial<BackgroundDraft>,
   ) => void;
+  onChangeConditional: (promptId: Id<"promptTemplates">, draft: ConditionalPromptDraft) => void;
   onChangeContent: (promptId: Id<"promptTemplates">, value: string) => void;
   onChangeImageType: (promptId: Id<"promptTemplates">, value: string) => void;
   onChangePromptKind: (promptId: Id<"promptTemplates">, value: string) => void;
@@ -119,19 +122,13 @@ export function PromptTemplateEditor({
           </div>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-1.5">
-            <Label htmlFor={`prompt-content-${prompt._id}`}>
-              Prompt specifique
-            </Label>
-            <Textarea
-              id={`prompt-content-${prompt._id}`}
-              className="min-h-[28rem] max-h-96 font-mono text-xs leading-relaxed"
-              value={state.contentValue}
-              onChange={(event) =>
-                onChangeContent(prompt._id, event.target.value)
-              }
-            />
-          </div>
+          <PromptContentEditor
+            idPrefix={`prompt-${prompt._id}`}
+            content={state.contentValue}
+            draft={state.conditionalValue}
+            onContentChange={(value) => onChangeContent(prompt._id, value)}
+            onConditionalChange={(draft) => onChangeConditional(prompt._id, draft)}
+          />
           <div className="mt-3 grid gap-1.5">
             <Label htmlFor={`prompt-kind-${prompt._id}`}>Prompt kind</Label>
             <Select

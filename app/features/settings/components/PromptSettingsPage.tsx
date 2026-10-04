@@ -36,6 +36,7 @@ export function PromptSettingsPage() {
               {item}
             </Badge>
           ))}
+          <p className="basis-full text-xs text-muted-foreground">Remplacez Taille dans OPTION_VALUE:Taille par le nom de votre option Shopify. Les valeurs correspondent à la variante générée.</p>
         </CardContent>
       </Card>
 
@@ -108,6 +109,7 @@ export function PromptSettingsPage() {
               onChangeAi={templates.updateAiDraft}
               onChangeBackground={templates.updateBackgroundDraft}
               onChangeContent={templates.updateContentDraft}
+              onChangeConditional={templates.updateConditionalDraft}
               onChangeImageType={templates.updateImageTypeDraft}
               onChangePromptKind={templates.updatePromptKindDraft}
               onDelete={templates.openDeletePrompt}

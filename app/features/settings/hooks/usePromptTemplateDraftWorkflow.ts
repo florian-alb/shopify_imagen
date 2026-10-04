@@ -1,4 +1,11 @@
 import { useState } from "react";
+import {
+  conditionalPromptDraft,
+  conditionalDraftsEqual,
+  defaultConditionalDraft,
+  validConditionalDraft,
+  type ConditionalPromptDraft,
+} from "../lib/conditionalPromptDraft";
 import { toast } from "sonner";
 import { type Doc, type Id } from "@/lib/convex";
 import {
@@ -19,6 +26,7 @@ import type { usePromptTemplatesEditor } from "./usePromptTemplatesEditor";
 type PromptTemplatesEditor = ReturnType<typeof usePromptTemplatesEditor>;
 
 export type PromptTemplateEditorState = {
+  conditionalValue: ConditionalPromptDraft;
   aiValue: PromptAiDraft;
   backgroundValue: BackgroundDraft;
   canSaveChanges: boolean;
@@ -53,6 +61,9 @@ export function usePromptTemplateDraftWorkflow({
   setPreset: PromptTemplatesEditor["setPreset"];
   updatePrompt: PromptTemplatesEditor["updatePrompt"];
 }) {
+  const [conditionalDrafts, setConditionalDrafts] = useState<
+    Record<string, ConditionalPromptDraft>
+  >({});
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [imageTypeDrafts, setImageTypeDrafts] = useState<
     Record<string, string>
@@ -79,8 +90,11 @@ export function usePromptTemplateDraftWorkflow({
     (newPromptDraft ? newPromptTabValue : orderedPrompts?.[0]?.imageType);
   const canCreatePrompt = Boolean(
     newPromptDraft?.imageType.trim() &&
-      newPromptDraft.content.trim() &&
-      busy !== "create",
+    newPromptDraft.content.trim() &&
+    validConditionalDraft(
+      newPromptDraft.conditional ?? defaultConditionalDraft,
+    ) &&
+    busy !== "create",
   );
   const deleteTarget =
     orderedPrompts?.find((prompt) => prompt._id === deletePromptId) ?? null;
@@ -88,6 +102,9 @@ export function usePromptTemplateDraftWorkflow({
   function getPromptEditorState(
     prompt: Doc<"promptTemplates">,
   ): PromptTemplateEditorState {
+    const persistedConditional = conditionalPromptDraft(prompt);
+    const conditionalValue =
+      conditionalDrafts[prompt._id] ?? persistedConditional;
     const imageTypeValue = imageTypeDrafts[prompt._id] ?? prompt.imageType;
     const contentValue = drafts[prompt._id] ?? prompt.content;
     const promptKindValue =
@@ -107,16 +124,20 @@ export function usePromptTemplateDraftWorkflow({
     );
     const aiChanged = !promptAiDraftsEqual(aiValue, persistedAi);
     const hasChanges =
+      !conditionalDraftsEqual(conditionalValue, persistedConditional) ||
       imageTypeChanged ||
       contentChanged ||
       promptKindChanged ||
       backgroundChanged ||
       aiChanged;
     const canSaveChanges = Boolean(
-      imageTypeValue.trim() && contentValue.trim(),
+      imageTypeValue.trim() &&
+      contentValue.trim() &&
+      validConditionalDraft(conditionalValue),
     );
 
     return {
+      conditionalValue,
       aiValue,
       backgroundValue,
       canSaveChanges,
@@ -179,7 +200,9 @@ export function usePromptTemplateDraftWorkflow({
 
     const imageType = (imageTypeDrafts[promptId] ?? prompt.imageType).trim();
     const content = (drafts[promptId] ?? prompt.content).trim();
-    if (!imageType || !content) {
+    const conditional =
+      conditionalDrafts[promptId] ?? conditionalPromptDraft(prompt);
+    if (!imageType || !content || !validConditionalDraft(conditional)) {
       toast.error("Image type content are required.");
       return;
     }
@@ -194,9 +217,14 @@ export function usePromptTemplateDraftWorkflow({
         imageType,
         content,
         promptKind,
+        condition: conditional.enabled ? conditional.condition : null,
+        alternativeContent: conditional.enabled
+          ? conditional.alternativeContent
+          : undefined,
         ...aiDraft,
         ...backgroundDraft,
       });
+      setConditionalDrafts((current) => deleteDraftValue(current, promptId));
       setDrafts((current) => deleteDraftValue(current, promptId));
       setImageTypeDrafts((current) => deleteDraftValue(current, promptId));
       setBackgroundDrafts((current) => deleteDraftValue(current, promptId));
@@ -220,6 +248,7 @@ export function usePromptTemplateDraftWorkflow({
     setBusy(promptId);
     try {
       await removePrompt({ promptId });
+      setConditionalDrafts((current) => deleteDraftValue(current, promptId));
       setDrafts((current) => deleteDraftValue(current, promptId));
       setImageTypeDrafts((current) => deleteDraftValue(current, promptId));
       setBackgroundDrafts((current) => deleteDraftValue(current, promptId));
@@ -321,7 +350,12 @@ export function usePromptTemplateDraftWorkflow({
           referenceImageCount: newPromptDraft.referenceImageCount,
         }
       : {};
+    const conditional = newPromptDraft.conditional ?? defaultConditionalDraft;
     const values = {
+      condition: conditional.enabled ? conditional.condition : undefined,
+      alternativeContent: conditional.enabled
+        ? conditional.alternativeContent
+        : undefined,
       imageType: newPromptDraft.imageType.trim(),
       label: newPromptDraft.imageType.trim(),
       content: newPromptDraft.content.trim(),
@@ -332,7 +366,11 @@ export function usePromptTemplateDraftWorkflow({
       backgroundColor: newPromptDraft.backgroundColor.trim(),
       backgroundShadow: newPromptDraft.backgroundShadow,
     };
-    if (!values.imageType || !values.content) {
+    if (
+      !values.imageType ||
+      !values.content ||
+      !validConditionalDraft(conditional)
+    ) {
       toast.error("Image type content are required.");
       return;
     }
@@ -379,6 +417,10 @@ export function usePromptTemplateDraftWorkflow({
     togglePreset,
     updateAiDraft,
     updateBackgroundDraft,
+    updateConditionalDraft: (
+      promptId: Id<"promptTemplates">,
+      draft: ConditionalPromptDraft,
+    ) => setConditionalDrafts((current) => ({ ...current, [promptId]: draft })),
     updateContentDraft,
     updateImageTypeDraft,
     updateNewPromptAiDraft,

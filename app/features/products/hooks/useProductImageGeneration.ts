@@ -7,6 +7,7 @@ import { errorMessage } from "@/lib/errors";
 import { api, type Doc, type Id } from "@/lib/convex";
 
 import type { VisualGroupsData } from "../types";
+import { useVariantGenerationSelection } from "./useVariantGenerationSelection";
 import { useImageTypeSelection } from "./useImageTypeSelection";
 
 export function useProductImageGeneration({
@@ -28,6 +29,14 @@ export function useProductImageGeneration({
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const imageTypeSelection = useImageTypeSelection(availableTypes);
+  const variants = useVariantGenerationSelection({
+    open,
+    productIds: product ? [product._id] : [],
+    selectedImageTypes: Array.from(imageTypeSelection.selectedTypes),
+    ...(visualGroupsData?.config
+      ? { visualGroupIds: Array.from(selectedGroupIds) }
+      : {}),
+  });
 
   function openWithGroups(
     groupIds: Id<"visualGroups">[],
@@ -38,6 +47,7 @@ export function useProductImageGeneration({
       return;
     }
     imageTypeSelection.resetSelection();
+    variants.resetVariantSelection();
     setSelectedGroupIds(new Set(groupIds));
     setFocusedGroupId(focusGroupId);
     setOpen(true);
@@ -46,7 +56,14 @@ export function useProductImageGeneration({
   function openGenerate() {
     openWithGroups(
       (visualGroupsData?.groups ?? [])
-        .filter((group) => group.ready)
+        .filter(
+          (group) =>
+            group.ready &&
+            (!visualGroupsData?.family ||
+              visualGroupsData.family.members.some(
+                (member) => member.groupId === group._id,
+              )),
+        )
         .map((group) => group._id),
       null,
     );
@@ -80,6 +97,7 @@ export function useProductImageGeneration({
       const jobId = await createJob({
         productIds: [product._id],
         selectedImageTypes: Array.from(imageTypeSelection.selectedTypes),
+        variantSelection: variants.variantSelection,
         ...(visualGroupsData?.config
           ? { visualGroupIds: Array.from(selectedGroupIds) }
           : {}),
@@ -104,6 +122,7 @@ export function useProductImageGeneration({
   }
 
   return {
+    variants,
     selectedTypes: imageTypeSelection.selectedTypes,
     selectedGroupIds,
     focusedGroupId,

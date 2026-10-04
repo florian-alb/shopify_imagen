@@ -77,11 +77,19 @@ function HistoryItem({
       className="rounded-lg border px-3 last:border-b"
     >
       <AccordionTrigger className="hover:no-underline">
-        <span className="flex items-center gap-2">
+        <span className="flex flex-wrap items-center gap-2">
           {image.imageType}
           <Separator orientation="vertical" className="h-4" />
           <ImageStateBadge image={image} />
           <Badge variant="outline">{providerLabel}</Badge>
+          {image.promptBranch === "if_true" ||
+          image.promptBranch === "otherwise" ? (
+            <Badge variant="outline">
+              {image.promptBranch === "if_true"
+                ? "Condition true"
+                : "Condition false"}
+            </Badge>
+          ) : null}
         </span>
       </AccordionTrigger>
       <AccordionContent>

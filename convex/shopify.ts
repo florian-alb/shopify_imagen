@@ -28,6 +28,7 @@ import {
   hashShopifyOAuthState,
   shopifyOAuthCallbackUrl,
 } from "./shopify/oauth";
+import { publicationVariantIds, validatePublicationTargets } from "./shopify/publicationTargets";
 import { sameIds, throwUserErrors } from "./shopify/media";
 import {
   mapProductForUpsert,
@@ -893,6 +894,22 @@ export const pushProductImages = action({
     replaceExisting: v.boolean(),
     replaceVariantMedia: v.optional(v.boolean()),
   },
+  returns: v.object({
+    pushed: v.number(),
+    replaced: v.boolean(),
+    publishMode: v.union(
+      v.literal("separate_products"),
+      v.literal("variant_media"),
+    ),
+    createdProducts: v.array(
+      v.object({
+        groupId: v.id("visualGroups"),
+        shopifyProductId: v.string(),
+        title: v.string(),
+        handle: v.union(v.string(), v.null()),
+      }),
+    ),
+  }),
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
     const replaceVariantMedia =
@@ -964,26 +981,46 @@ export const pushProductImages = action({
           groupIds: visualGroupIds,
         })) as VisualGroupTarget[])
       : [];
-    if (replaceVariantMedia && targets.length) {
-      if (!primaryVariantImageType) {
+    const imageTargets = validatePublicationTargets(
+      ready,
+      primaryVariantImageType,
+      replaceVariantMedia,
+    );
+    const currentVariants = (product.variants ?? []) as Array<{
+      id: string;
+      media?: { nodes?: Array<{ id?: string | null }> };
+    }>;
+    const currentVariantById = new Map(
+      currentVariants.map((variant) => [variant.id, variant]),
+    );
+    const variantIdsByTarget = new Map<string, string[]>();
+    for (const target of imageTargets) {
+      if (target.variantId && !currentVariantById.has(target.variantId)) {
         throw new Error(
-          "Configure a prompt in position 1 before replacing variant images.",
+          `La variante « ${target.label} » n’existe plus. Synchronisez le produit avant publication.`,
         );
       }
-      const targetMissingPromptOne = targets.find((target) => {
-        const groupImages = ready.filter(
-          (image) => image.visualGroupId === target.group._id,
-        );
-        return (
-          groupImages.length > 0 &&
-          !imageForPromptOne(groupImages, primaryVariantImageType)
-        );
-      });
-      if (targetMissingPromptOne) {
+      const groupTarget = targets.find(
+        (candidate) => candidate.group._id === target.groupId,
+      );
+      if (
+        target.groupId &&
+        (!groupTarget ||
+          groupTarget.group.productId !== product._id ||
+          groupTarget.group.shopId !== product.shopId)
+      ) {
         throw new Error(
-          `Select and approve the prompt 1 image for "${targetMissingPromptOne.group.label}" before replacing its variant images.`,
+          `Le groupe « ${target.label} » n’existe plus ou appartient à un autre produit.`,
         );
       }
+      variantIdsByTarget.set(
+        target.key,
+        publicationVariantIds(
+          target,
+          currentVariants.map((variant) => variant.id),
+          groupTarget?.variants.map((variant) => variant.shopifyVariantId),
+        ),
+      );
     }
     const visualContext = (await ctx.runQuery(
       internal.visualGroups.analysisContext,
@@ -993,8 +1030,26 @@ export const pushProductImages = action({
       },
     )) as VisualAnalysisContext | null;
 
+    const existingFamily = await ctx.runQuery(
+      internal.visualGroups.familyForSource,
+      { sourceProductId: product._id },
+    );
     if (
-      visualContext?.config.publishMode === "separate_products" &&
+      existingFamily &&
+      targets.some(
+        (target) =>
+          !existingFamily.members.some(
+            (member) => member.groupId === target.group._id,
+          ),
+      )
+    ) {
+      throw new Error(
+        "Une déclinaison sélectionnée ne correspond pas à un produit déjà séparé.",
+      );
+    }
+    if (
+      (visualContext?.config.publishMode === "separate_products" ||
+        existingFamily) &&
       targets.length
     ) {
       const members = await publishAsSeparateProducts({
@@ -1032,34 +1087,22 @@ export const pushProductImages = action({
       existingMediaIds,
     });
 
-    const currentVariants = (product.variants ?? []) as Array<{
-      id: string;
-      media?: { nodes?: Array<{ id?: string | null }> };
-    }>;
-    const currentVariantById = new Map(
-      currentVariants.map((variant) => [variant.id, variant]),
-    );
-
-    for (const target of targets) {
-      const groupImages = ready.filter(
-        (image) => image.visualGroupId === target.group._id,
-      );
+    for (const target of imageTargets) {
+      if (!target.requiresVariantImage) continue;
       const promptOneImage = imageForPromptOne(
-        groupImages,
+        target.images,
         primaryVariantImageType,
       );
       const primaryMediaId = promptOneImage
         ? created.mediaIdByImageId.get(promptOneImage._id)
         : undefined;
       if (!primaryMediaId) continue;
-
+      const variantIds = variantIdsByTarget.get(target.key) ?? [];
       await setPrimaryMediaOnVariants({
         productId: product.shopifyProductId,
-        variants: target.variants.map((variant) => ({
-          id: variant.shopifyVariantId,
-          mediaIds: shopifyVariantMediaIds(
-            currentVariantById.get(variant.shopifyVariantId) ?? {},
-          ),
+        variants: variantIds.map((id) => ({
+          id,
+          mediaIds: shopifyVariantMediaIds(currentVariantById.get(id) ?? {}),
         })),
         primaryMediaId,
         replaceExisting: replaceVariantMedia,

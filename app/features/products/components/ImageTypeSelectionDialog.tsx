@@ -14,6 +14,8 @@ import {
 import { Label } from "@/components/ui/label";
 import type { Doc, Id } from "@/lib/convex";
 
+import { VariantGenerationControls } from "./VariantGenerationControls";
+import type { useVariantGenerationSelection } from "../hooks/useVariantGenerationSelection";
 import type { VisualGroupsData } from "../types";
 
 export function ImageTypeSelectionDialog({
@@ -21,6 +23,7 @@ export function ImageTypeSelectionDialog({
   onOpenChange,
   types,
   selectedTypes,
+  variants,
   visualGroupsData,
   selectedGroupIds,
   focusedGroupId,
@@ -36,6 +39,7 @@ export function ImageTypeSelectionDialog({
   onOpenChange: (open: boolean) => void;
   types: Doc<"promptTemplates">[];
   selectedTypes: Set<string>;
+  variants: ReturnType<typeof useVariantGenerationSelection>;
   visualGroupsData?: VisualGroupsData | null;
   selectedGroupIds?: Set<Id<"visualGroups">>;
   focusedGroupId?: Id<"visualGroups"> | null;
@@ -51,8 +55,7 @@ export function ImageTypeSelectionDialog({
   const focusedGroup = visualGroupsData?.groups.find(
     (group) => group._id === focusedGroupId,
   );
-  const totalImages =
-    selectedTypes.size * (usesVisualGroups ? (selectedGroupIds?.size ?? 0) : 1);
+  const totalImages = variants.preview?.totalImages ?? 0;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -61,7 +64,13 @@ export function ImageTypeSelectionDialog({
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
-        <div className="space-y-4">
+        <div className="grid gap-4">
+          <VariantGenerationControls
+            value={variants.variantSelection}
+            onChange={variants.setVariantSelection}
+            allProductsSeparated={variants.allProductsSeparated}
+            separatedProductCount={variants.preview?.separatedProductCount ?? 0}
+          />
           {focusedGroup ? (
             <div className="flex items-center gap-3 rounded-lg border bg-muted/30 p-3">
               <span
@@ -90,9 +99,7 @@ export function ImageTypeSelectionDialog({
                   <Label
                     key={group._id}
                     className={`flex min-h-12 items-center gap-3 rounded-lg border px-3 has-[:checked]:border-primary ${
-                      group.ready
-                        ? ""
-                        : "bg-muted/30 text-muted-foreground"
+                      group.ready ? "" : "bg-muted/30 text-muted-foreground"
                     }`}
                   >
                     <Checkbox
@@ -125,9 +132,7 @@ export function ImageTypeSelectionDialog({
           ) : null}
 
           <fieldset className={usesVisualGroups ? "border-t pt-4" : ""}>
-            <legend className="mb-2 text-sm font-medium">
-              Types d’image
-            </legend>
+            <legend className="mb-2 text-sm font-medium">Types d’image</legend>
             <div className="grid gap-2">
               {types.map((type) => (
                 <Label
@@ -144,13 +149,23 @@ export function ImageTypeSelectionDialog({
             </div>
           </fieldset>
         </div>
+        {variants.preview?.error ? (
+          <p role="alert" className="text-sm text-destructive">
+            {variants.preview.error}
+          </p>
+        ) : null}
         <DialogFooter>
           <span className="mr-auto self-center text-sm text-muted-foreground">
-            {totalImages} image{totalImages === 1 ? "" : "s"} à générer
+            {variants.previewPending
+              ? "Calcul des images…"
+              : `${totalImages} image${totalImages === 1 ? "" : "s"} à générer`}
           </span>
           <Button
             className="min-h-11 sm:min-h-9"
             disabled={
+              variants.previewPending ||
+              Boolean(variants.preview?.error) ||
+              !totalImages ||
               !selectedTypes.size ||
               (usesVisualGroups && !selectedGroupIds?.size) ||
               busy

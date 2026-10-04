@@ -20,7 +20,8 @@ import {
 } from "./jobs/lifecycle";
 import { currentGenerationEngine } from "./jobs/engine";
 import { buildImageTasks } from "./jobs/planning";
-import { visualReferencePosition } from "./visualGroups/model";
+import { prepareImageTasks } from "./jobs/prepare";
+import { imageTaskKey, variantSelectionValidator } from "./generationTargets";
 import {
   getStoredReviewState,
   jobNeedsImageCostFallback,
@@ -303,20 +304,71 @@ export const get = query({
   },
 });
 
+export const preview = query({
+  args: {
+    productIds: v.array(v.id("products")),
+    visualGroupIds: v.optional(v.array(v.id("visualGroups"))),
+    selectedImageTypes: v.array(v.string()),
+    variantSelection: v.optional(variantSelectionValidator),
+  },
+  returns: v.object({
+    totalImages: v.number(),
+    separatedProductCount: v.number(),
+    error: v.union(v.string(), v.null()),
+  }),
+  handler: async (ctx, args) => {
+    const userId = await requireUserId(ctx);
+    const scope = await getActiveShopScope(ctx, userId);
+    const products = await Promise.all(
+      Array.from(new Set(args.productIds)).map((id) => ctx.db.get(id)),
+    );
+    if (
+      products.some((product) => !product || !shopMatchesScope(product, scope))
+    )
+      throw new Error("Selected products must belong to the active shop.");
+    if (!products.length || !args.selectedImageTypes.length)
+      return { totalImages: 0, separatedProductCount: 0, error: null };
+    try {
+      const plan = await prepareImageTasks(ctx, {
+        ...args,
+        products: products as Doc<"products">[],
+        scope,
+      });
+      return {
+        totalImages: plan.planned.length,
+        separatedProductCount: plan.separatedProductCount,
+        error: null,
+      };
+    } catch (error) {
+      return {
+        totalImages: 0,
+        separatedProductCount: 0,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Impossible de préparer la génération.",
+      };
+    }
+  },
+});
+
 export const create = mutation({
   args: {
     productIds: v.array(v.id("products")),
     visualGroupIds: v.optional(v.array(v.id("visualGroups"))),
+    variantSelection: v.optional(variantSelectionValidator),
     selectedImageTypes: v.array(v.string()),
     forceRegenerate: v.boolean(),
     useVibeAnalysis: v.optional(v.boolean()),
     regenerationInstructions: v.optional(v.string()),
   },
+  returns: v.id("generationJobs"),
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
     const shop = await ensureActiveShop(ctx, userId);
     const scope = await getActiveShopScope(ctx, userId);
-    if (!args.productIds.length) throw new Error("Select at least one product.");
+    if (!args.productIds.length)
+      throw new Error("Select at least one product.");
     if (!args.selectedImageTypes.length)
       throw new Error("Select at least one image type.");
     if (
@@ -328,9 +380,12 @@ export const create = mutation({
       );
     }
 
-    const products = (
-      await Promise.all(args.productIds.map((id) => ctx.db.get(id)))
-    ).filter(Boolean) as Doc<"products">[];
+    const loadedProducts = await Promise.all(
+      Array.from(new Set(args.productIds)).map((id) => ctx.db.get(id)),
+    );
+    if (loadedProducts.some((product) => !product))
+      throw new Error("One or more selected products no longer exist.");
+    const products = loadedProducts as Doc<"products">[];
     if (!products.length) throw new Error("No products found.");
     if (products.some((product) => !shopMatchesScope(product, scope))) {
       throw new Error("Selected products must belong to the active shop.");
@@ -349,59 +404,13 @@ export const create = mutation({
     const { imageProvider, executionMode, imageModel, vibeAnalysisDefault } =
       await currentGenerationEngine(ctx, scope);
     const vibeAnalysis = args.useVibeAnalysis ?? vibeAnalysisDefault;
-    const prompts = await promptsForScope(ctx, scope);
-    const promptSettings = await promptSettingsForScope(ctx, scope);
-    const modelReferences = sanitizeModelReferences(promptSettings?.modelReferences);
-    const groupTargets = (args.visualGroupIds?.length
-      ? await ctx.runQuery(internal.visualGroups.groupTargets, {
-          groupIds: args.visualGroupIds,
-        })
-      : []) as Array<{
-      group: Doc<"visualGroups">;
-      variants: Doc<"visualGroupVariants">[];
-      references: Doc<"visualGroupReferences">[];
-    }>;
-    const selectedProductIds = new Set(products.map((product) => product._id));
-    if (
-      groupTargets.some(
-        (target) => !selectedProductIds.has(target.group.productId),
-      )
-    ) {
-      throw new Error(
-        "Every selected visual group must belong to a selected product.",
-      );
-    }
-    if (
-      args.visualGroupIds?.length &&
-      groupTargets.length !== new Set(args.visualGroupIds).size
-    ) {
-      throw new Error("One or more selected visual groups no longer exist.");
-    }
-    if (groupTargets.some((target) => !target.references.length)) {
-      throw new Error(
-        "Confirm at least one reference image for every selected visual group.",
-      );
-    }
-    const { planned, selectedImageTypes } = buildImageTasks({
+    const { planned, selectedImageTypes } = await prepareImageTasks(ctx, {
       products,
-      prompts,
-      promptSettings,
-      modelReferences,
+      scope,
       selectedImageTypes: args.selectedImageTypes,
+      visualGroupIds: args.visualGroupIds,
+      variantSelection: args.variantSelection,
       regenerationInstructions: args.regenerationInstructions,
-      visualTargets: groupTargets.map((target) => ({
-        productId: target.group.productId,
-        groupId: target.group._id,
-        key: target.group.key,
-        label: target.group.label,
-        optionValues: target.group.optionValues,
-        referenceUrls: target.references
-          .sort(
-            (left, right) =>
-              visualReferencePosition(left) - visualReferencePosition(right),
-          )
-          .map((reference) => reference.referenceUrl),
-      })),
     });
     const now = Date.now();
 
@@ -421,6 +430,7 @@ export const create = mutation({
       imageModel,
       productIds: products.map((product) => product._id),
       selectedImageTypes,
+      variantSelection: args.variantSelection,
       forceRegenerate: args.forceRegenerate,
       totalTasks: planned.length,
       completedTasks: 0,
@@ -448,14 +458,16 @@ export const create = mutation({
         visualGroupKey: task.visualGroupKey,
         visualGroupLabel: task.visualGroupLabel,
         imageType: task.imageType,
+        generationTarget: task.generationTarget,
+        promptBranch: task.promptBranch,
         imageProvider,
         imageModel,
-      promptUsed: task.promptUsed,
-      finalPromptUsed: task.promptUsed,
-      promptKind: task.promptKind,
-      modelReferenceKey: task.modelReferenceKey,
-      modelReferenceStorageId: task.modelReferenceStorageId,
-      modelReferenceUrl: task.modelReferenceUrl,
+        promptUsed: task.promptUsed,
+        finalPromptUsed: task.promptUsed,
+        promptKind: task.promptKind,
+        modelReferenceKey: task.modelReferenceKey,
+        modelReferenceStorageId: task.modelReferenceStorageId,
+        modelReferenceUrl: task.modelReferenceUrl,
         useVibeAnalysis: task.useVibeAnalysis,
         vibeUsed: null,
         referenceImageCount: task.referenceImageCount,
@@ -1008,6 +1020,7 @@ export const completeImage = internalMutation({
     costUsd: v.optional(v.number()),
     costRateMultiplier: v.optional(v.number()),
   },
+  returns: v.object({ completed: v.boolean(), cleanupUrls: v.array(v.string()) }),
   handler: async (ctx, args) => {
     const image = await ctx.db.get(args.imageId);
     if (
@@ -1053,6 +1066,8 @@ export const completeImage = internalMutation({
       await ctx.db.patch(source._id, {
         imageProvider: image.imageProvider,
         imageModel: image.imageModel,
+        generationTarget: image.generationTarget,
+        promptBranch: image.promptBranch,
         promptUsed: image.promptUsed,
         finalPromptUsed: image.finalPromptUsed ?? image.promptUsed,
         promptKind: image.promptKind,
@@ -1420,6 +1435,7 @@ export const insertRetouchedImage = internalMutation({
     storageUrl: v.string(),
     saveMode: v.optional(v.union(v.literal("version"), v.literal("overwrite"))),
   },
+  returns: v.id("generatedImages"),
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
     const scope = await getActiveShopScope(ctx, userId);
@@ -1483,6 +1499,8 @@ export const insertRetouchedImage = internalMutation({
       ...(source.imageModel !== undefined
         ? { imageModel: source.imageModel }
         : {}),
+      generationTarget: source.generationTarget,
+      promptBranch: source.promptBranch,
       promptUsed: source.promptUsed,
       finalPromptUsed: source.finalPromptUsed ?? source.promptUsed,
       ...(source.promptKind ? { promptKind: source.promptKind } : {}),
@@ -1593,6 +1611,7 @@ export const regenerateImage = mutation({
     imageId: v.id("generatedImages"),
     regenerationInstructions: v.optional(v.string()),
   },
+  returns: v.id("generationJobs"),
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
     const scope = await getActiveShopScope(ctx, userId);
@@ -1614,7 +1633,9 @@ export const regenerateImage = mutation({
 
     const instructions = args.regenerationInstructions?.trim();
     if (instructions && instructions.length > 2000) {
-      throw new Error("Regeneration instructions must be 2000 characters or fewer.");
+      throw new Error(
+        "Regeneration instructions must be 2000 characters or fewer.",
+      );
     }
 
     const job = await ctx.db.get(image.jobId);
@@ -1632,21 +1653,43 @@ export const regenerateImage = mutation({
       throw new Error("Product not found.");
     }
 
-    const { imageProvider, imageModel, executionMode } = await currentGenerationEngine(
-      ctx,
-      scope,
-    );
+    const { imageProvider, imageModel, executionMode } =
+      await currentGenerationEngine(ctx, scope);
     const prompts = await promptsForScope(ctx, scope);
     const promptSettings = await promptSettingsForScope(ctx, scope);
-    const modelReferences = sanitizeModelReferences(promptSettings?.modelReferences);
-    const { planned } = buildImageTasks({
-      products: [product],
-      prompts,
-      promptSettings,
-      modelReferences,
-      selectedImageTypes: [image.imageType],
-      regenerationInstructions: instructions || undefined,
-    });
+    const modelReferences = sanitizeModelReferences(
+      promptSettings?.modelReferences,
+    );
+    const { planned } = image.generationTarget
+      ? buildImageTasks({
+          products: [product],
+          prompts,
+          promptSettings,
+          modelReferences,
+          selectedImageTypes: [image.imageType],
+          regenerationInstructions: instructions || undefined,
+          restoredTarget: {
+            generationTarget: image.generationTarget,
+            groupId: image.visualGroupId ?? null,
+            key: image.visualGroupKey ?? null,
+            label: image.visualGroupLabel ?? null,
+            optionValues: image.generationTarget.selectedOptions,
+            referenceUrls:
+              image.sourceImageUrls ??
+              [image.sourceImageUrl, image.sourceImageUrl2].filter(
+                (url): url is string => Boolean(url),
+              ),
+          },
+        })
+      : await prepareImageTasks(ctx, {
+          products: [product],
+          scope,
+          selectedImageTypes: [image.imageType],
+          ...(image.visualGroupId
+            ? { visualGroupIds: [image.visualGroupId] }
+            : {}),
+          regenerationInstructions: instructions || undefined,
+        });
     const task = planned[0];
     if (!task) {
       throw new Error("Image type is no longer available for generation.");
@@ -1656,7 +1699,8 @@ export const regenerateImage = mutation({
     const effectiveExecutionMode = job.executionMode ?? executionMode;
     const effectiveImageProvider =
       image.imageProvider ?? job.imageProvider ?? imageProvider;
-    const effectiveImageModel = image.imageModel ?? job.imageModel ?? imageModel;
+    const effectiveImageModel =
+      image.imageModel ?? job.imageModel ?? imageModel;
     const retryShopId = image.shopId ?? job.shopId;
     const retryJobId = await ctx.db.insert("generationJobs", {
       ...(retryShopId ? { shopId: retryShopId } : {}),
@@ -1698,6 +1742,11 @@ export const regenerateImage = mutation({
       productId: product._id,
       jobId: retryJobId,
       imageType: image.imageType,
+      generationTarget: task.generationTarget,
+      promptBranch: task.promptBranch,
+      visualGroupId: task.visualGroupId,
+      visualGroupKey: task.visualGroupKey,
+      visualGroupLabel: task.visualGroupLabel,
       imageProvider: effectiveImageProvider,
       imageModel: effectiveImageModel,
       promptUsed: task.promptUsed,
@@ -1765,12 +1814,12 @@ export const regenerateImage = mutation({
     );
 
     return retryJobId;
-
   },
 });
 
 export const retry = mutation({
   args: { jobId: v.id("generationJobs") },
+  returns: v.null(),
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
     const scope = await getActiveShopScope(ctx, userId);
@@ -1789,25 +1838,25 @@ export const retry = mutation({
     if (!toRetry.length) throw new Error("No failed images to retry.");
     const canResumePostProcessing = canResumeBackgroundRemoval(toRetry);
 
-  const now = Date.now();
-  const affectedProductIds = new Set<Id<"products">>();
-  const affectedJobIds = new Set<Id<"generationJobs">>([args.jobId]);
-  const existingSegments = await ctx.db
-    .query("generationBatchSegments")
-    .withIndex("by_job", (q) => q.eq("jobId", args.jobId))
-    .collect();
-  for (const segment of existingSegments) {
-    if (isTerminalBatchSegmentStatus(segment.status)) continue;
-    await ctx.db.patch(segment._id, {
-      status: "cancelled",
-      ingestionStartedAt: null,
-      updatedAt: now,
-    });
-  }
+    const now = Date.now();
+    const affectedProductIds = new Set<Id<"products">>();
+    const affectedJobIds = new Set<Id<"generationJobs">>([args.jobId]);
+    const existingSegments = await ctx.db
+      .query("generationBatchSegments")
+      .withIndex("by_job", (q) => q.eq("jobId", args.jobId))
+      .collect();
+    for (const segment of existingSegments) {
+      if (isTerminalBatchSegmentStatus(segment.status)) continue;
+      await ctx.db.patch(segment._id, {
+        status: "cancelled",
+        ingestionStartedAt: null,
+        updatedAt: now,
+      });
+    }
 
     // Cancel any stuck images from OTHER jobs on the same products so they
     // don't show as phantom "generating"/"queued" entries on the product page.
-    const retryImageTypes = new Set(toRetry.map((img) => img.imageType));
+    const retryImageTargets = new Set(toRetry.map(imageTaskKey));
     for (const productId of job.productIds as Id<"products">[]) {
       const otherImages = await ctx.db
         .query("generatedImages")
@@ -1815,7 +1864,7 @@ export const retry = mutation({
         .collect();
       for (const img of otherImages) {
         if (img.jobId === args.jobId) continue;
-        if (!retryImageTypes.has(img.imageType)) continue;
+        if (!retryImageTargets.has(imageTaskKey(img))) continue;
         if (isActiveImageStatus(img.status)) {
           await ctx.db.patch(img._id, supersedeImagePatch(now));
           affectedProductIds.add(img.productId);
@@ -1833,28 +1882,28 @@ export const retry = mutation({
     const kept = images.filter(
       (img) => img.status === "generated" || img.status === "uploaded",
     );
-  const previousBatchIds = Array.from(
-    new Set([
-      ...(job.previousBatchIds ?? []),
-      ...(job.batchId ? [job.batchId] : []),
-      ...existingSegments
-        .map((segment) => segment.batchId)
-        .filter((batchId): batchId is string => Boolean(batchId)),
-    ]),
-  );
-  await ctx.db.patch(args.jobId, {
-    status: "queued",
-    batchId: null,
-    previousBatchIds,
-    batchStatus: null,
-    batchInputFileName: null,
-    batchIngestionStartedAt: null,
-    batchResultOffset: 0,
-    batchSubmitStartedAt: undefined,
-    allBatchesSubmittedAt: undefined,
-    firstResultReadyAt: undefined,
-    firstImageStoredAt: undefined,
-    error: null,
+    const previousBatchIds = Array.from(
+      new Set([
+        ...(job.previousBatchIds ?? []),
+        ...(job.batchId ? [job.batchId] : []),
+        ...existingSegments
+          .map((segment) => segment.batchId)
+          .filter((batchId): batchId is string => Boolean(batchId)),
+      ]),
+    );
+    await ctx.db.patch(args.jobId, {
+      status: "queued",
+      batchId: null,
+      previousBatchIds,
+      batchStatus: null,
+      batchInputFileName: null,
+      batchIngestionStartedAt: null,
+      batchResultOffset: 0,
+      batchSubmitStartedAt: undefined,
+      allBatchesSubmittedAt: undefined,
+      firstResultReadyAt: undefined,
+      firstImageStoredAt: undefined,
+      error: null,
       totalTasks: toRetry.length + kept.length,
       failedTasks: 0,
       completedTasks: kept.length,
