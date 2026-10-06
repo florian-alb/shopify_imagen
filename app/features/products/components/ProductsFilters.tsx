@@ -31,10 +31,12 @@ const actionTabs: Array<{ label: string; value: ProductActionFilter }> = [
 export function ProductsFilters({
   search,
   facets,
+  resultCount,
   onFilterChange,
 }: {
   search: ProductSearch;
   facets: ProductFacets | undefined;
+  resultCount: number | undefined;
   onFilterChange: (patch: Partial<ProductSearch>) => void;
 }) {
   return (
@@ -158,6 +160,11 @@ export function ProductsFilters({
             ))}
           </FilterSelect>
         </div>
+        <p className="text-xs text-muted-foreground" role="status" aria-live="polite">
+          {resultCount === undefined
+            ? "Chargement du nombre de résultats…"
+            : `${resultCount.toLocaleString("fr-FR")} résultat${resultCount === 1 ? "" : "s"}`}
+        </p>
       </CardContent>
     </Card>
   );

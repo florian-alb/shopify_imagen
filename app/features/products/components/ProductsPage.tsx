@@ -44,6 +44,7 @@ function ProductsPageForShop({ search }: { search: ProductSearch }) {
     chooserOpen,
     creatingJob,
     facets,
+    filteredProductsCount,
     imageTypes,
     imageTypeSelection,
     variants,
@@ -108,6 +109,7 @@ function ProductsPageForShop({ search }: { search: ProductSearch }) {
       <ProductsFilters
         search={search}
         facets={facets}
+        resultCount={filteredProductsCount}
         onFilterChange={updateFilters}
       />
 
