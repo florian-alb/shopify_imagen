@@ -173,8 +173,10 @@ export function useSettingsPage() {
   async function runSync() {
     setSyncing(true);
     try {
-      await syncProducts({ limit: 1000 });
-      toast.success("Catalogue Shopify synchronise");
+      const { synced } = await syncProducts({});
+      toast.success("Catalogue Shopify synchronisé", {
+        description: `${synced.toLocaleString("fr-FR")} produit${synced === 1 ? "" : "s"} synchronisé${synced === 1 ? "" : "s"}.`,
+      });
     } catch (error) {
       toast.error("Synchronisation impossible", {
         description: error instanceof Error ? error.message : String(error),

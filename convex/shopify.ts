@@ -318,8 +318,12 @@ function generatedImageAssetUrls(image: Doc<"generatedImages">) {
 
 export const syncProducts = action({
   args: { limit: v.optional(v.number()) },
+  returns: v.object({ synced: v.number() }),
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
+    if (args.limit !== undefined && (!Number.isSafeInteger(args.limit) || args.limit < 1)) {
+      throw new ConvexError("La limite de synchronisation doit être un entier positif.");
+    }
     const credentials = (await ctx.runMutation(
       internal.shops.ensureActiveForAction,
       { userId },
@@ -331,14 +335,15 @@ export const syncProducts = action({
     if (credentials.shopId !== googleFeedContext.shopId) {
       throw new ConvexError("La boutique active a changé pendant la synchronisation.");
     }
-    const limit = Math.max(1, Math.min(args.limit ?? 100, 250));
-    const syncedIds: Id<"products">[] = [];
+    // Page size limits Shopify query cost; only an explicit limit caps the catalogue.
+    const limit = args.limit ?? Infinity;
+    let synced = 0;
     let after: string | null = null;
 
-    while (syncedIds.length < limit) {
+    while (synced < limit) {
       const first = Math.min(
         SHOPIFY_PRODUCT_SYNC_PAGE_SIZE,
-        limit - syncedIds.length,
+        limit - synced,
       );
       const data: ProductsResponse = await shopifyGraphql<ProductsResponse>(
         PRODUCTS_QUERY,
@@ -369,16 +374,20 @@ export const syncProducts = action({
             removeMissing: true,
           });
         }
-        syncedIds.push(id);
+        synced += 1;
       }
-      if (!data.products.pageInfo.hasNextPage) break;
-      after = data.products.pageInfo.endCursor;
+      if (!data.products.pageInfo.hasNextPage || synced >= limit) break;
+      const nextCursor = data.products.pageInfo.endCursor;
+      if (!nextCursor || nextCursor === after || !data.products.nodes.length) {
+        throw new ConvexError("Shopify n’a pas fourni de curseur valide pour poursuivre la synchronisation.");
+      }
+      after = nextCursor;
     }
 
     await ctx.runMutation(internal.products.refreshFacets, {
       shopId: credentials.shopId ?? null,
     });
-    return { synced: syncedIds.length };
+    return { synced };
   },
 });
 

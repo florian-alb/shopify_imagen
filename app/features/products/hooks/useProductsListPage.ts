@@ -138,8 +138,10 @@ export function useProductsListPage(search: ProductSearch) {
   async function runSync() {
     setSyncing(true);
     try {
-      await syncProducts({ limit: 1000 });
-      toast.success("Shopify catalog synced");
+      const { synced } = await syncProducts({});
+      toast.success("Catalogue Shopify synchronisé", {
+        description: `${synced.toLocaleString("fr-FR")} produit${synced === 1 ? "" : "s"} synchronisé${synced === 1 ? "" : "s"}.`,
+      });
     } catch (syncError) {
       toast.error("Sync failed", {
         description:
