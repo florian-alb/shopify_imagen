@@ -9,6 +9,7 @@ import {
 } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireUserId } from "./authz";
+import schema from "./schema";
 import { getActiveShopScope, shopMatchesScope, type ShopScope } from "./shopScope";
 import {
   DEFAULT_PAGE_SIZE,
@@ -222,11 +223,22 @@ export const list = query({
   }
 });
 
+const productDocumentValidator = schema.tables.products.validator.extend({
+  _id: v.id("products"),
+  _creationTime: v.number(),
+});
+
 export const navigation = query({
   args: {
-    productId: v.id("products"),
+    productId: v.optional(v.id("products")),
     ...productFilterArgs
   },
+  returns: v.object({
+    previous: v.union(productDocumentValidator, v.null()),
+    next: v.union(productDocumentValidator, v.null()),
+    position: v.union(v.number(), v.null()),
+    total: v.number(),
+  }),
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
     const scope = await getActiveShopScope(ctx, userId);

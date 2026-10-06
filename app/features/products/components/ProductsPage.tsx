@@ -54,6 +54,7 @@ function ProductsPageForShop({ search }: { search: ProductSearch }) {
     products,
     selected,
     syncing,
+    totalProducts,
     generate,
     openChooser,
     openChooserForProduct,
@@ -69,9 +70,11 @@ function ProductsPageForShop({ search }: { search: ProductSearch }) {
   return (
     <main className={pageContentClass}>
       <PageHeader
-        eyebrow={`${
-          productPage?.hasNext ? `${pageSize}+` : products.length
-        } produits visibles`}
+        eyebrow={
+          totalProducts === undefined
+            ? "Chargement du total…"
+            : `${totalProducts.toLocaleString("fr-FR")} produit${totalProducts === 1 ? "" : "s"} au total`
+        }
         title="Produits"
         action={
           <>
