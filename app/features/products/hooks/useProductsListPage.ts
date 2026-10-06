@@ -63,6 +63,7 @@ export function useProductsListPage(search: ProductSearch) {
     limit: pageSize,
   }) as ProductPageResult | undefined;
   const products = useMemo(() => productPage?.page ?? [], [productPage?.page]);
+  const catalogNavigation = useQuery(api.products.navigation, {});
   const visibleProductIds = useMemo(
     () => products.map((product) => product._id),
     [products],
@@ -230,6 +231,7 @@ export function useProductsListPage(search: ProductSearch) {
     pageSize,
     productPage,
     products,
+    totalProducts: catalogNavigation?.total,
     bulkTransform,
     bulkReorder,
     hasTrackedBulk: hasTrackedBulk ?? false,

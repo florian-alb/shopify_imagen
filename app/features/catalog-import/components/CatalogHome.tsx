@@ -1,40 +1,40 @@
-import { useState } from "react"
-import { Link, useNavigate } from "@tanstack/react-router"
-import { useMutation, useQuery } from "convex/react"
-import { ArrowRight } from "lucide-react"
-import { api } from "@/lib/convex"
-import { PageHeader, pageContentClass } from "@/components/page"
-import { Input } from "@/components/ui/input"
-import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
+import { useState } from "react";
+import { Link, useNavigate } from "@tanstack/react-router";
+import { useMutation, useQuery } from "convex/react";
+import { ArrowRight } from "lucide-react";
+import { api } from "@/lib/convex";
+import { PageHeader, pageContentClass } from "@/components/page";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 
 type Summary = {
-  id: string
-  origin: string
-  mode: string
-  topN?: number
-  status: string
-  complete: number
-  total: number
-  updatedAt: number
-}
+  id: string;
+  origin: string;
+  mode: string;
+  topN?: number;
+  status: string;
+  complete: number;
+  total: number;
+  updatedAt: number;
+};
 const labels: Record<string, string> = {
   working: "En cours",
   tags: "Tags à valider",
   ready: "Disponible",
   partial: "Partiel",
   blocked: "À relancer",
-}
+};
 export function CatalogHome() {
   const raw = useQuery(api.catalogues.list),
-    rows: Summary[] = raw ? JSON.parse(raw) : []
+    rows: Summary[] = raw ? JSON.parse(raw) : [];
   const create = useMutation(api.catalogues.create),
-    navigate = useNavigate()
+    navigate = useNavigate();
   const [url, setUrl] = useState(""),
     [mode, setMode] = useState<"ALL" | "TOP_N">("ALL"),
     [n, setN] = useState("25"),
     [busy, setBusy] = useState(false),
-    [error, setError] = useState("")
+    [error, setError] = useState("");
   return (
     <main className={pageContentClass}>
       <PageHeader title="Import de catalogue">
@@ -43,25 +43,25 @@ export function CatalogHome() {
       <form
         className="max-w-2xl space-y-6 py-4"
         onSubmit={async (e) => {
-          e.preventDefault()
-          setBusy(true)
-          setError("")
+          e.preventDefault();
+          setBusy(true);
+          setError("");
           try {
             if (mode === "TOP_N" && !/^[1-9]\d*$/.test(n))
-              throw new Error("Indiquez un entier strictement positif.")
+              throw new Error("Indiquez un entier strictement positif.");
             const id = await create({
               url,
               mode,
               ...(mode === "TOP_N" ? { topN: Number(n) } : {}),
-            })
+            });
             await navigate({
               to: "/catalog-import/$exportId",
               params: { exportId: id },
-            })
+            });
           } catch (e) {
-            setError(e instanceof Error ? e.message : "Analyse impossible.")
+            setError(e instanceof Error ? e.message : "Analyse impossible.");
           } finally {
-            setBusy(false)
+            setBusy(false);
           }
         }}
       >
@@ -71,7 +71,7 @@ export function CatalogHome() {
             type="url"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://www.kuscheltierland.de"
+            placeholder="https://www.site.com"
             required
             autoComplete="url"
           />
@@ -164,5 +164,5 @@ export function CatalogHome() {
         )}
       </section>
     </main>
-  )
+  );
 }
