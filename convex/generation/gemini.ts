@@ -56,7 +56,12 @@ function getCachedReferenceImage(
 ) {
   let cached = cache.get(url);
   if (!cached) {
-    cached = normalizeReferenceImage(url);
+    cached = normalizeReferenceImage(url).catch((error) => {
+      // Share in-flight downloads, but let later batch segments recover after
+      // a temporary supplier/CDN failure instead of reusing a rejected promise.
+      if (cache.get(url) === cached) cache.delete(url);
+      throw error;
+    });
     cache.set(url, cached);
   }
   return cached;

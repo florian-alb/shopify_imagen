@@ -2,25 +2,86 @@
 
 import sharp from "sharp";
 
-import { intEnv } from "./runtime";
+import { intEnv, log, sleep } from "./runtime";
+
+const REFERENCE_DOWNLOAD_ATTEMPTS = 3;
+const REFERENCE_DOWNLOAD_TIMEOUT_MS = 20_000;
+const MAX_REFERENCE_RETRY_DELAY_MS = 10_000;
+
+class ReferenceImageHttpError extends Error {
+  constructor(readonly status: number) {
+    super(`Failed to download supplier reference image (${status}).`);
+  }
+}
+
+function isRetryableReferenceStatus(status: number) {
+  return status === 408 || status === 429 || status >= 500;
+}
+
+function referenceRetryDelay(retryAfter: string | null, attempt: number) {
+  const backoff = 1000 * 2 ** (attempt - 1);
+  if (!retryAfter?.trim()) return backoff;
+  const seconds = Number(retryAfter);
+  const requestedDelay = Number.isFinite(seconds)
+    ? seconds * 1000
+    : Date.parse(retryAfter) - Date.now();
+  return Number.isFinite(requestedDelay)
+    ? Math.min(MAX_REFERENCE_RETRY_DELAY_MS, Math.max(backoff, requestedDelay))
+    : backoff;
+}
+
+async function downloadReferenceImage(sourceUrl: string): Promise<Buffer> {
+  for (let attempt = 1; attempt <= REFERENCE_DOWNLOAD_ATTEMPTS; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(),
+      REFERENCE_DOWNLOAD_TIMEOUT_MS,
+    );
+    let retryAfter: string | null = null;
+    let failure: Error;
+    try {
+      const response = await fetch(sourceUrl, { signal: controller.signal });
+      if (!response.ok) {
+        retryAfter = response.headers.get("retry-after");
+        await response.body?.cancel().catch(() => {});
+        throw new ReferenceImageHttpError(response.status);
+      }
+      // Keep the timeout active while reading the body: a connection can fail
+      // after the server has already returned successful response headers.
+      return Buffer.from(await response.arrayBuffer());
+    } catch (error) {
+      if (error instanceof ReferenceImageHttpError) {
+        if (!isRetryableReferenceStatus(error.status)) throw error;
+        failure = error;
+      } else {
+        failure = new Error(
+          controller.signal.aborted
+            ? "Timed out downloading supplier reference image."
+            : `Network error downloading supplier reference image: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+        );
+      }
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    if (attempt === REFERENCE_DOWNLOAD_ATTEMPTS) {
+      throw new Error(`${failure.message} Tried ${attempt} times; please retry later.`);
+    }
+    const delayMs = referenceRetryDelay(retryAfter, attempt);
+    log("reference", "download failed; retrying", {
+      attempt,
+      delayMs,
+      error: failure.message,
+    });
+    await sleep(delayMs);
+  }
+  throw new Error("Supplier reference image download attempts exhausted.");
+}
 
 export async function normalizeReferenceImage(sourceUrl: string) {
-  let response: Response;
-  try {
-    response = await fetch(sourceUrl);
-  } catch (err) {
-    throw new Error(
-      `Network error fetching reference image from ${sourceUrl}: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
-    );
-  }
-  if (!response.ok) {
-    throw new Error(
-      `Failed to download supplier reference image (${response.status}).`,
-    );
-  }
-  const bytes = Buffer.from(await response.arrayBuffer());
+  const bytes = await downloadReferenceImage(sourceUrl);
   // sharp (not jimp) so WebP/AVIF reference images decode correctly. Fit
   // within 1024px, flatten transparency onto white, output JPEG.
   return sharp(bytes)
