@@ -1,8 +1,4 @@
-import {
-  ImageIcon,
-  RefreshCw,
-  WandSparkles,
-} from "lucide-react";
+import { ImageIcon, RefreshCw, WandSparkles } from "lucide-react";
 import { useQuery } from "convex/react";
 
 import {
@@ -102,9 +98,7 @@ function ProductsPageForShop({ search }: { search: ProductSearch }) {
             </Button>
           </>
         }
-      >
-        Catalogue Shopify, générations d’images et publication en une seule table.
-      </PageHeader>
+      ></PageHeader>
 
       <ProductsFilters
         search={search}
