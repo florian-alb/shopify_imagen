@@ -9,6 +9,7 @@ export type JobSearch = {
   executionMode?: Exclude<ExecutionModeFilter, "all">;
   provider?: Exclude<ProviderFilter, "all">;
   review?: Exclude<JobReviewFilter, "all">;
+  archived?: boolean;
   page?: number;
   pageSize?: number;
 };
@@ -29,6 +30,7 @@ export function validateJobSearch(search: Record<string, unknown>): JobSearch {
     executionMode: optionalEnum(search.executionMode, executionModes),
     provider: optionalEnum(search.provider, providers),
     review: optionalEnum(search.review, jobReviewFilters),
+    archived: search.archived === true || search.archived === "true" ? true : undefined,
     page: page && page > 1 ? page : undefined,
     pageSize: pageSize && pageSize !== 20 ? pageSize : undefined,
   };

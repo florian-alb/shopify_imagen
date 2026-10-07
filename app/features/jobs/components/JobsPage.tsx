@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { SelectItem } from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
   TableBody,
@@ -24,6 +25,9 @@ import {
 import { reviewAggregateBadge } from "@/features/images/lib/review";
 import { api, type Doc, type Id } from "@/lib/convex";
 import { formatUsd } from "@/lib/formatters";
+import { useJobHistoryActions } from "../hooks/useJobHistoryActions";
+import { DeleteJobDialog } from "./DeleteJobDialog";
+import { JobHistoryMenu } from "./JobHistoryMenu";
 import type {
   ExecutionModeFilter,
   JobReviewFilter,
@@ -74,8 +78,9 @@ export function JobsPage({ search }: { search: JobSearch }) {
     status: search.status,
     executionMode: search.executionMode,
     provider: search.provider,
-    review: search.review
-  }), [search.executionMode, search.productId, search.provider, search.review, search.status]);
+    review: search.review,
+    archived: search.archived,
+  }), [search.archived, search.executionMode, search.productId, search.provider, search.review, search.status]);
   const jobsPage = useQuery(
     api.jobs.list,
     {
@@ -90,6 +95,14 @@ export function JobsPage({ search }: { search: JobSearch }) {
   const executionModeFilter: ExecutionModeFilter = search.executionMode ?? "all";
   const providerFilter: ProviderFilter = search.provider ?? "all";
   const reviewFilter: JobReviewFilter = search.review ?? "all";
+  const history = useJobHistoryActions({
+    onRemoved: keepCurrentPageValid,
+    onArchiveChanged: keepCurrentPageValid,
+  });
+
+  function keepCurrentPageValid() {
+    if (jobs.length === 1 && page > 1) updatePage(page - 1);
+  }
 
   function updateSearch(patch: Partial<JobSearch>) {
     void navigate({ to: "/jobs", search: { ...search, ...patch }, replace: true });
@@ -163,6 +176,14 @@ export function JobsPage({ search }: { search: JobSearch }) {
           </CardContent>
         </Card>
       ) : null}
+      <Tabs value={search.archived ? "archived" : "history"}
+        onValueChange={value => updateSearch({ archived: value === "archived" ? true : undefined, page: undefined })}
+        className="mb-4">
+        <TabsList aria-label="Vue de l'historique des générations">
+          <TabsTrigger value="history">Historique</TabsTrigger>
+          <TabsTrigger value="archived">Archivés</TabsTrigger>
+        </TabsList>
+      </Tabs>
       {jobsPage === undefined ? (
         <EmptyState loading title="Chargement des generations" body="Lecture des operations recentes depuis Convex." />
       ) : (
@@ -222,11 +243,11 @@ export function JobsPage({ search }: { search: JobSearch }) {
 
           {jobs.length === 0 ? (
             <EmptyState
-              title={hasActiveFilters ? "Aucune generation ne correspond" : "Aucun job"}
+              title={hasActiveFilters ? "Aucune generation ne correspond" : search.archived ? "Aucun job archivé" : "Aucun job"}
               body={
                 hasActiveFilters
                   ? "Ajustez les filtres pour afficher plus de jobs."
-                  : "Lancez une generation depuis la page produits."
+                  : search.archived ? "Les jobs archivés apparaîtront ici." : "Lancez une generation depuis la page produits."
               }
             />
           ) : (
@@ -290,11 +311,16 @@ export function JobsPage({ search }: { search: JobSearch }) {
                           {new Date(job.createdAt).toLocaleString()}
                         </TableCell>
                         <TableCell className="text-right">
-                          <Button variant="outline" size="sm" asChild>
-                            <Link to="/jobs/$jobId" params={{ jobId: job._id }}>
-                              Ouvrir
-                            </Link>
-                          </Button>
+                          <div className="flex items-center justify-end gap-2">
+                            <Button variant="outline" size="sm" asChild>
+                              <Link to="/jobs/$jobId" params={{ jobId: job._id }}>
+                                Ouvrir
+                              </Link>
+                            </Button>
+                            <JobHistoryMenu job={job} busy={history.busyJobId !== null}
+                              onArchive={() => void history.toggleArchived(job)}
+                              onDelete={() => history.setDeleteTarget(job)} />
+                          </div>
                         </TableCell>
                       </TableRow>
                     );
@@ -314,6 +340,8 @@ export function JobsPage({ search }: { search: JobSearch }) {
           />
         </>
       )}
+      <DeleteJobDialog target={history.deleteTarget} busy={history.busyJobId !== null}
+        onOpenChange={history.onDeleteOpenChange} onConfirm={() => void history.confirmRemoval()} />
     </main>
   );
 }

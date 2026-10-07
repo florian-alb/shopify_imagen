@@ -142,13 +142,8 @@ async function fillSlots(ctx: MutationCtx, job: Doc<"generationJobs">) {
     job.status === "failed"
   )
     return;
-  const segments = await ctx.db
-    .query("generationBatchSegments")
-    .withIndex("by_job", (q) => q.eq("jobId", job._id))
-    .take(1000);
-  const active = segments.filter((s) => !terminal(s));
-  // An uncertain submission holds its slot, and prevents new paid dispatches.
-  if (active.some((s) => s.phase === "uncertain")) return;
+  // Uncertain submissions keep their reserved slot. Independent work can use
+  // the remaining capacity without replaying that submission.
   const globalMaximum = job.openAiBatchConcurrency ?? 2;
   const globalActive = [
     ...(await ctx.db
@@ -170,7 +165,6 @@ async function fillSlots(ctx: MutationCtx, job: Doc<"generationJobs">) {
       )
       .take(4)),
   ];
-  if (globalActive.some((s) => s.phase === "uncertain")) return;
   const available = Math.max(0, globalMaximum - globalActive.length);
   for (let slot = 0; slot < available; slot++) {
     const images = await ctx.db
@@ -333,6 +327,84 @@ export const claim = internalMutation({
     };
     await ctx.db.patch(s._id, patch);
     return { ...s, ...patch };
+  },
+});
+
+// Operator-only replacement after a fresh, exhaustive provider scan. An empty
+// automatic reconciliation never invokes this mutation or resets a create fence.
+export const replaceUnacceptedSegment = internalMutation({
+  args: {
+    segmentId: v.id("generationBatchSegments"),
+    expectedSubmissionKey: v.string(),
+    expectedInputFileId: v.string(),
+    expectedAttemptedAt: v.number(),
+    token: v.string(),
+    verifiedAbsentAt: v.number(),
+  },
+  returns: v.object({
+    retiredSegmentId: v.id("generationBatchSegments"),
+    replacementSegmentId: v.id("generationBatchSegments"),
+  }),
+  handler: async (ctx, args) => {
+    const s = await ctx.db.get(args.segmentId);
+    const job = s ? await ctx.db.get(s.jobId) : null;
+    const now = Date.now();
+    if (!s || !job || job.status !== "running" || s.provider !== "openai" ||
+      s.status !== "submitting" || s.phase !== "uncertain" || s.batchId ||
+      s.submissionKey !== args.expectedSubmissionKey ||
+      s.inputFileName !== args.expectedInputFileId ||
+      s.submissionAttemptedAt !== args.expectedAttemptedAt ||
+      s.leaseToken !== args.token || (s.leaseUntil ?? 0) <= now)
+      throw new Error("Uncertain submission changed or recovery lease expired.");
+    if (now - args.expectedAttemptedAt < 30 * 60_000 ||
+      args.verifiedAbsentAt > now || now - args.verifiedAbsentAt > 60_000)
+      throw new Error("Recovery requires an old submission and a fresh complete OpenAI scan.");
+    const images = await ctx.db.query("generatedImages")
+      .withIndex("by_batch_segment", q => q.eq("batchSegmentId", s._id))
+      .take(101);
+    if (!images.length || s.imageCount > 100 || images.length !== s.imageCount ||
+      s.preparedTasks !== s.imageCount || images.some(image =>
+        image.jobId !== job._id || image.status !== "queued" ||
+        !image.openAiPrepared || image.providerBatchId ||
+        image.storageUrl || image.generatedImageUrl))
+      throw new Error("Recovery only replaces prepared, unaccepted queued image tasks.");
+    const replacementSegmentId = await ctx.db.insert("generationBatchSegments", {
+      jobId: job._id,
+      provider: "openai",
+      status: "submitting",
+      phase: "submitting",
+      inputFileName: s.inputFileName,
+      imageCount: images.length,
+      preparedTasks: images.length,
+      ingestedCount: 0,
+      failedCount: 0,
+      resultOffset: 0,
+      resultFileIndex: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await ctx.db.patch(replacementSegmentId, {
+      submissionKey: `segment:${replacementSegmentId}`,
+    });
+    await ctx.db.patch(s._id, {
+      status: "cancelled",
+      phase: "failed",
+      cancellationPending: false,
+      cancellationReconciled: true,
+      submissionRecovery: { checkedAt: args.verifiedAbsentAt, replacementSegmentId },
+      leaseToken: undefined,
+      leaseUntil: undefined,
+      error: `Operator recovery after complete OpenAI scan at ${new Date(args.verifiedAbsentAt).toISOString()} found no batch by submission key or input file. Replacement: ${replacementSegmentId}. Previous error: ${s.error ?? "unknown"}`,
+      updatedAt: now,
+    });
+    for (const image of images) await ctx.db.patch(image._id, {
+      batchSegmentId: replacementSegmentId,
+      updatedAt: now,
+    });
+    await ctx.db.patch(job._id, { updatedAt: now });
+    await startSegment(ctx, replacementSegmentId);
+    await ctx.scheduler.runAfter(0, internal.openAiDurable.resumeStarts, {});
+    return { retiredSegmentId: s._id, replacementSegmentId };
   },
 });
 

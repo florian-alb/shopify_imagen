@@ -25,6 +25,77 @@ import {
 import { ingestBatchItem } from "./generation/batchIngestion";
 import { cancelOpenAiBatch } from "./generation/openAiBatch";
 
+// Explicit operator command, never called by the watchdog or workflow. It
+// preserves the original submission identity and refuses partial/ambiguous scans.
+export const recoverUncertainSubmission = internalAction({
+  args: {
+    segmentId: v.id("generationBatchSegments"),
+    expectedSubmissionKey: v.string(),
+    expectedInputFileId: v.string(),
+    expectedAttemptedAt: v.number(),
+    confirmResubmission: v.literal(true),
+  },
+  returns: v.object({
+    retiredSegmentId: v.id("generationBatchSegments"),
+    replacementSegmentId: v.id("generationBatchSegments"),
+  }),
+  handler: async (ctx, args): Promise<{
+    retiredSegmentId: Doc<"generationBatchSegments">["_id"];
+    replacementSegmentId: Doc<"generationBatchSegments">["_id"];
+  }> => {
+    const data = await ctx.runQuery(internal.openAiDurable.context, {
+      segmentId: args.segmentId,
+    });
+    const s = data?.segment;
+    if (!s || data?.job.status !== "running" || s.provider !== "openai" ||
+      s.status !== "submitting" || s.phase !== "uncertain" || s.batchId ||
+      s.submissionKey !== args.expectedSubmissionKey ||
+      s.inputFileName !== args.expectedInputFileId ||
+      s.submissionAttemptedAt !== args.expectedAttemptedAt)
+      throw new Error("Uncertain submission identity or state changed.");
+    if (Date.now() - args.expectedAttemptedAt < 30 * 60_000)
+      throw new Error("Wait at least 30 minutes before operator recovery.");
+    const token = randomUUID();
+    const claimed = await ctx.runMutation(internal.openAiDurable.claim, {
+      segmentId: args.segmentId, token,
+    });
+    if (!claimed) throw new Error("Submission has an active worker lease; retry after it releases.");
+    try {
+      let cursor: string | null = null;
+      for (let page = 0; page < 20; page++) {
+        const found = await findOpenAiBatchBySubmissionKey({
+          submissionKey: args.expectedSubmissionKey,
+          inputFileId: args.expectedInputFileId,
+          cursor,
+          maxPages: 1,
+        });
+        if (found.matches.length)
+          throw new Error("OpenAI has a matching batch by submission key or input file; reconcile it instead of resubmitting.");
+        if (found.exhausted) {
+          const result = await ctx.runMutation(internal.openAiDurable.replaceUnacceptedSegment, {
+            segmentId: args.segmentId,
+            expectedSubmissionKey: args.expectedSubmissionKey,
+            expectedInputFileId: args.expectedInputFileId,
+            expectedAttemptedAt: args.expectedAttemptedAt,
+            token,
+            verifiedAbsentAt: Date.now(),
+          });
+          console.info("OpenAI operator submission recovery", result);
+          return result;
+        }
+        if (!found.cursor || found.cursor === cursor)
+          throw new Error("OpenAI scan returned an invalid pagination cursor.");
+        cursor = found.cursor;
+      }
+      throw new Error("OpenAI scan is incomplete; no submission was replaced.");
+    } finally {
+      await ctx.runMutation(internal.openAiDurable.checkpoint, {
+        segmentId: args.segmentId, token, release: true,
+      });
+    }
+  },
+});
+
 export const advance = internalAction({
   args: { segmentId: v.id("generationBatchSegments") },
   returns: v.object({ done: v.boolean(), delayMs: v.number() }),
@@ -307,7 +378,7 @@ export const advance = internalAction({
           error:
             matches.length > 1
               ? "Multiple OpenAI batches match this submission. Manual reconciliation required."
-              : "Submission uncertain: checking OpenAI before any new submission.",
+              : segment.error ?? "Submission uncertain: checking OpenAI before any new submission.",
         });
         return { done: false, delayMs: found.exhausted ? 300_000 : 1_000 };
       }
@@ -408,9 +479,15 @@ export const advance = internalAction({
         return { done: true, delayMs: 0 };
       }
       if (segment.phase === "submitting" || segment.phase === "uncertain") {
+        if (segment.phase === "submitting") console.warn("OpenAI batch submission uncertain", {
+          segmentId: segment._id,
+          submissionKey: segment.submissionKey,
+          inputFileId: segment.inputFileName,
+          error: message,
+        });
         await checkpoint({
           phase: "uncertain",
-          error: `Submission uncertain: ${message}`,
+          error: segment.error ?? `Submission uncertain: ${message}`,
         });
         return { done: false, delayMs: 60_000 };
       }

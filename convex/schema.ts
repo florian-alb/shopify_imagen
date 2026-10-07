@@ -722,6 +722,11 @@ export default defineSchema({
     reviewRejected: v.optional(v.number()),
     error: v.optional(v.union(v.string(), v.null())),
     isHidden: v.optional(v.boolean()),
+    archivedAt: v.optional(v.number()),
+    archivedByUserId: v.optional(v.id("users")),
+    // History removal keeps the record backing retained product images and costs.
+    deletedAt: v.optional(v.number()),
+    deletedByUserId: v.optional(v.id("users")),
     createdByUserId: v.optional(v.id("users")),
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -751,6 +756,11 @@ export default defineSchema({
     submissionKey: v.optional(v.string()),
     submissionAttemptedAt: v.optional(v.number()),
     submissionRejected: v.optional(v.boolean()),
+    // Operator resolution is distinct from an explicit provider rejection.
+    submissionRecovery: v.optional(v.object({
+      checkedAt: v.number(),
+      replacementSegmentId: v.id("generationBatchSegments"),
+    })),
     cancellationReconciled: v.optional(v.boolean()),
     cancellationPending: v.optional(v.boolean()),
     reconcileCursor: v.optional(v.union(v.string(), v.null())),

@@ -1,3 +1,4 @@
+import { useNavigate } from "@tanstack/react-router";
 import { ImageRetouchDialog } from "@/components/image-retouch-dialog";
 import { EmptyState, pageContentClass } from "@/components/page";
 import { JobDetailHeader } from "./JobDetailHeader";
@@ -10,9 +11,13 @@ import { JobReviewToolbar } from "./JobReviewToolbar";
 import { JobStickyPublishBar } from "./JobStickyPublishBar";
 import { JobTechnicalDetails } from "./JobTechnicalDetails";
 import { useJobDetailPage } from "../hooks/useJobDetailPage";
+import { useJobHistoryActions } from "../hooks/useJobHistoryActions";
+import { DeleteJobDialog } from "./DeleteJobDialog";
 
 export function JobDetailPage({ jobId }: { jobId: string }) {
   const page = useJobDetailPage(jobId);
+  const navigate = useNavigate();
+  const history = useJobHistoryActions({ onRemoved: () => void navigate({ to: "/jobs" }) });
 
   if (page.data === undefined) {
     return (
@@ -51,7 +56,13 @@ export function JobDetailPage({ jobId }: { jobId: string }) {
         onForcePoll={() => void page.actions.forcePoll()}
         onCancel={() => void page.actions.cancel()}
         onRetry={() => void page.actions.retry()}
+        historyBusy={history.busyJobId !== null}
+        onArchive={() => { if (page.job) void history.toggleArchived(page.job); }}
+        onDelete={() => history.setDeleteTarget(page.job)}
       />
+
+      <DeleteJobDialog target={history.deleteTarget} busy={history.busyJobId !== null}
+        onOpenChange={history.onDeleteOpenChange} onConfirm={() => void history.confirmRemoval()} />
 
       <JobProgressCard
         job={page.job}

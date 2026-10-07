@@ -151,6 +151,47 @@ test("reconciliation pages stay bounded and report conflicting batch matches exp
   expect(await findOpenAiBatchBySubmissionKey({ submissionKey: "same", cursor: first.cursor })).toMatchObject({ matches: [], exhausted: true });
 });
 
+test("operator reconciliation finds batches by submission key or input file across all pages", async () => {
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(Response.json({
+      data: [
+        { id: "key-match", input_file_id: "other-file", metadata: { submission_key: "expected-key" }, status: "in_progress" },
+        { id: "file-match", input_file_id: "expected-file", metadata: {}, status: "validating" },
+        { id: "unrelated", input_file_id: "other-file", metadata: { submission_key: "other-key" } },
+      ],
+      has_more: true,
+      last_id: "unrelated",
+    }))
+    .mockResolvedValueOnce(Response.json({
+      data: [{ id: "both-match", input_file_id: "expected-file", metadata: { submission_key: "expected-key" }, status: "completed" }],
+      has_more: false,
+    }));
+  vi.stubGlobal("fetch", fetchMock);
+  const result = await findOpenAiBatchBySubmissionKey({ submissionKey: "expected-key", inputFileId: "expected-file", maxPages: 2 });
+  expect(result).toEqual({
+    matches: [
+      { batchId: "key-match", batchStatus: "in_progress", inputFileId: "other-file" },
+      { batchId: "file-match", batchStatus: "validating", inputFileId: "expected-file" },
+      { batchId: "both-match", batchStatus: "completed", inputFileId: "expected-file" },
+    ],
+    cursor: null,
+    exhausted: true,
+  });
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(fetchMock.mock.calls[1][0]).toContain("after=unrelated");
+  expect(fetchMock.mock.calls.every((call) => call[1]?.method !== "POST")).toBe(true);
+});
+
+test("ordinary reconciliation requires the submission key when no input-file fallback was requested", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({
+    data: [{ id: "same-file-without-key", input_file_id: "expected-file", metadata: {} }],
+    has_more: false,
+  })));
+  expect(await findOpenAiBatchBySubmissionKey({ submissionKey: "expected-key" })).toEqual({
+    matches: [], cursor: null, exhausted: true,
+  });
+});
+
 test.each([408, 503])("HTTP %s during creation is uncertain instead of automatically retried", async (status) => {
   const fetchMock = vi.fn(async () => Response.json({ error: { message: "Upstream unavailable" } }, { status }));
   vi.stubGlobal("fetch", fetchMock);

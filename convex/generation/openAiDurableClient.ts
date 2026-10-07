@@ -203,6 +203,7 @@ export async function createOpenAiBatchFromFile(args: {
 
 export async function findOpenAiBatchBySubmissionKey(args: {
   submissionKey: string;
+  inputFileId?: string;
   cursor?: string | null;
   maxPages?: number;
 }): Promise<{
@@ -223,7 +224,8 @@ export async function findOpenAiBatchBySubmissionKey(args: {
         throw new Error(`OpenAI batch reconciliation failed (${response.status}): ${payload?.error?.message ?? "invalid batch list."}`);
       }
       for (const batch of payload.data) {
-        if (batch.metadata?.submission_key === args.submissionKey && batch.id) {
+        if (batch.id && (batch.metadata?.submission_key === args.submissionKey ||
+          (args.inputFileId && batch.input_file_id === args.inputFileId))) {
           matches.push({ batchId: batch.id, batchStatus: batch.status ?? null, inputFileId: batch.input_file_id ?? null });
         }
       }
