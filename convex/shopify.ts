@@ -10,6 +10,7 @@ import {
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireUserId } from "./authz";
 import schema from "./schema";
+import { assertImageMutable } from "./shared/publicationGuards";
 import { refreshProductSummary } from "./products";
 import { refreshJobSummary } from "./jobs";
 import {
@@ -1106,6 +1107,7 @@ async function publishAsSeparateProducts(args: {
     for (const image of groupImages) {
       await args.ctx.runMutation(internal.shopify.markImagePushed, {
         imageId: image._id,
+        pushRunId: image.pushRunId,
         shopifyMediaId: created.mediaIdByImageId.get(image._id)!,
         publishedShopifyProductId: publishedProduct.id,
       });
@@ -1164,6 +1166,8 @@ type ProductImagePushArgs = {
 };
 
 type CapturedPublicationScope = {
+  runId: Id<"imagePublishRuns">;
+  tracksImageFeedback: boolean;
   shopId: Id<"shops"> | null;
   shopDomain: string;
   images: Array<{ imageId: Id<"generatedImages">; storageUrl: string }>;
@@ -1205,6 +1209,10 @@ async function pushProductImagesForUser(
   const selected = args.imageIds?.length
     ? allImages.filter((image) => args.imageIds!.includes(image._id))
     : allImages;
+  if (!capturedScope && selected.some((image) => image.pushRunId))
+    throw new Error(
+      "Une publication Shopify est déjà en cours pour ces images.",
+    );
   // Allow re-pushing images already marked "uploaded" (e.g. after a WebP
   // re-generation), not just freshly "generated" ones.
   const ready = selected.filter(
@@ -1221,7 +1229,10 @@ async function pushProductImagesForUser(
           !ready.some(
             (image) =>
               image._id === selected.imageId &&
-              image.storageUrl === selected.storageUrl,
+              image.storageUrl === selected.storageUrl &&
+              (capturedScope.tracksImageFeedback
+                ? image.pushRunId === capturedScope.runId
+                : !image.pushRunId || image.pushRunId === capturedScope.runId),
           ),
       ))
   )
@@ -1425,6 +1436,7 @@ async function pushProductImagesForUser(
     for (const image of ready) {
       await ctx.runMutation(internal.shopify.markImagePushed, {
         imageId: image._id,
+        pushRunId: image.pushRunId,
         shopifyMediaId: created.mediaIdByImageId.get(image._id)!,
         publishedShopifyProductId: product.shopifyProductId,
       });
@@ -1570,12 +1582,20 @@ export const promptOrder = internalQuery({
 export const markImagePushed = internalMutation({
   args: {
     imageId: v.id("generatedImages"),
+    pushRunId: v.optional(v.id("imagePublishRuns")),
     shopifyMediaId: v.string(),
     publishedShopifyProductId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const current = await ctx.db.get(args.imageId);
+    if (!current) throw new Error("Image not found.");
+    if (current.pushRunId !== args.pushRunId)
+      throw new Error(
+        "La publication de cette image appartient à un autre envoi.",
+      );
     await ctx.db.patch(args.imageId, {
       status: "uploaded",
+      pushError: undefined,
       shopifyMediaId: args.shopifyMediaId,
       ...(args.publishedShopifyProductId
         ? { publishedShopifyProductId: args.publishedShopifyProductId }
@@ -1639,6 +1659,7 @@ export const deleteImageRecord = internalMutation({
   handler: async (ctx, args) => {
     const image = await ctx.db.get(args.imageId);
     if (!image) return;
+    assertImageMutable(image);
     const product = image.shopifyMediaId
       ? await ctx.db.get(image.productId)
       : null;
@@ -1715,6 +1736,7 @@ export const cleanupStaleRejectedImages = internalAction({
 
     for (const image of images) {
       try {
+        assertImageMutable(image);
         if (
           image.reviewStatus !== "rejected" ||
           (image.reviewedAt ?? image.updatedAt) > cutoff
@@ -1765,6 +1787,7 @@ export const deleteImage = action({
       imageId: args.imageId,
     })) as Doc<"generatedImages"> | null;
     if (!image) throw new Error("Image not found.");
+    assertImageMutable(image);
 
     if (image.shopifyMediaId && image.shopifyMediaId.startsWith("gid://")) {
       const product = (await ctx.runQuery(internal.products.internalGet, {

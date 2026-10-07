@@ -996,6 +996,151 @@ describe("durable OpenAI batch orchestration", () => {
     expect(createOpenAiBatchFromFile).not.toHaveBeenCalled();
   });
 
+  test.each(["failure", "success"])(
+    "job completion during result ingestion releases its lease and the next step closes the segment (%s)",
+    async (outcome) => {
+      const { t, jobId, imageIds } = await fixture();
+      const [segment] = await initialize(t, jobId);
+      await putSegmentInPhase(t, segment._id, "recovering", {
+        status: "running",
+        batchId: "paid-batch",
+        batchStatus: "completed",
+        outputFileId: "paid-results",
+        resultFileIndex: 0,
+        resultOffset: 0,
+      });
+      await t.run(async (ctx) => {
+        for (const imageId of imageIds.slice(0, 2))
+          await ctx.db.patch(imageId, {
+            status: "generated",
+            storageUrl: "https://r2.example.com/kept.png",
+          });
+        await ctx.db.patch(jobId, { completedTasks: 2 });
+      });
+      vi.mocked(ingestOpenAiBatchFilePage).mockImplementationOnce(async (args) => {
+        await args.onItem(imageIds[2], outcome === "failure"
+          ? { error: "Provider timed out downloading a reference" }
+          : { bytes: Buffer.from("last paid result"), contentType: "image/png" }, 100);
+        if (outcome === "success")
+          await t.mutation(internal.jobs.completeImage, {
+            imageId: imageIds[2],
+            storageUrl: "https://r2.example.com/last-paid-result.png",
+            generatedImageUrl: "https://r2.example.com/last-paid-result.png",
+            providerBatchId: "paid-batch",
+          });
+        // A postprocessing worker can finish the job before the ingestion
+        // action checkpoints its file cursor and releases its own lease.
+        await t.mutation(internal.jobs.finishJobIfDone, { jobId });
+        return { byteOffset: 100, done: true, processed: 1 };
+      });
+      expect(await t.action(internal.openAiDurableActions.advance, { segmentId: segment._id }))
+        .toEqual({ done: false, delayMs: 0 });
+      const afterIngestion = (await t.run((ctx) => ctx.db.get(segment._id)))!;
+      expect(afterIngestion).toMatchObject({ status: "running", phase: "recovering" });
+      expect(afterIngestion.leaseToken).toBeUndefined();
+      expect(afterIngestion.leaseUntil).toBeUndefined();
+      expect(await t.run((ctx) => ctx.db.get(jobId))).toMatchObject({
+        status: outcome === "failure" ? "failed" : "completed",
+      });
+      expect(await t.action(internal.openAiDurableActions.advance, { segmentId: segment._id }))
+        .toEqual({ done: true, delayMs: 0 });
+      expect(await t.run((ctx) => ctx.db.get(segment._id))).toMatchObject({
+        status: outcome === "failure" ? "failed" : "completed",
+        phase: outcome === "failure" ? "failed" : "completed",
+        ingestedCount: outcome === "failure" ? 2 : 3,
+        failedCount: outcome === "failure" ? 1 : 0,
+      });
+      expect(ingestOpenAiBatchFilePage).toHaveBeenCalledOnce();
+      expect(createOpenAiBatchFromFile).not.toHaveBeenCalled();
+    },
+  );
+
+  test("a finished job with a live recovery lease keeps its workflow waiting until it can close the segment", async () => {
+    const { t, jobId, imageIds } = await fixture();
+    const [segment] = await initialize(t, jobId);
+    await putSegmentInPhase(t, segment._id, "recovering", {
+      status: "running",
+      batchId: "paid-batch",
+      batchStatus: "completed",
+    });
+    await t.run(async (ctx) => {
+      await ctx.db.patch(jobId, { status: "failed", completedTasks: 2, failedTasks: 1 });
+      for (const imageId of imageIds.slice(0, 2))
+        await ctx.db.patch(imageId, { status: "generated", storageUrl: "https://r2.example.com/kept.png" });
+      await ctx.db.patch(imageIds[2], { status: "failed", error: "Provider reference download failed" });
+    });
+    await t.mutation(internal.openAiDurable.claim, { segmentId: segment._id, token: "previous-ingestion-worker" });
+    expect(await t.action(internal.openAiDurableActions.advance, { segmentId: segment._id }))
+      .toEqual({ done: false, delayMs: 30_000 });
+    expect(await t.run((ctx) => ctx.db.get(segment._id))).toMatchObject({
+      status: "running", phase: "recovering", leaseToken: "previous-ingestion-worker",
+    });
+    vi.setSystemTime(Date.now() + 11 * 60_000 + 1);
+    expect(await t.action(internal.openAiDurableActions.advance, { segmentId: segment._id }))
+      .toEqual({ done: true, delayMs: 0 });
+    const finished = (await t.run((ctx) => ctx.db.get(segment._id)))!;
+    expect(finished).toMatchObject({ status: "failed", phase: "failed", ingestedCount: 2, failedCount: 1 });
+    expect(finished.leaseToken).toBeUndefined();
+    expect(finished.leaseUntil).toBeUndefined();
+    expect(ingestOpenAiBatchFilePage).not.toHaveBeenCalled();
+    expect(createOpenAiBatchFromFile).not.toHaveBeenCalled();
+  });
+
+  test("a stale release after job completion cannot clear another worker's lease", async () => {
+    const { t, jobId } = await fixture();
+    const [segment] = await initialize(t, jobId);
+    await putSegmentInPhase(t, segment._id, "recovering", {
+      status: "running", batchId: "paid-batch", leaseToken: "replacement-worker", leaseUntil: Date.now() + 60_000,
+    });
+    await t.run((ctx) => ctx.db.patch(jobId, { status: "failed" }));
+    expect(await t.mutation(internal.openAiDurable.checkpoint, {
+      segmentId: segment._id, token: "previous-worker", release: true,
+    })).toBe(false);
+    expect(await t.run((ctx) => ctx.db.get(segment._id))).toMatchObject({
+      leaseToken: "replacement-worker", leaseUntil: Date.now() + 60_000,
+    });
+  });
+
+  test.each(["failed", "completed", "cancelled"] as const)(
+    "a token-matched release on a %s job clears only the lease and ignores combined state updates",
+    async (status) => {
+      const { t, jobId } = await fixture();
+      const [segment] = await initialize(t, jobId);
+      await putSegmentInPhase(t, segment._id, "recovering", {
+        status: "running",
+        batchId: "paid-batch",
+        batchStatus: "completed",
+        resultOffset: 17,
+        resultFileIndex: 1,
+        error: "Retained ingestion diagnostic",
+        leaseToken: "ingestion-worker",
+        leaseUntil: Date.now() + 60_000,
+      });
+      await t.run((ctx) => ctx.db.patch(jobId, { status }));
+      await t.mutation(internal.openAiDurable.checkpoint, {
+        segmentId: segment._id,
+        token: "ingestion-worker",
+        release: true,
+        phase: "failed",
+        batchId: "unexpected-new-batch",
+        batchStatus: "in_progress",
+        resultOffset: 999,
+        resultFileIndex: 9,
+        error: "Unexpected replacement diagnostic",
+        dispatch: true,
+      });
+      const released = (await t.run((ctx) => ctx.db.get(segment._id)))!;
+      expect(released).toMatchObject({
+        status: "running", phase: "recovering", batchId: "paid-batch", batchStatus: "completed",
+        resultOffset: 17, resultFileIndex: 1, error: "Retained ingestion diagnostic",
+      });
+      expect(released.submissionAttemptedAt).toBeUndefined();
+      expect(released.leaseToken).toBeUndefined();
+      expect(released.leaseUntil).toBeUndefined();
+      expect(await t.run((ctx) => ctx.db.get(jobId))).toMatchObject({ status });
+    },
+  );
+
   test("resumes result ingestion at its checkpoint and ignores already completed or duplicated results", async () => {
     const { t, jobId, imageIds } = await fixture(1, 2);
     const [segment] = await initialize(t, jobId);

@@ -119,6 +119,7 @@ describe("job detail view model", () => {
       failed: 1,
       pending: 1,
       pushed: 1,
+      pushing: 0,
       rejected: 1,
     });
     expect(viewModel.jobProgressPercent).toBe(50);
@@ -127,6 +128,31 @@ describe("job detail view model", () => {
     expect(viewModel.pushableImages).toHaveLength(2);
     expect(viewModel.selectedPushableImages).toHaveLength(1);
     expect(viewModel.selectedPushProductCount).toBe(1);
+  });
+
+  it("shows publication feedback and errors without losing the approved photo counts", () => {
+    const pushing = generatedImage({ reviewStatus: "approved", pushRunId: "run-1" as never });
+    const failedPush = generatedImage({ reviewStatus: "approved", pushError: "Shopify unavailable" });
+    const pushed = generatedImage({ reviewStatus: "approved", status: "uploaded", pushError: "Gallery update failed" });
+    const images = [pushing, failedPush, pushed];
+    const viewModel = createJobDetailViewModel({
+      filter: "all",
+      images,
+      job: generationJob({ status: "completed", completedTasks: 3, failedTasks: 0, totalTasks: 3 }),
+      products: [product()],
+      pushTargetProductId: null,
+      storeHandle: null,
+    });
+
+    expect(viewModel.approvedImages).toHaveLength(3);
+    expect(viewModel.previewImages).toHaveLength(3);
+    expect(viewModel.reviewCounts).toMatchObject({ approved: 3, pushing: 1, failed: 2, pushed: 1 });
+    expect(viewModel.visibleReviewable).toEqual([failedPush, pushed]);
+    expect(viewModel.pushableImages).toEqual([failedPush]);
+    expect(matchesJobReviewFilter(pushing, "pushing")).toBe(true);
+    expect(matchesJobReviewFilter(failedPush, "failed")).toBe(true);
+    expect(matchesJobReviewFilter(pushed, "failed")).toBe(true);
+    expect(viewModel.jobProgressPercent).toBe(100);
   });
 
   it("preserves the batch cost fallback when no explicit multiplier exists", () => {

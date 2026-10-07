@@ -591,10 +591,20 @@ export const checkpoint = internalMutation({
       !s ||
       !job ||
       terminal(s) ||
-      s.leaseToken !== args.token ||
-      job.status !== "running"
+      s.leaseToken !== args.token
     )
       return false;
+    if (job.status !== "running") {
+      // An ingestion callback can finish the job before the worker's finally
+      // block. Its owner must still release the lease, without advancing state
+      // or reviving work after completion/cancellation.
+      if (!args.release) return false;
+      await ctx.db.patch(s._id, {
+        leaseToken: undefined,
+        leaseUntil: undefined,
+      });
+      return true;
+    }
     const { segmentId, token: _token, release, dispatch, ...updates } = args;
     void _token;
     const patch = Object.fromEntries(

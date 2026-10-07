@@ -3,7 +3,7 @@ import { Check, ExternalLink, Loader2, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { GeneratedImageTile } from "@/features/images/components/GeneratedImageTile";
-import { getReviewStatus, isReviewable } from "@/features/images/lib/review";
+import { canReviewImage, getReviewStatus, isReviewable } from "@/features/images/lib/review";
 import type { Doc, Id } from "@/lib/convex";
 
 export function JobProductReviewCard({
@@ -43,6 +43,7 @@ export function JobProductReviewCard({
   ) => void;
 }) {
   const reviewable = images.filter(isReviewable);
+  const editableImages = images.filter(canReviewImage);
   const approved = reviewable.filter(
     (image) => getReviewStatus(image) === "approved",
   ).length;
@@ -78,10 +79,10 @@ export function JobProductReviewCard({
           <Button
             variant="outline"
             size="sm"
-            disabled={!reviewable.length || reviewing}
+            disabled={!editableImages.length || reviewing}
             onClick={() =>
               onReview(
-                reviewable.map((image) => image._id),
+                editableImages.map((image) => image._id),
                 "approved",
               )
             }

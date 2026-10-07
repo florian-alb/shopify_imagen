@@ -18,6 +18,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { Doc } from "@/lib/convex";
+import { isImagePushing } from "@/features/images/lib/review";
 
 export function JobImagePreviewDialog({
   image,
@@ -42,6 +43,7 @@ export function JobImagePreviewDialog({
   onRetouch: () => void;
   onReview: (reviewStatus: "approved" | "rejected") => void;
 }) {
+  const pushing = image ? isImagePushing(image) : false;
   return (
     <Dialog open={image !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-h-[calc(100vh-2rem)] overflow-y-auto sm:max-w-5xl">
@@ -87,10 +89,13 @@ export function JobImagePreviewDialog({
                 <ChevronRight data-icon="inline-end" />
               </Button>
             </div>
+            {image.pushError && !pushing ? (
+              <p className="text-sm text-destructive">Shopify push: {image.pushError}</p>
+            ) : null}
             <DialogFooter className="flex-col sm:flex-row">
               <Button
                 variant="destructive"
-                disabled={reviewing}
+                disabled={reviewing || pushing}
                 onClick={() => onReview("rejected")}
               >
                 <X data-icon="inline-start" />
@@ -98,7 +103,7 @@ export function JobImagePreviewDialog({
               </Button>
               <Button
                 variant="outline"
-                disabled={regenerating}
+                disabled={regenerating || pushing}
                 onClick={onRegenerate}
               >
                 {regenerating ? (
@@ -110,13 +115,13 @@ export function JobImagePreviewDialog({
               </Button>
               <Button
                 variant="outline"
-                disabled={!image.storageUrl}
+                disabled={!image.storageUrl || pushing}
                 onClick={onRetouch}
               >
                 <Paintbrush data-icon="inline-start" />
                 Retoucher
               </Button>
-              <Button disabled={reviewing} onClick={() => onReview("approved")}>
+              <Button disabled={reviewing || pushing} onClick={() => onReview("approved")}>
                 <Check data-icon="inline-start" />
                 Approve
               </Button>

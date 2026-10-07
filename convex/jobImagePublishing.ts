@@ -12,6 +12,7 @@ import {
   internalQuery,
   mutation,
   query,
+  type MutationCtx,
 } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireUserId } from "./authz";
@@ -89,7 +90,9 @@ export const start = mutation({
         image.status !== "generated" ||
         image.reviewStatus !== "approved" ||
         !image.storageUrl ||
-        image.shopifyMediaId
+        image.shopifyMediaId ||
+        image.pushRunId ||
+        image.activeRetryImageId
       )
         throw new Error(
           "La sélection doit contenir uniquement des images approuvées, générées et non publiées de ce job.",
@@ -131,9 +134,17 @@ export const start = mutation({
       pushedImages: 0,
       createdAt: now,
       updatedAt: now,
+      tracksImageFeedback: true,
     });
     let position = 0;
     for (const { product, images } of groups.values()) {
+      for (const selected of images) {
+        await ctx.db.patch(selected.imageId, {
+          pushRunId: runId,
+          pushError: undefined,
+          updatedAt: now,
+        });
+      }
       await ctx.db.insert("imagePublishProducts", {
         runId,
         productId: product._id,
@@ -230,6 +241,8 @@ export const productForPush = internalQuery({
   args: { itemId: v.id("imagePublishProducts") },
   returns: v.object({
     userId: v.id("users"),
+    runId: v.id("imagePublishRuns"),
+    tracksImageFeedback: v.boolean(),
     productId: v.id("products"),
     shopId: v.union(v.id("shops"), v.null()),
     shopDomain: v.string(),
@@ -258,6 +271,8 @@ export const productForPush = internalQuery({
       );
     return {
       userId: run.createdByUserId,
+      runId: run._id,
+      tracksImageFeedback: run.tracksImageFeedback ?? false,
       productId: item.productId,
       shopId: run.shopId ?? null,
       shopDomain: run.shopDomain,
@@ -266,6 +281,24 @@ export const productForPush = internalQuery({
     };
   },
 });
+
+async function settleSelectedImages(
+  ctx: MutationCtx,
+  item: Doc<"imagePublishProducts">,
+  error?: string,
+) {
+  for (const selected of item.images) {
+    const image = await ctx.db.get(selected.imageId);
+    // A delayed callback from an older run must never clear a newer run's
+    // queued feedback or replace its error.
+    if (!image || image.pushRunId !== item.runId) continue;
+    await ctx.db.patch(image._id, {
+      pushRunId: undefined,
+      pushError: error?.slice(0, MAX_ERROR_LENGTH),
+      updatedAt: Date.now(),
+    });
+  }
+}
 
 export const recordProduct = internalMutation({
   args: {
@@ -297,6 +330,11 @@ export const recordProduct = internalMutation({
     pushedImages = Math.max(
       0,
       Math.min(item.images.length, Math.floor(pushedImages)),
+    );
+    await settleSelectedImages(
+      ctx,
+      item,
+      failed ? args.error || "Publication échouée." : undefined,
     );
     const now = Date.now();
     await ctx.db.patch(item._id, {
@@ -403,6 +441,13 @@ export const workflowCompleted = internalMutation({
         completedAt: Date.now(),
         updatedAt: Date.now(),
       });
+      await ctx.scheduler.runAfter(
+        0,
+        internal.jobImagePublishing.settleInterruptedProducts,
+        {
+          runId: run._id,
+        },
+      );
     }
     await ctx.scheduler.runAfter(
       7 * 24 * 60 * 60_000,
@@ -410,6 +455,54 @@ export const workflowCompleted = internalMutation({
       {
         workflowId: args.workflowId,
       },
+    );
+    return null;
+  },
+});
+
+// Each product snapshot contains at most 250 images. Process one at a time so
+// interruption cleanup stays bounded even for a large publication run.
+export const settleInterruptedProducts = internalMutation({
+  args: { runId: v.id("imagePublishRuns") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const run = await ctx.db.get(args.runId);
+    if (!run || run.status !== "failed") return null;
+    const item = await ctx.db
+      .query("imagePublishProducts")
+      .withIndex("by_runId_and_status", (q) =>
+        q.eq("runId", run._id).eq("status", "queued"),
+      )
+      .first();
+    if (!item) return null;
+    const error = run.error || "La publication a été interrompue.";
+    let pushedImages = 0;
+    for (const selected of item.images) {
+      const image = await ctx.db.get(selected.imageId);
+      if (
+        image?.storageUrl === selected.storageUrl &&
+        image.status === "uploaded" &&
+        image.shopifyMediaId
+      )
+        pushedImages++;
+    }
+    await settleSelectedImages(ctx, item, error);
+    await ctx.db.patch(item._id, {
+      status: "failed",
+      error,
+      pushedImages,
+      updatedAt: Date.now(),
+    });
+    await ctx.db.patch(run._id, {
+      processedProducts: run.processedProducts + 1,
+      failedProducts: run.failedProducts + 1,
+      pushedImages: run.pushedImages + pushedImages,
+      updatedAt: Date.now(),
+    });
+    await ctx.scheduler.runAfter(
+      0,
+      internal.jobImagePublishing.settleInterruptedProducts,
+      args,
     );
     return null;
   },

@@ -34,7 +34,20 @@ export function isReviewable(image: Doc<"generatedImages">) {
 }
 
 export function isPushReady(image: Doc<"generatedImages">) {
-  return isReviewable(image) && getReviewStatus(image) === "approved";
+  return isReviewable(image) && !isImagePushing(image) &&
+    getReviewStatus(image) === "approved";
+}
+
+export function isImagePushing(image: Doc<"generatedImages">) {
+  return Boolean(image.pushRunId);
+}
+
+export function hasImagePushError(image: Doc<"generatedImages">) {
+  return Boolean(image.pushError);
+}
+
+export function canReviewImage(image: Doc<"generatedImages">) {
+  return isReviewable(image) && !isImagePushing(image);
 }
 
 export function getReviewAggregateState({
