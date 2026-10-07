@@ -22,6 +22,7 @@ import {
 import { currentGenerationEngine } from "./jobs/engine";
 import { buildImageTasks } from "./jobs/planning";
 import { prepareImageTasks } from "./jobs/prepare";
+import { scopedJobsNewestFirst } from "./jobs/listing";
 import { imageTaskKey, variantSelectionValidator } from "./generationTargets";
 import {
   getStoredReviewState,
@@ -145,6 +146,21 @@ export const list = query({
     offset: v.optional(v.number()),
     limit: v.optional(v.number()),
   },
+  returns: v.object({
+    page: v.array(schema.doc("generationJobs").extend({
+      costSummary: v.object({
+        generationCost: v.number(), inputTokens: v.number(),
+        outputTokens: v.number(), pricedImageCount: v.number(),
+      }),
+      reviewSummary: v.object({
+        total: v.number(), pending: v.number(), approved: v.number(), rejected: v.number(),
+      }),
+    })),
+    offset: v.number(),
+    limit: v.number(),
+    hasPrevious: v.boolean(),
+    hasNext: v.boolean(),
+  }),
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
     const scope = await getActiveShopScope(ctx, userId);
@@ -155,11 +171,7 @@ export const list = query({
     );
     const page: Doc<"generationJobs">[] = [];
     let matched = 0;
-    const jobs = ctx.db
-      .query("generationJobs")
-      .withIndex("by_created")
-      .order("desc");
-    for await (const job of jobs) {
+    for await (const job of scopedJobsNewestFirst(ctx, scope)) {
       if (job.isHidden) continue;
       if (!shopMatchesScope(job, scope)) continue;
       if (args.productId && !job.productIds.includes(args.productId)) continue;
@@ -173,17 +185,11 @@ export const list = query({
       matched += 1;
       if (page.length >= limit + 1) break;
     }
-    const pageJobs = await Promise.all(
-      page.slice(0, limit).map(async (job) => {
-        const images = await ctx.db
-          .query("generatedImages")
-          .withIndex("by_job", (q) => q.eq("jobId", job._id))
-          .collect();
-        return { ...job, ...executionPatchForJob(job, images) };
-      }),
-    );
+    // Completion, failure, review and cost counters are persisted by the image
+    // mutations. Loading all image payloads here multiplies a single bulk's
+    // read cost by the page size and can exceed the 16 MiB transaction limit.
     return {
-      page: pageJobs.map(listedJob),
+      page: page.slice(0, limit).map(listedJob),
       offset,
       limit,
       hasPrevious: offset > 0,
