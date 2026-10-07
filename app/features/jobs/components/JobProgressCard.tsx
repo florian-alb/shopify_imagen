@@ -4,15 +4,19 @@ import { Progress } from "@/components/ui/progress";
 import type { Doc } from "@/lib/convex";
 import { formatUsd } from "@/lib/formatters";
 import { executionModeRateLabel } from "../lib/jobDetailViewModel";
+import type { BatchJobProgress } from "../lib/batchJobProgress";
+import { JobBatchProgress } from "./JobBatchProgress";
 
 export function JobProgressCard({
   job,
   jobCost,
   progress,
+  batchProgress,
 }: {
   job: Doc<"generationJobs">;
   jobCost: number;
   progress: number;
+  batchProgress: BatchJobProgress | null;
 }) {
   return (
     <Card className="mb-5 rounded-lg">
@@ -25,7 +29,9 @@ export function JobProgressCard({
             {executionModeRateLabel(job.executionMode)}
           </span>
         </div>
-        <Progress value={progress} className="h-2" />
+        <Progress value={progress} className="h-2" aria-label="Progression globale des images" />
+
+        {batchProgress ? <JobBatchProgress progress={batchProgress} /> : null}
 
         {job.error ? (
           <Alert variant="destructive" className="mt-3">

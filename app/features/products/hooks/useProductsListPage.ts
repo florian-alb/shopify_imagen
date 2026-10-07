@@ -64,6 +64,7 @@ export function useProductsListPage(search: ProductSearch) {
   }) as ProductPageResult | undefined;
   const products = useMemo(() => productPage?.page ?? [], [productPage?.page]);
   const catalogNavigation = useQuery(api.products.navigation, {});
+  const filteredNavigation = useQuery(api.products.navigation, productListArgs);
   const visibleProductIds = useMemo(
     () => products.map((product) => product._id),
     [products],
@@ -138,8 +139,10 @@ export function useProductsListPage(search: ProductSearch) {
   async function runSync() {
     setSyncing(true);
     try {
-      await syncProducts({ limit: 1000 });
-      toast.success("Shopify catalog synced");
+      const { synced } = await syncProducts({});
+      toast.success("Catalogue Shopify synchronisé", {
+        description: `${synced.toLocaleString("fr-FR")} produit${synced === 1 ? "" : "s"} synchronisé${synced === 1 ? "" : "s"}.`,
+      });
     } catch (syncError) {
       toast.error("Sync failed", {
         description:
@@ -232,6 +235,7 @@ export function useProductsListPage(search: ProductSearch) {
     productPage,
     products,
     totalProducts: catalogNavigation?.total,
+    filteredProductsCount: filteredNavigation?.total,
     bulkTransform,
     bulkReorder,
     hasTrackedBulk: hasTrackedBulk ?? false,

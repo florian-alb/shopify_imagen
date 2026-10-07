@@ -28,7 +28,15 @@ import {
   hashShopifyOAuthState,
   shopifyOAuthCallbackUrl,
 } from "./shopify/oauth";
-import { publicationVariantIds, validatePublicationTargets } from "./shopify/publicationTargets";
+import {
+  publicationVariantIds,
+  validatePublicationTargets,
+} from "./shopify/publicationTargets";
+import {
+  publicationFingerprint,
+  reconcilePublishedMedia,
+} from "./shopify/publicationIdentity";
+import type { PublicationResult } from "./shopify/publicationSchema";
 import { sameIds, throwUserErrors } from "./shopify/media";
 import {
   mapProductForUpsert,
@@ -72,8 +80,7 @@ async function loadRemainingGoogleFeedVariants(
 ) {
   const nodes = [...(product.variants?.nodes ?? [])];
   let pageInfo = product.variants?.pageInfo as
-    | { hasNextPage: boolean; endCursor: string | null }
-    | undefined;
+    { hasNextPage: boolean; endCursor: string | null } | undefined;
   while (pageInfo?.hasNextPage && pageInfo.endCursor) {
     const response = await shopifyGraphql<{
       product: {
@@ -248,9 +255,19 @@ export const beginAuthorization = action({
         internal.shops.getShopifyCredentials,
         { shopId: args.shopId, userId },
       )) as ShopifyCredentials;
-      return await createAuthorizationAttempt(ctx, userId, selectedCredentials, args.catalog);
+      return await createAuthorizationAttempt(
+        ctx,
+        userId,
+        selectedCredentials,
+        args.catalog,
+      );
     }
-    return await createAuthorizationAttempt(ctx, userId, credentials, args.catalog);
+    return await createAuthorizationAttempt(
+      ctx,
+      userId,
+      credentials,
+      args.catalog,
+    );
   },
 });
 
@@ -318,8 +335,17 @@ function generatedImageAssetUrls(image: Doc<"generatedImages">) {
 
 export const syncProducts = action({
   args: { limit: v.optional(v.number()) },
+  returns: v.object({ synced: v.number() }),
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
+    if (
+      args.limit !== undefined &&
+      (!Number.isSafeInteger(args.limit) || args.limit < 1)
+    ) {
+      throw new ConvexError(
+        "La limite de synchronisation doit être un entier positif.",
+      );
+    }
     const credentials = (await ctx.runMutation(
       internal.shops.ensureActiveForAction,
       { userId },
@@ -329,17 +355,17 @@ export const syncProducts = action({
       { userId },
     )) as { shopId: Id<"shops">; coordinates: GoogleFeedSyncCoordinates };
     if (credentials.shopId !== googleFeedContext.shopId) {
-      throw new ConvexError("La boutique active a changé pendant la synchronisation.");
+      throw new ConvexError(
+        "La boutique active a changé pendant la synchronisation.",
+      );
     }
-    const limit = Math.max(1, Math.min(args.limit ?? 100, 250));
-    const syncedIds: Id<"products">[] = [];
+    // Page size limits Shopify query cost; only an explicit limit caps the catalogue.
+    const limit = args.limit ?? Infinity;
+    let synced = 0;
     let after: string | null = null;
 
-    while (syncedIds.length < limit) {
-      const first = Math.min(
-        SHOPIFY_PRODUCT_SYNC_PAGE_SIZE,
-        limit - syncedIds.length,
-      );
+    while (synced < limit) {
+      const first = Math.min(SHOPIFY_PRODUCT_SYNC_PAGE_SIZE, limit - synced);
       const data: ProductsResponse = await shopifyGraphql<ProductsResponse>(
         PRODUCTS_QUERY,
         {
@@ -369,16 +395,22 @@ export const syncProducts = action({
             removeMissing: true,
           });
         }
-        syncedIds.push(id);
+        synced += 1;
       }
-      if (!data.products.pageInfo.hasNextPage) break;
-      after = data.products.pageInfo.endCursor;
+      if (!data.products.pageInfo.hasNextPage || synced >= limit) break;
+      const nextCursor = data.products.pageInfo.endCursor;
+      if (!nextCursor || nextCursor === after || !data.products.nodes.length) {
+        throw new ConvexError(
+          "Shopify n’a pas fourni de curseur valide pour poursuivre la synchronisation.",
+        );
+      }
+      after = nextCursor;
     }
 
     await ctx.runMutation(internal.products.refreshFacets, {
       shopId: credentials.shopId ?? null,
     });
-    return { synced: syncedIds.length };
+    return { synced };
   },
 });
 
@@ -395,7 +427,9 @@ export const syncProduct = action({
       { userId },
     )) as { shopId: Id<"shops">; coordinates: GoogleFeedSyncCoordinates };
     if (product.shopId !== googleFeedContext.shopId) {
-      throw new ConvexError("Ce produit n’appartient pas à la boutique active.");
+      throw new ConvexError(
+        "Ce produit n’appartient pas à la boutique active.",
+      );
     }
     const credentials = (await ctx.runQuery(
       internal.shops.getShopifyCredentials,
@@ -541,12 +575,16 @@ function generatedImageAlt(
   productTitle: string,
   image: Doc<"generatedImages">,
 ) {
-  return [productTitle, image.visualGroupLabel, image.imageType]
+  return [
+    productTitle,
+    image.visualGroupLabel ?? image.generationTarget?.variantTitle,
+    image.imageType,
+  ]
     .filter(Boolean)
     .join(" - ");
 }
 
-async function createGeneratedMedia(args: {
+async function createGeneratedMediaRequest(args: {
   productId: string;
   productTitle: string;
   images: Doc<"generatedImages">[];
@@ -605,6 +643,174 @@ async function createGeneratedMedia(args: {
     mediaIdByImageId,
     mediaNodes: productUpdate.product?.media?.nodes ?? [],
   };
+}
+
+const PRODUCT_PUBLICATION_MEDIA_QUERY = `#graphql
+  query ProductPublicationMedia($id: ID!, $after: String) {
+    product(id: $id) {
+      media(first: 100, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes { id alt }
+      }
+    }
+  }
+`;
+
+async function publicationMediaSnapshot(
+  productId: string,
+  credentials: ShopifyCredentials,
+) {
+  const nodes: Array<{ id: string; alt?: string | null }> = [];
+  let after: string | null = null;
+  for (let page = 0; page < 10; page += 1) {
+    const data: {
+      product: {
+        media: {
+          nodes: Array<{ id: string; alt?: string | null }>;
+          pageInfo: { hasNextPage: boolean; endCursor: string | null };
+        };
+      } | null;
+    } = await shopifyGraphql(
+      PRODUCT_PUBLICATION_MEDIA_QUERY,
+      { id: productId, after },
+      undefined,
+      credentials,
+    );
+    if (!data.product)
+      throw new Error(
+        "Shopify product not found during publication reconciliation.",
+      );
+    nodes.push(...data.product.media.nodes);
+    if (!data.product.media.pageInfo.hasNextPage) return nodes;
+    const next = data.product.media.pageInfo.endCursor;
+    if (!next || next === after)
+      throw new Error("Shopify media pagination did not advance.");
+    after = next;
+  }
+  throw new Error("Shopify media reconciliation exceeded its page limit.");
+}
+
+async function createGeneratedMedia(args: {
+  ctx: Pick<ActionCtx, "runMutation" | "runQuery">;
+  sourceProductId: Id<"products">;
+  sourceShopifyProductId: string;
+  publicationToken: string;
+  productId: string;
+  productTitle: string;
+  images: Doc<"generatedImages">[];
+  credentials: ShopifyCredentials;
+  existingMediaIds?: Set<string>;
+}) {
+  const previous: Array<Doc<"generatedMediaPublications"> | null> =
+    await args.ctx.runQuery(internal.shopifyPublications.mediaForImages, {
+      targetProductId: args.productId,
+      images: args.images.map((image) => ({
+        imageId: image._id,
+        storageUrl: image.storageUrl!,
+      })),
+    });
+  const mediaIdByImageId = new Map<Id<"generatedImages">, string>();
+  let snapshot: Array<{ id: string; alt?: string | null }> | undefined;
+  for (const row of previous) {
+    if (!row) continue;
+    if (row.state === "completed" && row.shopifyMediaId) {
+      mediaIdByImageId.set(row.imageId, row.shopifyMediaId);
+      continue;
+    }
+    snapshot ??= await publicationMediaSnapshot(
+      args.productId,
+      args.credentials,
+    );
+    const mediaId = reconcilePublishedMedia(row, snapshot);
+    if (!mediaId || Array.from(mediaIdByImageId.values()).includes(mediaId)) {
+      throw new Error(
+        "La publication Shopify est incertaine : aucun média unique ne permet de la rapprocher. Aucune image supplémentaire n’a été créée.",
+      );
+    }
+    await args.ctx.runMutation(internal.shopifyPublications.recordMedia, {
+      productId: args.sourceProductId,
+      token: args.publicationToken,
+      media: [{ publicationId: row._id, shopifyMediaId: mediaId }],
+    });
+    mediaIdByImageId.set(row.imageId, mediaId);
+  }
+  const legacyUploaded = args.images.filter(
+    (image, index) =>
+      !previous[index] &&
+      image.status === "uploaded" &&
+      image.shopifyMediaId &&
+      (image.publishedShopifyProductId ?? args.sourceShopifyProductId) ===
+        args.productId,
+  );
+  if (legacyUploaded.length) {
+    snapshot ??= await publicationMediaSnapshot(
+      args.productId,
+      args.credentials,
+    );
+    const remoteIds = new Set(snapshot.map((node) => node.id));
+    const stillPublished = legacyUploaded.filter((image) =>
+      remoteIds.has(image.shopifyMediaId!),
+    );
+    if (stillPublished.length) {
+      // Overwritten retouches update the same Shopify file before retaining
+      // `uploaded` locally. Legacy rows therefore reuse that accepted media ID.
+      await args.ctx.runMutation(
+        internal.shopifyPublications.adoptUploadedMedia,
+        {
+          productId: args.sourceProductId,
+          token: args.publicationToken,
+          targetProductId: args.productId,
+          images: stillPublished.map((image) => ({
+            imageId: image._id,
+            storageUrl: image.storageUrl!,
+            expectedAlt: generatedImageAlt(args.productTitle, image),
+            shopifyMediaId: image.shopifyMediaId!,
+          })),
+        },
+      );
+      for (const image of stillPublished)
+        mediaIdByImageId.set(image._id, image.shopifyMediaId!);
+    }
+  }
+  const fresh = args.images.filter(
+    (image, index) => !previous[index] && !mediaIdByImageId.has(image._id),
+  );
+  if (fresh.length) {
+    snapshot ??= await publicationMediaSnapshot(
+      args.productId,
+      args.credentials,
+    );
+    const baseline = new Set(snapshot.map((node) => node.id));
+    const publicationIds: Id<"generatedMediaPublications">[] =
+      await args.ctx.runMutation(internal.shopifyPublications.beginMedia, {
+        productId: args.sourceProductId,
+        token: args.publicationToken,
+        targetProductId: args.productId,
+        baselineMediaIds: Array.from(baseline),
+        images: fresh.map((image) => ({
+          imageId: image._id,
+          storageUrl: image.storageUrl!,
+          expectedAlt: generatedImageAlt(args.productTitle, image),
+        })),
+      });
+    const created = await createGeneratedMediaRequest({
+      ...args,
+      images: fresh,
+      existingMediaIds: baseline,
+    });
+    await args.ctx.runMutation(internal.shopifyPublications.recordMedia, {
+      productId: args.sourceProductId,
+      token: args.publicationToken,
+      media: fresh.map((image, index) => ({
+        publicationId: publicationIds[index],
+        shopifyMediaId: created.mediaIdByImageId.get(image._id)!,
+      })),
+    });
+    for (const [imageId, mediaId] of created.mediaIdByImageId)
+      mediaIdByImageId.set(imageId, mediaId);
+    return { mediaIdByImageId, mediaNodes: created.mediaNodes };
+  }
+  return { mediaIdByImageId, mediaNodes: snapshot ?? [] };
 }
 
 const SHOPIFY_MEDIA_READY_TIMEOUT_MS = 60_000;
@@ -724,6 +930,7 @@ async function publishAsSeparateProducts(args: {
   replaceVariantMedia: boolean;
   credentials: ShopifyCredentials;
   coordinates: GoogleFeedSyncCoordinates;
+  publicationToken: string;
 }) {
   const existingFamily = (await args.ctx.runQuery(
     internal.visualGroups.familyForSource,
@@ -768,29 +975,55 @@ async function publishAsSeparateProducts(args: {
       }
       publishedProduct = existing.product;
     } else {
-      const duplicated = await shopifyGraphql<any>(
-        PRODUCT_DUPLICATE_MUTATION,
+      const savedSibling: string | null = await args.ctx.runMutation(
+        internal.shopifyPublications.beginSibling,
         {
-          productId: args.product.shopifyProductId,
-          newTitle: `${args.product.title} — ${target.group.label}`,
-          newStatus: "DRAFT",
-          includeImages: false,
-          synchronous: true,
+          productId: args.product._id,
+          token: args.publicationToken,
+          groupId: target.group._id,
         },
-        undefined,
-        args.credentials,
       );
-      throwUserErrors(
-        duplicated.productDuplicate?.userErrors,
-        "Shopify sibling product creation failed",
-      );
-      publishedProduct = duplicated.productDuplicate?.newProduct;
+      const duplicated = savedSibling
+        ? null
+        : await shopifyGraphql<any>(
+            PRODUCT_DUPLICATE_MUTATION,
+            {
+              productId: args.product.shopifyProductId,
+              newTitle: `${args.product.title} — ${target.group.label}`,
+              newStatus: "DRAFT",
+              includeImages: false,
+              synchronous: true,
+            },
+            undefined,
+            args.credentials,
+          );
+      if (savedSibling) {
+        const saved = await shopifyGraphql<{ product: any | null }>(
+          PRODUCT_QUERY,
+          productQueryVariables(savedSibling, args.coordinates),
+          undefined,
+          args.credentials,
+        );
+        publishedProduct = saved.product;
+      } else {
+        throwUserErrors(
+          duplicated?.productDuplicate?.userErrors,
+          "Shopify sibling product creation failed",
+        );
+        publishedProduct = duplicated?.productDuplicate?.newProduct;
+      }
       isNewProduct = true;
       if (!publishedProduct?.id) {
         throw new Error(
           `Shopify did not return the sibling product for ${target.group.label}.`,
         );
       }
+      await args.ctx.runMutation(internal.shopifyPublications.recordSibling, {
+        productId: args.product._id,
+        token: args.publicationToken,
+        groupId: target.group._id,
+        targetProductId: publishedProduct.id,
+      });
     }
 
     const publishedVariants = (publishedProduct.variants?.nodes ??
@@ -829,6 +1062,10 @@ async function publishAsSeparateProducts(args: {
     }
 
     const created = await createGeneratedMedia({
+      ctx: args.ctx,
+      sourceProductId: args.product._id,
+      sourceShopifyProductId: args.product.shopifyProductId,
+      publicationToken: args.publicationToken,
       productId: publishedProduct.id,
       productTitle: publishedProduct.title,
       images: groupImages,
@@ -910,7 +1147,7 @@ export const pushProductImages = action({
       }),
     ),
   }),
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<PublicationResult> => {
     const userId = await requireUserId(ctx);
     const replaceVariantMedia =
       args.replaceExisting || (args.replaceVariantMedia ?? true);
@@ -976,7 +1213,7 @@ export const pushProductImages = action({
           .filter((groupId): groupId is Id<"visualGroups"> => Boolean(groupId)),
       ),
     );
-    const targets = visualGroupIds.length
+    const targets: VisualGroupTarget[] = visualGroupIds.length
       ? ((await ctx.runQuery(internal.visualGroups.groupTargets, {
           groupIds: visualGroupIds,
         })) as VisualGroupTarget[])
@@ -1047,124 +1284,168 @@ export const pushProductImages = action({
         "Une déclinaison sélectionnée ne correspond pas à un produit déjà séparé.",
       );
     }
-    if (
+    const publishMode =
       (visualContext?.config.publishMode === "separate_products" ||
         existingFamily) &&
       targets.length
-    ) {
-      const members = await publishAsSeparateProducts({
-        ctx,
-        product,
-        ready,
-        targets,
-        promptOneImageType: primaryVariantImageType,
+        ? ("separate_products" as const)
+        : ("variant_media" as const);
+    const publicationToken = crypto.randomUUID();
+    const claim = await ctx.runMutation(internal.shopifyPublications.claim, {
+      productId: product._id,
+      token: publicationToken,
+      fingerprint: publicationFingerprint({
+        images: ready,
+        publishMode,
+        replaceExisting: args.replaceExisting,
         replaceVariantMedia,
+      }),
+    });
+    if (claim.state === "completed") return claim.result;
+    try {
+      if (
+        (visualContext?.config.publishMode === "separate_products" ||
+          existingFamily) &&
+        targets.length
+      ) {
+        const members = await publishAsSeparateProducts({
+          ctx,
+          product,
+          ready,
+          targets,
+          promptOneImageType: primaryVariantImageType,
+          replaceVariantMedia,
+          credentials,
+          coordinates,
+          publicationToken,
+        });
+        await ctx.runMutation(internal.shopify.markProductPushed, {
+          productId: product._id,
+        });
+        const result = {
+          pushed: ready.length,
+          replaced: false,
+          publishMode: "separate_products" as const,
+          createdProducts: members,
+        };
+        await ctx.runMutation(internal.shopifyPublications.complete, {
+          productId: product._id,
+          token: publicationToken,
+          result,
+        });
+        return result;
+      }
+
+      const existingMediaIds = new Set(
+        product.currentShopifyImages
+          .map((image: any) => image.mediaId ?? image.id)
+          .filter(Boolean)
+          .map(String),
+      );
+      const created = await createGeneratedMedia({
+        ctx,
+        sourceProductId: product._id,
+        sourceShopifyProductId: product.shopifyProductId,
+        publicationToken,
+        productId: product.shopifyProductId,
+        productTitle: product.title,
+        images: ready,
         credentials,
-        coordinates,
+        existingMediaIds,
       });
+
+      for (const target of imageTargets) {
+        if (!target.requiresVariantImage) continue;
+        const promptOneImage = imageForPromptOne(
+          target.images,
+          primaryVariantImageType,
+        );
+        const primaryMediaId = promptOneImage
+          ? created.mediaIdByImageId.get(promptOneImage._id)
+          : undefined;
+        if (!primaryMediaId) continue;
+        const variantIds = variantIdsByTarget.get(target.key) ?? [];
+        await setPrimaryMediaOnVariants({
+          productId: product.shopifyProductId,
+          variants: variantIds.map((id) => ({
+            id,
+            mediaIds: shopifyVariantMediaIds(currentVariantById.get(id) ?? {}),
+          })),
+          primaryMediaId,
+          replaceExisting: replaceVariantMedia,
+          credentials,
+        });
+      }
+
+      for (const image of ready) {
+        await ctx.runMutation(internal.shopify.markImagePushed, {
+          imageId: image._id,
+          shopifyMediaId: created.mediaIdByImageId.get(image._id)!,
+          publishedShopifyProductId: product.shopifyProductId,
+        });
+      }
+
+      if (args.replaceExisting) {
+        const createdIds = new Set(created.mediaIdByImageId.values());
+        const mediaIdsToDelete = Array.from(existingMediaIds).filter(
+          (id) => !createdIds.has(id),
+        );
+        if (mediaIdsToDelete.length) {
+          const deleted = await shopifyGraphql<any>(
+            PRODUCT_DELETE_MEDIA_MUTATION,
+            {
+              productId: product.shopifyProductId,
+              mediaIds: mediaIdsToDelete,
+            },
+            undefined,
+            credentials,
+          );
+          if (!deleted.productDeleteMedia)
+            throw new ConvexError(
+              "Shopify product media deletion failed: Shopify returned no media deletion payload.",
+            );
+          throwUserErrors(
+            deleted.productDeleteMedia.mediaUserErrors,
+            "Shopify product media deletion failed",
+          );
+        }
+      }
+
       await ctx.runMutation(internal.shopify.markProductPushed, {
         productId: product._id,
       });
-      return {
-        pushed: ready.length,
-        replaced: false,
-        publishMode: "separate_products" as const,
-        createdProducts: members,
-      };
-    }
-
-    const existingMediaIds = new Set(
-      product.currentShopifyImages
-        .map((image: any) => image.mediaId ?? image.id)
-        .filter(Boolean)
-        .map(String),
-    );
-    const created = await createGeneratedMedia({
-      productId: product.shopifyProductId,
-      productTitle: product.title,
-      images: ready,
-      credentials,
-      existingMediaIds,
-    });
-
-    for (const target of imageTargets) {
-      if (!target.requiresVariantImage) continue;
-      const promptOneImage = imageForPromptOne(
-        target.images,
-        primaryVariantImageType,
-      );
-      const primaryMediaId = promptOneImage
-        ? created.mediaIdByImageId.get(promptOneImage._id)
-        : undefined;
-      if (!primaryMediaId) continue;
-      const variantIds = variantIdsByTarget.get(target.key) ?? [];
-      await setPrimaryMediaOnVariants({
-        productId: product.shopifyProductId,
-        variants: variantIds.map((id) => ({
-          id,
-          mediaIds: shopifyVariantMediaIds(currentVariantById.get(id) ?? {}),
-        })),
-        primaryMediaId,
-        replaceExisting: replaceVariantMedia,
+      const synced = await shopifyGraphql<{ product: any | null }>(
+        PRODUCT_QUERY,
+        productQueryVariables(product.shopifyProductId, coordinates),
+        undefined,
         credentials,
-      });
-    }
-
-    for (const image of ready) {
-      await ctx.runMutation(internal.shopify.markImagePushed, {
-        imageId: image._id,
-        shopifyMediaId: created.mediaIdByImageId.get(image._id)!,
-        publishedShopifyProductId: product.shopifyProductId,
-      });
-    }
-
-    if (args.replaceExisting) {
-      const createdIds = new Set(created.mediaIdByImageId.values());
-      const mediaIdsToDelete = Array.from(existingMediaIds).filter(
-        (id) => !createdIds.has(id),
       );
-      if (mediaIdsToDelete.length) {
-        const deleted = await shopifyGraphql<any>(
-          PRODUCT_DELETE_MEDIA_MUTATION,
-          {
-            productId: product.shopifyProductId,
-            mediaIds: mediaIdsToDelete,
-          },
-          undefined,
-          credentials,
-        );
-        if (!deleted.productDeleteMedia)
-          throw new ConvexError(
-            "Shopify product media deletion failed: Shopify returned no media deletion payload.",
-          );
-        throwUserErrors(
-          deleted.productDeleteMedia.mediaUserErrors,
-          "Shopify product media deletion failed",
+      if (synced.product) {
+        await ctx.runMutation(
+          internal.products.upsertSynced,
+          mapProductForUpsert(synced.product, credentials),
         );
       }
+      const result = {
+        pushed: ready.length,
+        replaced: args.replaceExisting,
+        publishMode: "variant_media" as const,
+        createdProducts: [],
+      };
+      await ctx.runMutation(internal.shopifyPublications.complete, {
+        productId: product._id,
+        token: publicationToken,
+        result,
+      });
+      return result;
+    } catch (error) {
+      await ctx.runMutation(internal.shopifyPublications.fail, {
+        productId: product._id,
+        token: publicationToken,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
     }
-
-    await ctx.runMutation(internal.shopify.markProductPushed, {
-      productId: product._id,
-    });
-    const synced = await shopifyGraphql<{ product: any | null }>(
-      PRODUCT_QUERY,
-      productQueryVariables(product.shopifyProductId, coordinates),
-      undefined,
-      credentials,
-    );
-    if (synced.product) {
-      await ctx.runMutation(
-        internal.products.upsertSynced,
-        mapProductForUpsert(synced.product, credentials),
-      );
-    }
-    return {
-      pushed: ready.length,
-      replaced: args.replaceExisting,
-      publishMode: "variant_media" as const,
-      createdProducts: [],
-    };
   },
 });
 

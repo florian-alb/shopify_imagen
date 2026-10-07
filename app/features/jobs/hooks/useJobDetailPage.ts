@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { useGeneratedImageRetouch } from "@/features/images/hooks/useGeneratedImageRetouch";
 import { reviewAggregateBadge } from "@/features/images/lib/review";
 import { api, type Doc, type Id } from "@/lib/convex";
+import type { JobBatchSegment } from "../lib/batchJobProgress";
 import {
   createJobDetailViewModel,
   type ReviewFilter,
@@ -15,6 +16,7 @@ import { useJobImageReview } from "./useJobImageReview";
 
 const emptyImages: Doc<"generatedImages">[] = [];
 const emptyProducts: Doc<"products">[] = [];
+const emptySegments: JobBatchSegment[] = [];
 
 export function useJobDetailPage(jobId: string) {
   const { data, shopInfo } = useJobDetail(jobId);
@@ -42,6 +44,7 @@ export function useJobDetailPage(jobId: string) {
   const job = data?.job ?? null;
   const images = data?.images ?? emptyImages;
   const products = data?.products ?? emptyProducts;
+  const segments = data?.segments ?? emptySegments;
 
   const viewModel = useMemo(
     () =>
@@ -52,10 +55,11 @@ export function useJobDetailPage(jobId: string) {
             job,
             products,
             pushTargetProductId,
+            segments,
             storeHandle: shopInfo?.storeHandle,
           })
         : null,
-    [filter, images, job, products, pushTargetProductId, shopInfo?.storeHandle],
+    [filter, images, job, products, pushTargetProductId, segments, shopInfo?.storeHandle],
   );
 
   const previewImage =
@@ -229,6 +233,7 @@ export function useJobDetailPage(jobId: string) {
     retrying,
     review,
     reviewBadge,
+    segments,
     setFilter,
     setPreviewId,
     viewModel,

@@ -56,7 +56,7 @@ export function PageHeader({
   children?: ReactNode;
 }) {
   return (
-    <header className="mb-4 flex flex-col gap-3 border-b border-border pb-4 lg:flex-row lg:items-end lg:justify-between">
+    <header className="mb-4 flex flex-col gap-3 border-border pb-4 lg:flex-row lg:items-end lg:justify-between">
       <div className="min-w-0">
         {eyebrow ? (
           <p className="mb-1 text-sm text-muted-foreground">{eyebrow}</p>

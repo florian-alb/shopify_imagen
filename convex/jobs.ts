@@ -1,4 +1,5 @@
 import { v } from "convex/values";
+import schema from "./schema";
 import { internal } from "./_generated/api";
 import {
   internalMutation,
@@ -300,7 +301,9 @@ export const get = query({
     const products = await Promise.all(
       job.productIds.map((id) => ctx.db.get(id)),
     );
-    return { job: currentJob, images, products: products.filter(Boolean) };
+    const segments = await ctx.db.query("generationBatchSegments")
+      .withIndex("by_job", q => q.eq("jobId", args.jobId)).take(1000);
+    return { job: currentJob, images, products: products.filter(Boolean), segments };
   },
 });
 
@@ -412,6 +415,9 @@ export const create = mutation({
       variantSelection: args.variantSelection,
       regenerationInstructions: args.regenerationInstructions,
     });
+    if (imageProvider === "openai" && executionMode === "batch" && planned.length > 900) {
+      throw new Error("OpenAI bulk supports up to 900 image tasks per job. Reduce the product or variant selection.");
+    }
     const now = Date.now();
 
     const jobId = await ctx.db.insert("generationJobs", {
@@ -503,7 +509,7 @@ export const create = mutation({
     await ctx.scheduler.runAfter(
       0,
       executionMode === "batch"
-        ? internal.generation.submitBatch
+        ? (imageProvider === "openai" ? internal.openAiDurable.initialize : internal.generation.submitBatch)
         : internal.generation.processJob,
       { jobId },
     );
@@ -538,6 +544,13 @@ async function cancelJobLocally(
     .withIndex("by_job", (q: any) => q.eq("jobId", args.jobId))
     .collect();
   const now = Date.now();
+  const segments = await ctx.db.query("generationBatchSegments")
+    .withIndex("by_job", (q: any) => q.eq("jobId", args.jobId)).take(1000);
+  for (const segment of segments) {
+    if (!segment.phase || isTerminalBatchSegmentStatus(segment.status)) continue;
+    await ctx.db.patch(segment._id, { status: "cancelled", cancellationPending:
+      Boolean(segment.submissionAttemptedAt && !segment.submissionRejected), updatedAt: now });
+  }
   for (const image of images) {
     if (isActiveImageStatus(image.status)) {
       await ctx.db.patch(
@@ -692,6 +705,27 @@ export const markBatchSubmitStarted = internalMutation({
   },
 });
 
+export const queuedImagesForBatchSubmission = internalQuery({
+  args: { jobId: v.id("generationJobs"), limit: v.number() },
+  returns: v.array(v.object({
+    ...schema.tables.generatedImages.validator.fields,
+    _id: v.id("generatedImages"),
+    _creationTime: v.number(),
+  })),
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("generatedImages")
+      .withIndex("by_job_and_status", (q) =>
+        q.eq("jobId", args.jobId).eq("status", "queued"),
+      )
+      .filter((q) => q.or(
+        q.eq(q.field("batchSegmentId"), undefined),
+        q.eq(q.field("batchSegmentId"), null),
+      ))
+      .take(Math.min(101, Math.max(1, args.limit)));
+  },
+});
+
 export const markAllBatchesSubmitted = internalMutation({
   args: { jobId: v.id("generationJobs") },
   handler: async (ctx, args) => {
@@ -799,6 +833,8 @@ export const setBatchSegmentStatus = internalMutation({
     const now = Date.now();
     await ctx.db.patch(args.segmentId, {
       status: args.status,
+      ...(args.status === "cancelled" && segment.provider === "openai" && segment.submissionAttemptedAt && !segment.submissionRejected
+        ? { cancellationPending: true } : {}),
       batchStatus: args.batchStatus ?? segment.batchStatus ?? null,
       error: args.error ?? null,
       ingestedCount: args.ingestedCount ?? segment.ingestedCount ?? 0,
@@ -820,10 +856,11 @@ export const setBatchSegmentStatus = internalMutation({
 });
 
 export const setBatchSegmentResultOffset = internalMutation({
-  args: { segmentId: v.id("generationBatchSegments"), offset: v.number() },
+  args: { segmentId: v.id("generationBatchSegments"), offset: v.number(), fileIndex: v.optional(v.number()) },
   handler: async (ctx, args) => {
     await ctx.db.patch(args.segmentId, {
       resultOffset: args.offset,
+      ...(args.fileIndex !== undefined ? { resultFileIndex: args.fileIndex } : {}),
       updatedAt: Date.now(),
     });
   },
@@ -992,10 +1029,11 @@ export const releaseBatchIngestion = internalMutation({
 });
 
 export const setBatchResultOffset = internalMutation({
-  args: { jobId: v.id("generationJobs"), offset: v.number() },
+  args: { jobId: v.id("generationJobs"), offset: v.number(), fileIndex: v.optional(v.number()) },
   handler: async (ctx, args) => {
     await ctx.db.patch(args.jobId, {
       batchResultOffset: args.offset,
+      ...(args.fileIndex !== undefined ? { batchResultFileIndex: args.fileIndex } : {}),
       updatedAt: Date.now(),
     });
   },
@@ -1019,6 +1057,7 @@ export const completeImage = internalMutation({
     outputTokens: v.optional(v.number()),
     costUsd: v.optional(v.number()),
     costRateMultiplier: v.optional(v.number()),
+    expectedPostProcessingStartedAt: v.optional(v.number()),
   },
   returns: v.object({ completed: v.boolean(), cleanupUrls: v.array(v.string()) }),
   handler: async (ctx, args) => {
@@ -1028,7 +1067,8 @@ export const completeImage = internalMutation({
       image.status === "generated" ||
       image.status === "uploaded" ||
       image.status === "failed" ||
-      image.status === "canceled"
+      image.status === "canceled" ||
+      (args.expectedPostProcessingStartedAt !== undefined && image.postProcessingStartedAt !== args.expectedPostProcessingStartedAt)
     )
       return { completed: false, cleanupUrls: [] } satisfies CompleteImageResult;
     if (image.retrySourceImageId) {
@@ -1211,6 +1251,7 @@ export const markImagePostprocessing = internalMutation({
     outputTokens: v.optional(v.number()),
     costUsd: v.optional(v.number()),
     costRateMultiplier: v.optional(v.number()),
+    expectedSegmentId: v.optional(v.union(v.id("generationBatchSegments"), v.string(), v.null())),
   },
   handler: async (ctx, args) => {
     const image = await ctx.db.get(args.imageId);
@@ -1219,7 +1260,10 @@ export const markImagePostprocessing = internalMutation({
       image.status === "generated" ||
       image.status === "uploaded" ||
       image.status === "failed" ||
-      image.status === "canceled"
+      image.status === "canceled" ||
+      (image.status === "postprocessing" && Boolean(image.postProcessingInputUrl)) ||
+      (image.providerBatchId && args.providerBatchId && image.providerBatchId !== args.providerBatchId) ||
+      (args.expectedSegmentId !== undefined && (image.batchSegmentId ?? null) !== args.expectedSegmentId)
     )
       return false;
     await ctx.db.patch(args.imageId, {
@@ -1255,8 +1299,11 @@ export const claimPostprocessingImages = internalMutation({
       )
       .take(Math.max(1, args.limit * 4));
     const claimed: Doc<"generatedImages">[] = [];
+    const inFlight = images.filter(image => image.postProcessingStartedAt &&
+      now - image.postProcessingStartedAt < POSTPROCESSING_LEASE_MS).length;
+    const capacity = Math.max(0, args.limit - inFlight);
     for (const image of images) {
-      if (claimed.length >= args.limit) break;
+      if (claimed.length >= capacity) break;
       if (
         image.postProcessingStartedAt &&
         now - image.postProcessingStartedAt < POSTPROCESSING_LEASE_MS
@@ -1331,6 +1378,10 @@ export const failImage = internalMutation({
     providerRequestId: v.optional(v.union(v.string(), v.null())),
     providerResponseId: v.optional(v.union(v.string(), v.null())),
     backgroundRemovalRequestId: v.optional(v.union(v.string(), v.null())),
+    deferSummary: v.optional(v.boolean()),
+    expectedSegmentId: v.optional(v.union(v.id("generationBatchSegments"), v.string(), v.null())),
+    expectedPostProcessingStartedAt: v.optional(v.number()),
+    batchRecoveryPending: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const image = await ctx.db.get(args.imageId);
@@ -1339,7 +1390,9 @@ export const failImage = internalMutation({
       image.status === "generated" ||
       image.status === "uploaded" ||
       image.status === "failed" ||
-      image.status === "canceled"
+      image.status === "canceled" ||
+      (args.expectedSegmentId !== undefined && (image.batchSegmentId ?? null) !== args.expectedSegmentId) ||
+      (args.expectedPostProcessingStartedAt !== undefined && image.postProcessingStartedAt !== args.expectedPostProcessingStartedAt)
     )
       return false;
     const job = await ctx.db.get(image.jobId);
@@ -1359,6 +1412,7 @@ export const failImage = internalMutation({
     await ctx.db.patch(args.imageId, {
       status: "failed",
       error: args.error,
+      batchRecoveryPending: args.batchRecoveryPending ?? false,
       providerBatchId: args.providerBatchId,
       providerRequestId: args.providerRequestId,
       providerResponseId: args.providerResponseId,
@@ -1370,9 +1424,9 @@ export const failImage = internalMutation({
         failedTasks: job.failedTasks + 1,
         updatedAt: Date.now(),
       });
-      await refreshJobSummary(ctx, job._id);
+      if (!args.deferSummary) await refreshJobSummary(ctx, job._id);
     }
-    await refreshProductSummary(ctx, image.productId);
+    if (!args.deferSummary) await refreshProductSummary(ctx, image.productId);
     return true;
   },
 });
@@ -1808,7 +1862,7 @@ export const regenerateImage = mutation({
     await ctx.scheduler.runAfter(
       0,
       effectiveExecutionMode === "batch"
-        ? internal.generation.submitBatch
+        ? (effectiveImageProvider === "openai" ? internal.openAiDurable.initialize : internal.generation.submitBatch)
         : internal.generation.processJob,
       { jobId: retryJobId },
     );
@@ -1845,8 +1899,29 @@ export const retry = mutation({
       .query("generationBatchSegments")
       .withIndex("by_job", (q) => q.eq("jobId", args.jobId))
       .collect();
+    if (existingSegments.some(segment => segment.provider === "openai" && !segment.batchId && !segment.submissionRejected &&
+      (segment.submissionAttemptedAt || segment.phase === "uncertain" ||
+        (!segment.phase && segment.status !== "completed")))) {
+      throw new Error("OpenAI submission is uncertain. Reconcile the existing batch before retrying; a retry could duplicate paid images.");
+    }
+    if (existingSegments.some(segment => segment.cancellationPending)) {
+      throw new Error("OpenAI cancellation is still pending. Wait for provider confirmation before retrying.");
+    }
+    if (existingSegments.some(segment => segment.provider === "openai" && segment.phase &&
+      segment.submissionAttemptedAt && !segment.submissionRejected &&
+      !isTerminalBatchSegmentStatus(segment.status) && segment.phase !== "recovering")) {
+      throw new Error("OpenAI work is still active. Wait for its cancellation or reconciliation before retrying.");
+    }
+    const recoverySegments = new Set(toRetry.filter(img => img.batchRecoveryPending)
+      .map(img => img.batchSegmentId));
     for (const segment of existingSegments) {
-      if (isTerminalBatchSegmentStatus(segment.status)) continue;
+      if (recoverySegments.has(segment._id) && segment.batchId) {
+        await ctx.db.patch(segment._id, { status: "running", phase: "recovering", stepFailures: 0,
+          leaseToken: undefined, leaseUntil: undefined, workflowId: undefined, error: null, updatedAt: now });
+        await ctx.scheduler.runAfter(0, internal.openAiDurable.restartSegment, { segmentId: segment._id });
+        continue;
+      }
+      if (isTerminalBatchSegmentStatus(segment.status) && segment.status !== "failed") continue;
       await ctx.db.patch(segment._id, {
         status: "cancelled",
         ingestionStartedAt: null,
@@ -1874,7 +1949,26 @@ export const retry = mutation({
     }
 
     for (const img of toRetry) {
-      await ctx.db.patch(img._id, retryImagePatch(now));
+      const resumeStaged = job.openAiDurable && Boolean(img.postProcessingInputUrl);
+      const resumeResults = job.openAiDurable && img.batchRecoveryPending &&
+        existingSegments.some(s => s._id === img.batchSegmentId && s.batchId);
+      await ctx.db.patch(img._id, {
+        ...retryImagePatch(now),
+        batchRecoveryPending: false,
+        ...(resumeResults ? { status: "generating" as const, batchSegmentId: img.batchSegmentId,
+          providerBatchId: img.providerBatchId, providerRequestId: img.providerRequestId,
+          providerResponseId: img.providerResponseId } : {}),
+        ...(resumeStaged ? {
+          status: "postprocessing" as const,
+          postProcessingInputUrl: img.postProcessingInputUrl,
+          postProcessingInputContentType: img.postProcessingInputContentType,
+          postProcessingInputExtension: img.postProcessingInputExtension,
+          providerBatchId: img.providerBatchId,
+          providerRequestId: img.providerRequestId,
+          providerResponseId: img.providerResponseId,
+          batchSegmentId: img.batchSegmentId,
+        } : {}),
+      });
       await ctx.db.patch(img.productId, generatingProductPatch(now));
       affectedProductIds.add(img.productId);
     }
@@ -1892,13 +1986,16 @@ export const retry = mutation({
       ]),
     );
     await ctx.db.patch(args.jobId, {
-      status: "queued",
+      // Recovery workflows may start before the initializer scheduled below.
+      // Their persisted cursor is already runnable in this transaction.
+      status: job.openAiDurable ? "running" : "queued",
       batchId: null,
       previousBatchIds,
       batchStatus: null,
       batchInputFileName: null,
       batchIngestionStartedAt: null,
       batchResultOffset: 0,
+      batchResultFileIndex: 0,
       batchSubmitStartedAt: undefined,
       allBatchesSubmittedAt: undefined,
       firstResultReadyAt: undefined,
@@ -1921,10 +2018,13 @@ export const retry = mutation({
     await ctx.scheduler.runAfter(
       0,
       job.executionMode === "batch" && !canResumePostProcessing
-        ? internal.generation.submitBatch
+        ? (job.imageProvider === "openai" ? internal.openAiDurable.initialize : internal.generation.submitBatch)
         : internal.generation.processJob,
       { jobId: args.jobId },
     );
+    if (job.openAiDurable && toRetry.some(img => img.postProcessingInputUrl)) {
+      await ctx.scheduler.runAfter(0, internal.generation.processPostprocessingJob, { jobId: args.jobId });
+    }
   },
 });
 

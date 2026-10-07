@@ -36,13 +36,14 @@ export function buildGeminiGenerationConfig(settings: Record<string, unknown>) {
 export async function buildGeminiReferenceParts(
   urls: Array<string | null | undefined>,
   referenceImageCache?: Map<string, Promise<Buffer>>,
+  signal?: AbortSignal,
 ) {
   const parts: Array<{ inline_data: { mime_type: string; data: string } }> = [];
   for (const url of urls) {
     if (!url) continue;
     const bytes = referenceImageCache
-      ? await getCachedReferenceImage(referenceImageCache, url)
-      : await normalizeReferenceImage(url);
+      ? await getCachedReferenceImage(referenceImageCache, url, signal)
+      : await normalizeReferenceImage(url, signal);
     parts.push({
       inline_data: { mime_type: "image/jpeg", data: bytes.toString("base64") },
     });
@@ -53,10 +54,11 @@ export async function buildGeminiReferenceParts(
 function getCachedReferenceImage(
   cache: Map<string, Promise<Buffer>>,
   url: string,
+  signal?: AbortSignal,
 ) {
   let cached = cache.get(url);
   if (!cached) {
-    cached = normalizeReferenceImage(url).catch((error) => {
+    cached = normalizeReferenceImage(url, signal).catch((error) => {
       // Share in-flight downloads, but let later batch segments recover after
       // a temporary supplier/CDN failure instead of reusing a rejected promise.
       if (cache.get(url) === cached) cache.delete(url);

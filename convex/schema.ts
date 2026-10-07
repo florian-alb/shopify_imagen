@@ -1,6 +1,7 @@
 import { authTables } from "@convex-dev/auth/server";
 import { defineSchema, defineTable } from "convex/server";
 import { catalogueTables } from "./catalogue/schema";
+import { publicationTables } from "./shopify/publicationSchema";
 import { v } from "convex/values";
 import { promptConditionValidator } from "./promptConditions";
 import { generationTargetValidator, promptBranchValidator, variantSelectionValidator } from "./generationTargets";
@@ -245,6 +246,7 @@ const googleFeedCondition = v.object({
 export default defineSchema({
   ...authTables,
   ...catalogueTables,
+  ...publicationTables,
   users: defineTable({
     name: v.optional(v.string()),
     image: v.optional(v.string()),
@@ -689,6 +691,10 @@ export default defineSchema({
     batchInputFileName: v.optional(v.union(v.string(), v.null())),
     batchIngestionStartedAt: v.optional(v.union(v.number(), v.null())),
     batchResultOffset: v.optional(v.number()),
+    batchResultFileIndex: v.optional(v.number()),
+    openAiDurable: v.optional(v.boolean()),
+    openAiBatchSize: v.optional(v.number()),
+    openAiBatchConcurrency: v.optional(v.number()),
     // Legacy batch timing fields retained for existing jobs.
     batchSubmitStartedAt: v.optional(v.number()),
     allBatchesSubmittedAt: v.optional(v.number()),
@@ -723,6 +729,8 @@ export default defineSchema({
     completedAt: v.optional(v.number()),
   })
     .index("by_status", ["status"])
+    .index("by_provider_and_execution_and_status", ["imageProvider", "executionMode", "status"])
+    .index("by_open_ai_durable_and_status", ["openAiDurable", "status"])
     .index("by_created", ["createdAt"])
     .index("by_shop_and_status", ["shopId", "status"])
     .index("by_shop_and_created", ["shopId", "createdAt"]),
@@ -734,6 +742,26 @@ export default defineSchema({
     inputFileName: v.optional(v.union(v.string(), v.null())),
     batchStatus: v.optional(v.union(v.string(), v.null())),
     status: batchSegmentStatus,
+    phase: v.optional(v.union(
+      v.literal("preparing"), v.literal("uploading"), v.literal("submitting"),
+      v.literal("uncertain"), v.literal("waiting"), v.literal("recovering"),
+      v.literal("completed"), v.literal("failed"),
+    )),
+    workflowId: v.optional(v.string()),
+    submissionKey: v.optional(v.string()),
+    submissionAttemptedAt: v.optional(v.number()),
+    submissionRejected: v.optional(v.boolean()),
+    cancellationReconciled: v.optional(v.boolean()),
+    cancellationPending: v.optional(v.boolean()),
+    reconcileCursor: v.optional(v.union(v.string(), v.null())),
+    reconcileMatches: v.optional(v.array(v.string())),
+    preparedTasks: v.optional(v.number()),
+    leaseToken: v.optional(v.string()),
+    leaseUntil: v.optional(v.number()),
+    outputFileId: v.optional(v.union(v.string(), v.null())),
+    errorFileId: v.optional(v.union(v.string(), v.null())),
+    resultFileIndex: v.optional(v.number()),
+    stepFailures: v.optional(v.number()),
     imageCount: v.number(),
     ingestedCount: v.optional(v.number()),
     failedCount: v.optional(v.number()),
@@ -749,7 +777,21 @@ export default defineSchema({
     .index("by_job", ["jobId"])
     .index("by_status", ["status"])
     .index("by_job_and_status", ["jobId", "status"])
-    .index("by_batch_id", ["batchId"]),
+    .index("by_batch_id", ["batchId"])
+    .index("by_provider_and_status", ["provider", "status"])
+    .index("by_cancellation_pending", ["cancellationPending"]),
+
+  openAiBatchReferences: defineTable({
+    jobId: v.id("generationJobs"),
+    productId: v.id("products"),
+    sourceUrl: v.string(),
+    url: v.optional(v.string()),
+    leaseToken: v.optional(v.string()),
+    leaseUntil: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_job_and_product_and_source", ["jobId", "productId", "sourceUrl"])
+    .index("by_job", ["jobId"]),
 
   generatedImages: defineTable({
     shopId: v.optional(v.id("shops")),
@@ -767,6 +809,9 @@ export default defineSchema({
     imageModel: v.optional(v.string()),
     promptUsed: v.string(),
     finalPromptUsed: v.optional(v.string()),
+    openAiPrepared: v.optional(v.boolean()),
+    batchRecoveryPending: v.optional(v.boolean()),
+    stagedReferenceUrls: v.optional(v.array(v.string())),
     promptKind: v.optional(promptKind),
     useVibeAnalysis: v.optional(v.boolean()),
     vibeUsed: v.optional(v.union(v.string(), v.null())),
@@ -833,6 +878,7 @@ export default defineSchema({
     .index("by_job", ["jobId"])
     .index("by_status", ["status"])
     .index("by_job_and_status", ["jobId", "status"])
+    .index("by_job_and_status_and_segment", ["jobId", "status", "batchSegmentId"])
     .index("by_retry_source", ["retrySourceImageId"])
     .index("by_provider_batch_id", ["providerBatchId"])
     .index("by_batch_segment", ["batchSegmentId"])

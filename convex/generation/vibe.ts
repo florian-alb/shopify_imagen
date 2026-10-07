@@ -6,22 +6,25 @@ import type { ActionCtx } from "../_generated/server";
 import { estimateCostUsd, type TokenUsage } from "../pricing";
 import { geminiUsage } from "./formats";
 import { normalizeReferenceImage } from "./images";
+import { withRequestTimeout } from "./requestTimeout";
 import { env } from "./runtime";
 
 // Quick, low-cost vision pass: describe the ideal real-world scene for a product
 // so the generation prompt stages it correctly (e.g. a kids room, not a salon).
 async function analyzeVibe(args: {
   sourceImageUrl: string;
+  signal: AbortSignal;
   model: string;
 }): Promise<{ text: string; usage: TokenUsage }> {
   const apiKey = env("GEMINI_API_KEY");
   if (!apiKey) throw new Error("GEMINI_API_KEY is required for vibe analysis.");
-  const referenceBytes = await normalizeReferenceImage(args.sourceImageUrl);
+  const referenceBytes = await normalizeReferenceImage(args.sourceImageUrl, args.signal);
   const instruction =
     "You are a product photography art director. Look at this product image and describe, in ONE concise sentence, the ideal real-world scene to showcase it: room/setting, target audience, mood, and color palette. Infer the intended end-user context (e.g. a child's bedroom for a kids product, not a generic luxury living room). Reply with the description only, no preamble.";
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(args.model)}:generateContent`,
     {
+      signal: args.signal,
       method: "POST",
       headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
       body: JSON.stringify({
@@ -75,7 +78,9 @@ export async function ensureProductVibe(
     settings.VIBE_MODEL ?? env("VIBE_MODEL", "gemini-2.5-flash-lite"),
   );
   try {
-    const { text, usage } = await analyzeVibe({ sourceImageUrl, model });
+    const { text, usage } = await withRequestTimeout("Vibe analysis", 30_000, (signal) =>
+      analyzeVibe({ sourceImageUrl, model, signal }),
+    );
     const costUsd = estimateCostUsd(model, usage);
     await ctx.runMutation(internal.products.setVibe, {
       productId: product._id,

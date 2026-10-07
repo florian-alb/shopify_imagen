@@ -57,6 +57,7 @@ export function JobDetailPage({ jobId }: { jobId: string }) {
         job={page.job}
         progress={page.viewModel.jobProgressPercent}
         jobCost={page.viewModel.jobCost}
+        batchProgress={page.viewModel.batchProgress}
       />
 
       <JobReviewToolbar
@@ -87,7 +88,7 @@ export function JobDetailPage({ jobId }: { jobId: string }) {
         onRetry={page.actions.retryImage}
       />
 
-      <JobTechnicalDetails images={page.images} job={page.job} />
+      <JobTechnicalDetails images={page.images} job={page.job} segments={page.segments} />
 
       <JobStickyPublishBar
         reviewableCount={page.viewModel.reviewableImages.length}
