@@ -1,6 +1,8 @@
 import { Check, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { BusyIcon } from "@/components/page";
+import type { JobImagePublishRun } from "../hooks/useJobImagePublish";
 
 export function JobStickyPublishBar({
   approvedCount,
@@ -10,6 +12,8 @@ export function JobStickyPublishBar({
   reviewableCount,
   visibleReviewableCount,
   reviewing,
+  publishing,
+  publishRun,
   onPublish,
   onApproveVisible,
 }: {
@@ -20,6 +24,8 @@ export function JobStickyPublishBar({
   reviewableCount: number;
   visibleReviewableCount: number;
   reviewing: boolean;
+  publishing: boolean;
+  publishRun: JobImagePublishRun | null | undefined;
   onPublish: () => void;
   onApproveVisible: () => void;
 }) {
@@ -37,7 +43,9 @@ export function JobStickyPublishBar({
             {rejectedCount} rejetees
           </p>
           <p className="truncate text-xs text-muted-foreground">
-            {pushableCount
+            {publishRun?.status === "running"
+              ? `Publication en arrière-plan · ${publishRun.processedProducts} / ${publishRun.totalProducts} produits`
+              : pushableCount
               ? `${pushableCount} image${pushableCount === 1 ? "" : "s"} prete${
                   pushableCount === 1 ? "" : "s"
                 } a publier`
@@ -53,9 +61,10 @@ export function JobStickyPublishBar({
             <Check data-icon="inline-start" />
             Approver {visibleReviewableCount || ""}
           </Button>
-          <Button disabled={!pushableCount} onClick={onPublish}>
-            <Send data-icon="inline-start" />
-            Publier {pushableCount || ""}
+          <Button disabled={publishing || !pushableCount} onClick={onPublish}>
+            <BusyIcon busy={publishing && publishRun !== undefined} />
+            {!publishing ? <Send data-icon="inline-start" /> : null}
+            {publishing && publishRun !== undefined ? "Publication…" : `Publier ${pushableCount || ""}`}
           </Button>
         </div>
       </Card>

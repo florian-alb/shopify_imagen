@@ -244,7 +244,318 @@ async function putSegmentInPhase(
   });
 }
 
+async function preparedUncertainFixture(taskCount = 3) {
+  vi.setSystemTime(4_000_000);
+  const data = await fixture(1, taskCount + 2);
+  const [segment] = await initialize(data.t, data.jobId, taskCount, 1);
+  const submissionAttemptedAt = Date.now() - 31 * 60_000;
+  await putSegmentInPhase(data.t, segment._id, "uncertain", {
+    inputFileName: "uncertain-input",
+    submissionAttemptedAt,
+    preparedTasks: taskCount,
+    error: "Submission uncertain: creation connection reset",
+  });
+  await data.t.run(async (ctx) => {
+    for (const imageId of data.imageIds.slice(0, taskCount))
+      await ctx.db.patch(imageId, {
+        openAiPrepared: true,
+        stagedReferenceUrls: ["https://r2.example.com/prepared-reference.jpg"],
+      });
+    await ctx.db.patch(data.imageIds[taskCount], {
+      status: "generated",
+      storageUrl: "https://r2.example.com/kept.png",
+    });
+    await ctx.db.patch(data.imageIds[taskCount + 1], {
+      status: "uploaded",
+      storageUrl: "https://r2.example.com/published.png",
+      shopifyMediaId: "media-kept",
+    });
+    await ctx.db.patch(data.jobId, { completedTasks: 2 });
+  });
+  return {
+    ...data,
+    segment,
+    recoveryArgs: {
+      segmentId: segment._id,
+      expectedSubmissionKey: segment.submissionKey!,
+      expectedInputFileId: "uncertain-input",
+      expectedAttemptedAt: submissionAttemptedAt,
+      confirmResubmission: true as const,
+    },
+  };
+}
+
+async function copyQueuedJob(
+  t: TestBackend,
+  jobId: Id<"generationJobs">,
+  imageIds: Id<"generatedImages">[],
+) {
+  return t.run(async (ctx) => {
+    const job = (await ctx.db.get(jobId))!;
+    const { _id, _creationTime, ...jobFields } = job;
+    void _id;
+    void _creationTime;
+    const copiedJobId = await ctx.db.insert("generationJobs", {
+      ...jobFields,
+      status: "queued",
+      totalTasks: imageIds.length,
+      completedTasks: 0,
+      failedTasks: 0,
+    });
+    for (const imageId of imageIds) {
+      const image = (await ctx.db.get(imageId))!;
+      const { _id, _creationTime, ...imageFields } = image;
+      void _id;
+      void _creationTime;
+      await ctx.db.insert("generatedImages", {
+        ...imageFields,
+        jobId: copiedJobId,
+        batchSegmentId: null,
+        status: "queued",
+      });
+    }
+    return copiedJobId;
+  });
+}
+
 describe("durable OpenAI batch orchestration", () => {
+  test("an uncertain segment reserves one slot while independent jobs use the remaining capacity", async () => {
+    const { t, jobId, imageIds } = await fixture();
+    const [uncertain] = await initialize(t, jobId, 3, 2);
+    await putSegmentInPhase(t, uncertain._id, "uncertain", {
+      inputFileName: "uncertain-input",
+      submissionAttemptedAt: Date.now() - 1,
+    });
+    const secondJobId = await copyQueuedJob(t, jobId, imageIds);
+    expect(await initialize(t, secondJobId, 3, 2)).toHaveLength(1);
+    const thirdJobId = await copyQueuedJob(t, jobId, imageIds);
+    expect(await initialize(t, thirdJobId, 3, 2)).toHaveLength(0);
+    const active = await t.run((ctx) =>
+      ctx.db.query("generationBatchSegments").collect(),
+    );
+    expect(active.filter((s) => s.status === "submitting" || s.status === "running")).toHaveLength(2);
+    expect(await t.run((ctx) => ctx.db.get(uncertain._id))).toMatchObject({
+      phase: "uncertain",
+      status: "submitting",
+    });
+    expect(createOpenAiBatchFromFile).not.toHaveBeenCalled();
+  });
+
+  test("an uncertain segment does not block unrelated queued tasks in the same job", async () => {
+    const { t, jobId } = await fixture(1, 6);
+    const [uncertain] = await initialize(t, jobId, 3, 1);
+    await putSegmentInPhase(t, uncertain._id, "uncertain", {
+      inputFileName: "uncertain-input",
+      submissionAttemptedAt: Date.now() - 1,
+    });
+    await t.run((ctx) => ctx.db.patch(jobId, { openAiBatchConcurrency: 2 }));
+    const segments = await initialize(t, jobId);
+    expect(segments).toHaveLength(2);
+    expect(segments.find((s) => s._id === uncertain._id)?.phase).toBe("uncertain");
+    expect(segments.find((s) => s._id !== uncertain._id)?.imageCount).toBe(3);
+    expect(createOpenAiBatchFromFile).not.toHaveBeenCalled();
+  });
+
+  test("empty reconciliation preserves the original submission failure without submitting again", async () => {
+    const { t, segment } = await preparedUncertainFixture();
+    for (let index = 0; index < 3; index++)
+      await t.action(internal.openAiDurableActions.advance, { segmentId: segment._id });
+    expect(await t.run((ctx) => ctx.db.get(segment._id))).toMatchObject({
+      phase: "uncertain",
+      error: "Submission uncertain: creation connection reset",
+    });
+    expect(findOpenAiBatchBySubmissionKey).toHaveBeenCalledTimes(3);
+    expect(vi.mocked(findOpenAiBatchBySubmissionKey).mock.calls[0][0]).not.toHaveProperty("inputFileId");
+    expect(createOpenAiBatchFromFile).not.toHaveBeenCalled();
+  });
+
+  test("operator recovery replaces only the verified absent attempt and keeps prepared tasks and paid results", async () => {
+    const { t, jobId, imageIds, segment, recoveryArgs } = await preparedUncertainFixture(100);
+    vi.mocked(findOpenAiBatchBySubmissionKey)
+      .mockResolvedValueOnce({ matches: [], cursor: "page-two", exhausted: false })
+      .mockResolvedValueOnce({ matches: [], cursor: null, exhausted: true });
+    const result = await t.action(internal.openAiDurableActions.recoverUncertainSubmission, recoveryArgs);
+    expect(result.retiredSegmentId).toBe(segment._id);
+    expect(result.replacementSegmentId).not.toBe(segment._id);
+    expect(findOpenAiBatchBySubmissionKey).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      submissionKey: recoveryArgs.expectedSubmissionKey,
+      inputFileId: recoveryArgs.expectedInputFileId,
+    }));
+    expect(findOpenAiBatchBySubmissionKey).toHaveBeenNthCalledWith(2, expect.objectContaining({ cursor: "page-two" }));
+    const old = (await t.run((ctx) => ctx.db.get(segment._id)))!;
+    expect(old).toMatchObject({
+      status: "cancelled",
+      phase: "failed",
+      submissionKey: recoveryArgs.expectedSubmissionKey,
+      inputFileName: recoveryArgs.expectedInputFileId,
+      submissionAttemptedAt: recoveryArgs.expectedAttemptedAt,
+      cancellationPending: false,
+      cancellationReconciled: true,
+    });
+    expect(old.error).toMatch(/operator|opérateur/i);
+    expect(old.submissionRejected).toBeUndefined();
+    expect(old.submissionRecovery).toEqual({
+      checkedAt: Date.now(),
+      replacementSegmentId: result.replacementSegmentId,
+    });
+    const replacement = (await t.run((ctx) => ctx.db.get(result.replacementSegmentId)))!;
+    expect(replacement).toMatchObject({
+      jobId,
+      status: "submitting",
+      phase: "submitting",
+      inputFileName: recoveryArgs.expectedInputFileId,
+      imageCount: 100,
+      preparedTasks: 100,
+    });
+    expect(replacement.submissionKey).not.toBe(old.submissionKey);
+    expect(replacement.submissionAttemptedAt).toBeUndefined();
+    const images = await t.run((ctx) => Promise.all(imageIds.map((id) => ctx.db.get(id))));
+    for (const image of images.slice(0, 100))
+      expect(image).toMatchObject({
+        status: "queued",
+        batchSegmentId: replacement._id,
+        openAiPrepared: true,
+        stagedReferenceUrls: ["https://r2.example.com/prepared-reference.jpg"],
+      });
+    expect(images[100]).toMatchObject({ status: "generated", storageUrl: "https://r2.example.com/kept.png" });
+    expect(images[101]).toMatchObject({ status: "uploaded", shopifyMediaId: "media-kept" });
+    expect(await t.run((ctx) => ctx.db.get(jobId))).toMatchObject({ completedTasks: 2, failedTasks: 0 });
+    expect(createOpenAiBatchFromFile).not.toHaveBeenCalled();
+    expect(uploadOpenAiBatchInput).not.toHaveBeenCalled();
+    await t.action(internal.openAiDurableActions.advance, { segmentId: old._id });
+    expect(createOpenAiBatchFromFile).not.toHaveBeenCalled();
+    await t.action(internal.openAiDurableActions.advance, { segmentId: replacement._id });
+    expect(createOpenAiBatchFromFile).toHaveBeenCalledOnce();
+    expect(createOpenAiBatchFromFile).toHaveBeenCalledWith(expect.objectContaining({
+      inputFileId: "uncertain-input", submissionKey: replacement.submissionKey,
+    }));
+    await expect(t.action(internal.openAiDurableActions.recoverUncertainSubmission, recoveryArgs)).rejects.toThrow();
+    expect(createOpenAiBatchFromFile).toHaveBeenCalledOnce();
+  });
+
+  test.each(["key-match", "file-match", "ambiguous", "incomplete", "provider-error"])(
+    "operator recovery refuses unsafe provider evidence (%s)",
+    async (reason) => {
+      const { t, jobId, imageIds, segment, recoveryArgs } = await preparedUncertainFixture();
+      if (reason === "provider-error")
+        vi.mocked(findOpenAiBatchBySubmissionKey).mockRejectedValue(new Error("OpenAI listing unavailable"));
+      else if (reason === "incomplete") {
+        let page = 0;
+        vi.mocked(findOpenAiBatchBySubmissionKey).mockImplementation(async () => ({
+          matches: [], cursor: `more-pages-${++page}`, exhausted: false,
+        }));
+      }
+      else
+        vi.mocked(findOpenAiBatchBySubmissionKey).mockResolvedValue({
+          matches: [{ batchId: "existing-paid-batch", batchStatus: "validating", inputFileId: reason === "key-match" ? "other-input" : "uncertain-input" },
+            ...(reason === "ambiguous" ? [{ batchId: "another-paid-batch", batchStatus: "in_progress", inputFileId: "uncertain-input" }] : [])],
+          cursor: null,
+          exhausted: true,
+        });
+      await expect(t.action(internal.openAiDurableActions.recoverUncertainSubmission, recoveryArgs)).rejects.toThrow();
+      if (reason === "incomplete") expect(findOpenAiBatchBySubmissionKey).toHaveBeenCalledTimes(20);
+      expect(await segmentsForJob(t, jobId)).toHaveLength(1);
+      expect(await t.run((ctx) => ctx.db.get(segment._id))).toMatchObject({ phase: "uncertain", status: "submitting" });
+      for (const imageId of imageIds.slice(0, 3))
+        expect(await t.run((ctx) => ctx.db.get(imageId))).toMatchObject({ batchSegmentId: segment._id });
+      expect(createOpenAiBatchFromFile).not.toHaveBeenCalled();
+    },
+  );
+
+  test("operator recovery refuses segments larger than the supported 100-task limit", async () => {
+    const { t, jobId, imageIds, segment, recoveryArgs } = await preparedUncertainFixture(100);
+    await t.run(async (ctx) => {
+      await ctx.db.patch(imageIds[100], {
+        status: "queued",
+        batchSegmentId: segment._id,
+        storageUrl: undefined,
+        openAiPrepared: true,
+      });
+      await ctx.db.patch(segment._id, { imageCount: 101, preparedTasks: 101 });
+    });
+    await expect(t.action(internal.openAiDurableActions.recoverUncertainSubmission, recoveryArgs)).rejects.toThrow();
+    expect(await segmentsForJob(t, jobId)).toHaveLength(1);
+    expect(createOpenAiBatchFromFile).not.toHaveBeenCalled();
+  });
+
+  test.each(["identity", "recent", "active-lease"])(
+    "operator recovery refuses before provider scanning when its target is unsafe (%s)",
+    async (reason) => {
+      const { t, jobId, segment, recoveryArgs } = await preparedUncertainFixture();
+      if (reason === "identity") recoveryArgs.expectedInputFileId = "wrong-input";
+      if (reason === "recent") {
+        recoveryArgs.expectedAttemptedAt = Date.now() - 5 * 60_000;
+        await t.run((ctx) => ctx.db.patch(segment._id, { submissionAttemptedAt: recoveryArgs.expectedAttemptedAt }));
+      }
+      if (reason === "active-lease")
+        await t.run((ctx) => ctx.db.patch(segment._id, { leaseToken: "current-worker", leaseUntil: Date.now() + 60_000 }));
+      await expect(t.action(internal.openAiDurableActions.recoverUncertainSubmission, recoveryArgs)).rejects.toThrow();
+      expect(findOpenAiBatchBySubmissionKey).not.toHaveBeenCalled();
+      expect(await segmentsForJob(t, jobId)).toHaveLength(1);
+      expect(createOpenAiBatchFromFile).not.toHaveBeenCalled();
+    },
+  );
+
+  test.each(["generated", "provider-receipt", "storage-result", "generated-result", "unprepared"])(
+    "operator recovery rejects tasks changed during provider verification (%s)",
+    async (reason) => {
+      const { t, jobId, imageIds, segment, recoveryArgs } = await preparedUncertainFixture();
+      vi.mocked(findOpenAiBatchBySubmissionKey).mockImplementationOnce(async () => {
+        await t.run((ctx) => ctx.db.patch(imageIds[0],
+          reason === "generated" ? { status: "generated" } :
+            reason === "provider-receipt" ? { providerBatchId: "paid-batch" } :
+              reason === "storage-result" ? { storageUrl: "https://r2.example.com/paid.png" } :
+                reason === "generated-result" ? { generatedImageUrl: "https://r2.example.com/paid.png" } :
+                  { openAiPrepared: false },
+        ));
+        return { matches: [], cursor: null, exhausted: true };
+      });
+      await expect(t.action(internal.openAiDurableActions.recoverUncertainSubmission, recoveryArgs)).rejects.toThrow();
+      expect(await segmentsForJob(t, jobId)).toHaveLength(1);
+      expect(await t.run((ctx) => ctx.db.get(segment._id))).toMatchObject({ phase: "uncertain" });
+      expect(createOpenAiBatchFromFile).not.toHaveBeenCalled();
+    },
+  );
+
+  test.each(["stale-token", "expired-lease", "old-evidence", "future-evidence", "late-receipt"])(
+    "atomic recovery refuses stale evidence or concurrent provider acceptance (%s)",
+    async (reason) => {
+      const { t, jobId, segment, recoveryArgs } = await preparedUncertainFixture();
+      await t.mutation(internal.openAiDurable.claim, { segmentId: segment._id, token: "operator-lease" });
+      if (reason === "expired-lease")
+        await t.run((ctx) => ctx.db.patch(segment._id, { leaseUntil: Date.now() }));
+      if (reason === "late-receipt")
+        await t.mutation(internal.openAiDurable.saveReceipt, {
+          segmentId: segment._id,
+          submissionKey: recoveryArgs.expectedSubmissionKey,
+          inputFileId: recoveryArgs.expectedInputFileId,
+          batchId: "accepted-during-verification",
+        });
+      await expect(t.mutation(internal.openAiDurable.replaceUnacceptedSegment, {
+        segmentId: recoveryArgs.segmentId,
+        expectedSubmissionKey: recoveryArgs.expectedSubmissionKey,
+        expectedInputFileId: recoveryArgs.expectedInputFileId,
+        expectedAttemptedAt: recoveryArgs.expectedAttemptedAt,
+        token: reason === "stale-token" ? "obsolete-operator" : "operator-lease",
+        verifiedAbsentAt: Date.now() + (reason === "old-evidence" ? -60_001 : reason === "future-evidence" ? 1 : 0),
+      })).rejects.toThrow();
+      expect(await segmentsForJob(t, jobId)).toHaveLength(1);
+      expect(await t.run((ctx) => ctx.db.get(segment._id))).toMatchObject({ phase: "uncertain" });
+      expect(createOpenAiBatchFromFile).not.toHaveBeenCalled();
+    },
+  );
+
+  test("a resolved operator attempt does not block retries after the replacement receives a definite rejection", async () => {
+    const { t, client, jobId, recoveryArgs } = await preparedUncertainFixture();
+    const { replacementSegmentId } = await t.action(internal.openAiDurableActions.recoverUncertainSubmission, recoveryArgs);
+    vi.mocked(createOpenAiBatchFromFile).mockRejectedValueOnce(new OpenAiBatchRejectedError("OpenAI rejected replacement (400)"));
+    await t.action(internal.openAiDurableActions.advance, { segmentId: replacementSegmentId });
+    expect(await t.run((ctx) => ctx.db.get(jobId))).toMatchObject({ status: "failed", completedTasks: 2, failedTasks: 3 });
+    await expect(client.mutation(api.jobs.retry, { jobId })).resolves.toBeNull();
+    expect(createOpenAiBatchFromFile).toHaveBeenCalledOnce();
+    expect(await t.run((ctx) => ctx.db.get(jobId))).toMatchObject({ completedTasks: 2, failedTasks: 0 });
+  });
+
   test("the authenticated public entry creates one 300-product bulk with 900 tasks and a transactional initializer", async () => {
     const {
       t,

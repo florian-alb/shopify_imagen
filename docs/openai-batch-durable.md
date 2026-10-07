@@ -13,7 +13,7 @@ Variables serveur Convex, lues au démarrage puis figées dans le job :
 | `OPENAI_BATCH_SEGMENT_SIZE` | 100 images | 1–100 |
 | `OPENAI_BATCH_MAX_CONCURRENT` | 2 segments | 1–3 |
 
-Le plafond de segments actifs s'applique à la clé OpenAI partagée par le déploiement, entre les jobs, et inclut les anciens segments OpenAI actifs et les annulations non confirmées. Les soumissions incertaines retiennent leur place. Les étapes Node utilisent un Workpool limité à trois workers. Ces limites ne représentent pas le quota réel du compte OpenAI.
+Le plafond de segments actifs s'applique à la clé OpenAI partagée par le déploiement, entre les jobs, et inclut les anciens segments OpenAI actifs et les annulations non confirmées. Les soumissions incertaines retiennent leur place ; les créneaux restants restent disponibles pour les autres segments et jobs. Les étapes Node utilisent un Workpool limité à trois workers. Ces limites ne représentent pas le quota réel du compte OpenAI.
 
 Le point d'entrée accepte au maximum 900 tâches OpenAI Batch par job. Pour 300 produits × trois images, neuf segments de 100 sont créés à mesure que les places se libèrent. Le démarrage est une mutation programmée, transactionnelle ; le watchdog récupère aussi les anciens démarrages restés en file.
 
@@ -32,6 +32,12 @@ Chaque étape dispose d'un lease de onze minutes, supérieur à la durée maxima
 ## Soumissions incertaines et annulations
 
 Un timeout, une réponse serveur ambiguë ou une interruption après le POST n'autorise **jamais** un second POST automatique. Le Workflow parcourt la liste paginée OpenAI, enregistre son curseur et cherche une correspondance exacte de clé de soumission **et** fichier d'entrée. Une correspondance unique est rattachée ; aucune correspondance ou plusieurs correspondances laissent un état explicitement incertain. Les refus HTTP explicites sont distingués des réponses inconnues et peuvent être relancés après correction.
+
+Les scans sans correspondance conservent l'erreur initiale, également journalisée lors d'une soumission ambiguë. Le watchdog et le bouton Poll ne réémettent pas une soumission incertaine.
+
+Une reprise opérateur explicite est disponible via l'action interne `openAiDurableActions:recoverUncertainSubmission`. Elle requiert `segmentId`, `expectedSubmissionKey`, `expectedInputFileId`, `expectedAttemptedAt` et `confirmResubmission: true`. Après trente minutes minimum, elle acquiert un lease puis parcourt complètement la liste OpenAI (maximum vingt pages). Toute correspondance de clé **ou** de fichier, erreur HTTP, pagination incomplète, identité modifiée ou reçu tardif refuse la reprise. Une liste vide n'est pas un refus contractuel du fournisseur : cette commande représente une décision opérateur après vérification, jamais une reprise automatique.
+
+La transaction finale ne remplace que les tâches préparées encore en file, sans résultat ni reçu fournisseur. Elle conserve l'ancien segment, sa clé, son fichier et sa tentative, avec `submissionRecovery` et une justification ; elle démarre un nouveau segment avec une nouvelle clé et réutilise le fichier d'entrée et les références préparées. Les résultats déjà générés restent acquis. La réservation passe au nouveau segment ; une éventuelle relance ultérieure du job distingue cette résolution opérateur d'une soumission encore incertaine et d'un refus HTTP explicite.
 
 Une annulation pendant cette fenêtre continue le rapprochement en lecture ; un batch retrouvé est annulé et sa place reste réservée jusqu'à un état fournisseur terminal. Les refus explicites reçus pendant l'annulation sont aussi conservés et libèrent cette réservation. La relance est refusée tant que la soumission ou son annulation reste incertaine.
 
@@ -89,3 +95,11 @@ La liste utilise désormais les compteurs persistés par les mutations de géné
 `npx convex dev --once` a confirmé les fonctions prêtes sur `curious-greyhound-437` à 11:20:13 Paris. Le contrôle préalable en lecture seule a confirmé zéro job queued/running, zéro image en post-traitement et aucune fonction de génération pending/inProgress ; le scan des fonctions programmées était complet. Aucun déploiement de production ni génération payante n'a été lancé pour ce correctif.
 
 Cette qualification porte sur `jobs:list` et ne garantit pas un budget constant pour un historique arbitrairement profond : la pagination par offset et les filtres non indexés parcourent encore les anciens jobs. Les requêtes de détail et de coût global conservent leurs parcours distincts, dont le repli de coût des anciens jobs sur les images. Leur pagination/agrégation devra être qualifiée séparément à grande échelle. Aucun parcours authentifié de cette correction n'a été exécuté en production.
+
+## Correctif des soumissions incertaines — 7 octobre 2026
+
+Le diagnostic en production a trouvé un segment de 100 tâches en phase `uncertain`, sans identifiant OpenAI, qui interdisait également les nouveaux segments des deux jobs suivants (192 et 1 tâche). Le workflow exécutait toujours ses scans toutes les cinq minutes ; le watchdog tournait toutes les quinze minutes. Deux parcours complets du compte OpenAI ont retrouvé 74 batches, sans correspondance de clé ni de fichier pour le segment bloqué ; son fichier d'entrée était traité. L'erreur initiale avait été remplacée par le message d'attente.
+
+Le correctif limite cette réservation au créneau du segment, conserve la cause initiale et ajoute la commande opérateur décrite ci-dessus. Les tests couvrent notamment le remplacement de 100 tâches préparées, la conservation des résultats acquis, la concurrence entre jobs, l'absence de POST automatique, les scans incomplets/ambigus, les leases et reçus concurrents, ainsi que la relance ultérieure du job. Les 449 tests du workspace et les 73 tests ciblés dans la copie isolée passent ; typecheck app/Convex, build, contrat public et diff-check passent. Le lint ciblé n'a aucune erreur.
+
+La simulation valide le schéma sur les données de production ; aucune migration ou modification d'index, de composant ou d'authentification n'est nécessaire. Les 214 modules applicatifs du HEAD propre correspondent exactement à la base de production ; les changements locaux d'historique sont exclus de la copie de déploiement. Le déploiement réel et la reprise restent en attente d'autorisation explicite après rejet de l'approbation automatique. Aucun résultat de test simulé ne constitue une reprise réelle du fournisseur.

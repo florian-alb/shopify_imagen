@@ -19,6 +19,7 @@ describe("job search helpers", () => {
       executionMode: "batch",
       provider: "gemini",
       review: "approved",
+      archived: undefined,
       page: undefined,
       pageSize: undefined,
     });
@@ -40,6 +41,7 @@ describe("job search helpers", () => {
       executionMode: undefined,
       provider: undefined,
       review: undefined,
+      archived: undefined,
       page: undefined,
       pageSize: undefined,
     });
@@ -65,8 +67,16 @@ describe("job search helpers", () => {
       executionMode: undefined,
       provider: undefined,
       review: undefined,
+      archived: undefined,
       page: 2,
       pageSize: 100,
     });
+  });
+
+  it("keeps the archive view in shareable URLs and strips the default view", () => {
+    expect(validateJobSearch({ archived: "true", page: "2" })).toMatchObject({ archived: true, page: 2 });
+    expect(validateJobSearch({ archived: true }).archived).toBe(true);
+    expect(validateJobSearch({ archived: "false" }).archived).toBeUndefined();
+    expect(validateJobSearch({ archived: "all" }).archived).toBeUndefined();
   });
 });

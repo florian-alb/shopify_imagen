@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { reviewAggregateBadge } from "@/features/images/lib/review";
 import type { Doc } from "@/lib/convex";
 import { executionModeLabel } from "../lib/jobDetailViewModel";
+import { JobHistoryMenu } from "./JobHistoryMenu";
 
 export function JobDetailHeader({
   canCancelJob,
@@ -18,6 +19,9 @@ export function JobDetailHeader({
   onCancel,
   onForcePoll,
   onRetry,
+  historyBusy,
+  onArchive,
+  onDelete,
 }: {
   canCancelJob: boolean;
   canForcePoll: boolean;
@@ -30,6 +34,9 @@ export function JobDetailHeader({
   onCancel: () => void;
   onForcePoll: () => void;
   onRetry: () => void;
+  historyBusy: boolean;
+  onArchive: () => void;
+  onDelete: () => void;
 }) {
   return (
     <>
@@ -39,7 +46,7 @@ export function JobDetailHeader({
         className="-ml-2 mb-3 text-muted-foreground"
         asChild
       >
-        <Link to="/jobs">
+        <Link to="/jobs" search={{ archived: job.archivedAt != null ? true : undefined }}>
           <ArrowLeft data-icon="inline-start" />
           Generations
         </Link>
@@ -56,6 +63,7 @@ export function JobDetailHeader({
               {job.imageProvider === "gemini" ? "Nano Banana Pro" : "OpenAI"}
             </StateBadge>
             <StateBadge state={jobState}>{job.status}</StateBadge>
+            {job.archivedAt != null ? <StateBadge state="neutral">Archivé</StateBadge> : null}
             {job.batchStatus ? <StateBadge>{job.batchStatus}</StateBadge> : null}
             <StateBadge state={reviewBadge.tone}>{reviewBadge.label}</StateBadge>
 
@@ -74,6 +82,8 @@ export function JobDetailHeader({
                 Poll
               </Button>
             ) : null}
+            <JobHistoryMenu job={job} busy={historyBusy || retrying || cancelling}
+              onArchive={onArchive} onDelete={onDelete} />
 
             {canCancelJob ? (
               <Button

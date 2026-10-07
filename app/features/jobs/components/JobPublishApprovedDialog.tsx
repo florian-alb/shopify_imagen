@@ -12,13 +12,12 @@ import {
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { Progress } from "@/components/ui/progress";
 import type { Doc } from "@/lib/convex";
 
 export function JobPublishApprovedDialog({
   open,
-  pushedProducts,
-  pushing,
+  starting,
+  publishDisabled,
   replaceExisting,
   selectedPushableImages,
   selectedPushProductCount,
@@ -28,8 +27,8 @@ export function JobPublishApprovedDialog({
   onReplaceExistingChange,
 }: {
   open: boolean;
-  pushedProducts: number;
-  pushing: boolean;
+  starting: boolean;
+  publishDisabled: boolean;
   replaceExisting: boolean;
   selectedPushableImages: Doc<"generatedImages">[];
   selectedPushProductCount: number;
@@ -70,7 +69,7 @@ export function JobPublishApprovedDialog({
           <Checkbox
             className="mt-0.5"
             checked={replaceExisting}
-            disabled={pushing}
+            disabled={publishDisabled}
             onCheckedChange={(checked) =>
               onReplaceExistingChange(checked === true)
             }
@@ -80,37 +79,24 @@ export function JobPublishApprovedDialog({
               Replace current Shopify galleries
             </strong>
             <span className="mt-1 block text-xs text-muted-foreground">
-              Existing Shopify media will deleted each successful upload.
+              Existing Shopify media will be deleted after each successful upload.
             </span>
           </span>
         </Label>
 
-        {pushing ? (
-          <div>
-            <div className="mb-2 flex justify-between text-xs text-muted-foreground">
-              <span>Publishing products</span>
-              <span>
-                {pushedProducts} / {selectedPushProductCount}
-              </span>
-            </div>
-            <Progress
-              value={
-                selectedPushProductCount
-                  ? (pushedProducts / selectedPushProductCount) * 100
-                  : 0
-              }
-            />
-          </div>
-        ) : null}
+        <p className="text-xs text-muted-foreground">
+          The push runs in the background. You can leave this page or close your
+          browser and check progress on this job later.
+        </p>
 
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={pushing}>Cancel</AlertDialogCancel>
+          <AlertDialogCancel disabled={starting}>Cancel</AlertDialogCancel>
           <Button
-            disabled={pushing || !selectedPushableImages.length}
+            disabled={publishDisabled || !selectedPushableImages.length}
             onClick={onPush}
           >
-            <BusyIcon busy={pushing} />
-            {!pushing ? <Send data-icon="inline-start" /> : null}
+            <BusyIcon busy={starting} />
+            {!starting ? <Send data-icon="inline-start" /> : null}
             Push {selectedPushableImages.length} image
             {selectedPushableImages.length === 1 ? "" : "s"}
           </Button>

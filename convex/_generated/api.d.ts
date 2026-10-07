@@ -62,6 +62,7 @@ import type * as googleFeed_shopify from "../googleFeed/shopify.js";
 import type * as googleFeed_validators from "../googleFeed/validators.js";
 import type * as googleFeedActions from "../googleFeedActions.js";
 import type * as http from "../http.js";
+import type * as jobImagePublishing from "../jobImagePublishing.js";
 import type * as jobs from "../jobs.js";
 import type * as jobs_engine from "../jobs/engine.js";
 import type * as jobs_lifecycle from "../jobs/lifecycle.js";
@@ -172,6 +173,7 @@ declare const fullApi: ApiFromModules<{
   "googleFeed/validators": typeof googleFeed_validators;
   googleFeedActions: typeof googleFeedActions;
   http: typeof http;
+  jobImagePublishing: typeof jobImagePublishing;
   jobs: typeof jobs;
   "jobs/engine": typeof jobs_engine;
   "jobs/lifecycle": typeof jobs_lifecycle;

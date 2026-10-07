@@ -8,5 +8,5 @@ export const Route = createFileRoute("/jobs/$jobId")({
 function JobDetailRoute() {
   const { jobId } = Route.useParams();
 
-  return <JobDetailPage jobId={jobId} />;
+  return <JobDetailPage key={jobId} jobId={jobId} />;
 }

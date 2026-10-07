@@ -36,7 +36,7 @@ export function useJobDetailPage(jobId: string) {
   const regeneration = useJobImageRegeneration({
     onOpen: () => setPreviewId(null),
   });
-  const publish = useJobImagePublish();
+  const publish = useJobImagePublish(jobId as Id<"generationJobs">);
   const retouch = useGeneratedImageRetouch({
     onSaved: (retouchedImageId) => setPreviewId(retouchedImageId),
   });
@@ -170,7 +170,7 @@ export function useJobDetailPage(jobId: string) {
   }
 
   function onPublishOpenChange(open: boolean) {
-    if (publish.pushing) return;
+    if (publish.starting) return;
     publish.setPushOpen(open);
     if (!open) setPushTargetProductId(null);
   }
@@ -178,13 +178,7 @@ export function useJobDetailPage(jobId: string) {
   async function pushApproved() {
     if (!viewModel) return;
     const success = await publish.pushApproved({
-      products,
       pushableImages: viewModel.selectedPushableImages,
-      successMessage: pushTargetProduct
-        ? `${viewModel.selectedPushableImages.length} image${
-            viewModel.selectedPushableImages.length === 1 ? "" : "s"
-          } pushed for ${pushTargetProduct.title}`
-        : undefined,
     });
 
     if (success) setPushTargetProductId(null);

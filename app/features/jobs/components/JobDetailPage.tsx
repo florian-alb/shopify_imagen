@@ -1,3 +1,4 @@
+import { useNavigate } from "@tanstack/react-router";
 import { ImageRetouchDialog } from "@/components/image-retouch-dialog";
 import { EmptyState, pageContentClass } from "@/components/page";
 import { JobDetailHeader } from "./JobDetailHeader";
@@ -5,14 +6,19 @@ import { JobImagePreviewDialog } from "./JobImagePreviewDialog";
 import { JobProductReviewGrid } from "./JobProductReviewGrid";
 import { JobProgressCard } from "./JobProgressCard";
 import { JobPublishApprovedDialog } from "./JobPublishApprovedDialog";
+import { JobPublishProgressCard } from "./JobPublishProgressCard";
 import { JobRegenerateImageDialog } from "./JobRegenerateImageDialog";
 import { JobReviewToolbar } from "./JobReviewToolbar";
 import { JobStickyPublishBar } from "./JobStickyPublishBar";
 import { JobTechnicalDetails } from "./JobTechnicalDetails";
 import { useJobDetailPage } from "../hooks/useJobDetailPage";
+import { useJobHistoryActions } from "../hooks/useJobHistoryActions";
+import { DeleteJobDialog } from "./DeleteJobDialog";
 
 export function JobDetailPage({ jobId }: { jobId: string }) {
   const page = useJobDetailPage(jobId);
+  const navigate = useNavigate();
+  const history = useJobHistoryActions({ onRemoved: () => void navigate({ to: "/jobs" }) });
 
   if (page.data === undefined) {
     return (
@@ -51,7 +57,13 @@ export function JobDetailPage({ jobId }: { jobId: string }) {
         onForcePoll={() => void page.actions.forcePoll()}
         onCancel={() => void page.actions.cancel()}
         onRetry={() => void page.actions.retry()}
+        historyBusy={history.busyJobId !== null || page.publish.pushing}
+        onArchive={() => { if (page.job) void history.toggleArchived(page.job); }}
+        onDelete={() => history.setDeleteTarget(page.job)}
       />
+
+      <DeleteJobDialog target={history.deleteTarget} busy={history.busyJobId !== null}
+        onOpenChange={history.onDeleteOpenChange} onConfirm={() => void history.confirmRemoval()} />
 
       <JobProgressCard
         job={page.job}
@@ -71,11 +83,13 @@ export function JobDetailPage({ jobId }: { jobId: string }) {
         onApproveVisible={page.actions.reviewVisible}
       />
 
+      <JobPublishProgressCard run={page.publish.publishRun} />
+
       <JobProductReviewGrid
         productRows={page.viewModel.productRows}
         reviewing={page.review.reviewing}
         retrying={page.retrying}
-        publishing={page.publish.pushing}
+        publishing={page.publish.publishDisabled}
         pushTargetProductId={page.pushTargetProductId}
         regeneratingId={page.regeneration.regeneratingId}
         onPreview={page.setPreviewId}
@@ -91,6 +105,8 @@ export function JobDetailPage({ jobId }: { jobId: string }) {
       <JobTechnicalDetails images={page.images} job={page.job} segments={page.segments} />
 
       <JobStickyPublishBar
+        publishing={page.publish.publishDisabled}
+        publishRun={page.publish.publishRun}
         reviewableCount={page.viewModel.reviewableImages.length}
         approvedCount={page.viewModel.approvedImages.length}
         pendingCount={page.viewModel.pendingCount}
@@ -147,8 +163,8 @@ export function JobDetailPage({ jobId }: { jobId: string }) {
         selectedPushableImages={page.viewModel.selectedPushableImages}
         selectedPushProductCount={page.viewModel.selectedPushProductCount}
         replaceExisting={page.publish.replaceExisting}
-        pushing={page.publish.pushing}
-        pushedProducts={page.publish.pushedProducts}
+        starting={page.publish.starting}
+        publishDisabled={page.publish.publishDisabled}
         onOpenChange={page.actions.onPublishOpenChange}
         onReplaceExistingChange={page.publish.setReplaceExisting}
         onPush={() => void page.actions.pushApproved()}

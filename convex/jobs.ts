@@ -143,6 +143,7 @@ export const list = query({
     executionMode: executionModeFilter,
     provider: providerFilter,
     review: reviewFilter,
+    archived: v.optional(v.boolean()),
     offset: v.optional(v.number()),
     limit: v.optional(v.number()),
   },
@@ -172,7 +173,8 @@ export const list = query({
     const page: Doc<"generationJobs">[] = [];
     let matched = 0;
     for await (const job of scopedJobsNewestFirst(ctx, scope)) {
-      if (job.isHidden) continue;
+      if (job.isHidden || job.deletedAt != null) continue;
+      if ((job.archivedAt != null) !== (args.archived ?? false)) continue;
       if (!shopMatchesScope(job, scope)) continue;
       if (args.productId && !job.productIds.includes(args.productId)) continue;
       const effectiveExecutionMode = job.executionMode ?? "realtime";
@@ -298,7 +300,7 @@ export const get = query({
     const userId = await requireUserId(ctx);
     const scope = await getActiveShopScope(ctx, userId);
     const job = await ctx.db.get(args.jobId);
-    if (!job || !shopMatchesScope(job, scope)) return null;
+    if (!job || job.deletedAt != null || !shopMatchesScope(job, scope)) return null;
     const images = await ctx.db
       .query("generatedImages")
       .withIndex("by_job", (q) => q.eq("jobId", args.jobId))
@@ -534,6 +536,95 @@ export const cancel = mutation({
   },
 });
 
+export const setArchived = mutation({
+  args: { jobId: v.id("generationJobs"), archived: v.boolean() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const userId = await requireUserId(ctx);
+    const scope = await getActiveShopScope(ctx, userId);
+    const job = await ctx.db.get(args.jobId);
+    if (!job || job.isHidden || job.deletedAt != null || !shopMatchesScope(job, scope))
+      throw new Error("Job introuvable.");
+    if ((job.archivedAt != null) === args.archived) return null;
+    const now = Date.now();
+    await ctx.db.patch(job._id, {
+      archivedAt: args.archived ? now : undefined,
+      archivedByUserId: args.archived ? userId : undefined,
+      updatedAt: now,
+    });
+    return null;
+  },
+});
+
+export const remove = mutation({
+  args: { jobId: v.id("generationJobs") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const userId = await requireUserId(ctx);
+    const scope = await getActiveShopScope(ctx, userId);
+    const job = await ctx.db.get(args.jobId);
+    if (!job || job.isHidden || !shopMatchesScope(job, scope))
+      throw new Error("Job introuvable.");
+    if (job.deletedAt != null) return null;
+    const activePublication = await ctx.db.query("imagePublishRuns")
+      .withIndex("by_jobId_and_status", q => q.eq("jobId", job._id).eq("status", "running"))
+      .first();
+    if (activePublication)
+      throw new Error("Une publication Shopify est encore en cours pour ce job. Attendez sa fin avant de le supprimer.");
+    if (!isTerminalJobStatus(job.status))
+      throw new Error("Terminez ou annulez le job avant de le supprimer.");
+    // Probe selective indexes instead of reading up to 900 prompt payloads.
+    const activeImages = await Promise.all(
+      (["queued", "generating", "postprocessing"] as const).map(status => ctx.db
+        .query("generatedImages")
+        .withIndex("by_job_and_status", q => q.eq("jobId", job._id).eq("status", status))
+        .first()),
+    );
+    if (activeImages.some(Boolean))
+      throw new Error("Des images sont encore en cours de traitement. Attendez avant de supprimer le job.");
+    const segments = await ctx.db.query("generationBatchSegments")
+      .withIndex("by_job", q => q.eq("jobId", job._id)).take(1001);
+    if (segments.length > 1000)
+      throw new Error("Ce job contient trop de segments pour être supprimé. Vous pouvez l'archiver.");
+    if (segments.some(segment => !isTerminalBatchSegmentStatus(segment.status) ||
+      segment.cancellationPending || segment.phase === "uncertain" ||
+      (segment.batchId && providerBatchStillActive(segment.provider, segment.batchStatus)) ||
+      (segment.batchId && segment.batchStatus == null && segment.status !== "completed" &&
+        !segment.cancellationReconciled) ||
+      (segment.provider === "openai" && !segment.batchId && !segment.submissionRejected &&
+        (segment.submissionAttemptedAt != null || (!segment.phase && segment.status !== "completed"))) ||
+      (segment.provider === "openai" && segment.status === "cancelled" &&
+        segment.submissionAttemptedAt != null && !segment.submissionRejected && !segment.cancellationReconciled))) {
+      throw new Error("Un batch est encore actif ou sa soumission/annulation est incertaine. Attendez son rapprochement avant de supprimer le job.");
+    }
+    if ((job.batchId && (providerBatchStillActive(job.imageProvider ?? "openai", job.batchStatus) ||
+        (job.batchStatus == null && job.status !== "completed"))) ||
+      (job.executionMode === "batch" && job.imageProvider !== "gemini" && !job.openAiDurable &&
+        !job.batchId && !segments.length && job.status !== "completed")) {
+      throw new Error("Le statut du batch fournisseur reste à confirmer. Vous pouvez archiver le job en attendant.");
+    }
+    // Do not erase image ownership, supplier receipts or already incurred costs.
+    // Removal is permanent in the public history; retained product images keep
+    // their backing job so review, publication and image retries still work.
+    const now = Date.now();
+    await ctx.db.patch(job._id, {
+      deletedAt: now, deletedByUserId: userId, updatedAt: now,
+    });
+    return null;
+  },
+});
+
+function providerBatchStillActive(provider: "openai" | "gemini", status?: string | null) {
+  const terminalStatuses = provider === "openai"
+    ? ["completed", "failed", "expired", "cancelled"]
+    : ["JOB_STATE_SUCCEEDED", "BATCH_STATE_SUCCEEDED", "SUCCEEDED",
+      "JOB_STATE_FAILED", "BATCH_STATE_FAILED", "FAILED",
+      "JOB_STATE_EXPIRED", "BATCH_STATE_EXPIRED", "EXPIRED",
+      "JOB_STATE_CANCELLED", "BATCH_STATE_CANCELLED", "CANCELLED", "CANCELED"];
+  // Unknown provider states also require reconciliation rather than erasure.
+  return status != null && !terminalStatuses.includes(status);
+}
+
 async function cancelJobLocally(
   ctx: { db: any },
   args: {
@@ -583,7 +674,7 @@ export const markRunning = internalMutation({
   args: { jobId: v.id("generationJobs") },
   handler: async (ctx, args) => {
     const job = await ctx.db.get(args.jobId);
-    if (!job || job.status === "cancelled") return false;
+    if (!job || job.deletedAt != null || job.status === "cancelled") return false;
     await ctx.db.patch(args.jobId, {
       status: "running",
       startedAt: Date.now(),
@@ -597,7 +688,7 @@ export const nextQueuedImage = internalQuery({
   args: { jobId: v.id("generationJobs") },
   handler: async (ctx, args) => {
     const job = await ctx.db.get(args.jobId);
-    if (!job || job.status === "cancelled") return null;
+    if (!job || job.deletedAt != null || job.status === "cancelled") return null;
     return ctx.db
       .query("generatedImages")
       .withIndex("by_job", (q) => q.eq("jobId", args.jobId))
@@ -1884,7 +1975,7 @@ export const retry = mutation({
     const userId = await requireUserId(ctx);
     const scope = await getActiveShopScope(ctx, userId);
     const job = await ctx.db.get(args.jobId);
-    if (!job || !shopMatchesScope(job, scope))
+    if (!job || job.deletedAt != null || !shopMatchesScope(job, scope))
       throw new Error("Job not found.");
     if (job.status !== "failed" && job.status !== "cancelled")
       throw new Error("Only failed or cancelled jobs can be retried.");
@@ -1906,6 +1997,7 @@ export const retry = mutation({
       .withIndex("by_job", (q) => q.eq("jobId", args.jobId))
       .collect();
     if (existingSegments.some(segment => segment.provider === "openai" && !segment.batchId && !segment.submissionRejected &&
+      !(segment.status === "cancelled" && segment.cancellationReconciled && segment.submissionRecovery) &&
       (segment.submissionAttemptedAt || segment.phase === "uncertain" ||
         (!segment.phase && segment.status !== "completed")))) {
       throw new Error("OpenAI submission is uncertain. Reconcile the existing batch before retrying; a retry could duplicate paid images.");
