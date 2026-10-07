@@ -1,10 +1,12 @@
 import { useQuery } from "convex/react";
 import { api, type Doc, type Id } from "@/lib/convex";
+import type { JobBatchSegment } from "../lib/batchJobProgress";
 
 export type JobDetail = {
   job: Doc<"generationJobs">;
   images: Doc<"generatedImages">[];
   products: Doc<"products">[];
+  segments?: JobBatchSegment[];
 } | null;
 
 export function useJobDetail(jobId: string) {

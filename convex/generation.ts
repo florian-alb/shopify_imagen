@@ -1,5 +1,6 @@
 "use node";
 
+import { createHash } from "node:crypto";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { action, internalAction, type ActionCtx } from "./_generated/server";
@@ -64,13 +65,13 @@ import {
 // Batch generation (asynchronous, ~50% cheaper than real-time)
 // ---------------------------------------------------------------------------
 
-const GEMINI_BATCH_SEGMENT_SIZE = Math.max(
+const BATCH_SUBMISSION_SEGMENT_SIZE = Math.max(
   1,
-  intEnv("GEMINI_BATCH_SEGMENT_SIZE", 10),
+  Math.min(10, intEnv("GEMINI_BATCH_SEGMENT_SIZE", 10)),
 );
-const GEMINI_BATCH_MAX_CONCURRENT_SUBMISSIONS = Math.max(
+const BATCH_MAX_CONCURRENT_SUBMISSIONS = Math.max(
   1,
-  intEnv("GEMINI_BATCH_MAX_CONCURRENT_SUBMISSIONS", 3),
+  Math.min(3, intEnv("GEMINI_BATCH_MAX_CONCURRENT_SUBMISSIONS", 3)),
 );
 const VIBE_ANALYSIS_MAX_CONCURRENT = Math.max(
   1,
@@ -160,9 +161,26 @@ async function withResolvedModelReferenceUrl<
   };
 }
 
+export const cleanupFailedOpenAiBatchReferences = internalAction({
+  args: { segmentId: v.id("generationBatchSegments") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const images = await ctx.runQuery(internal.jobs.imagesForBatchSegment, args);
+    await cleanupOpenAiBatchReferencesForImages(images);
+    return null;
+  },
+});
+
 export const submitBatch = internalAction({
   args: { jobId: v.id("generationJobs") },
+  returns: v.null(),
   handler: async (ctx, args) => {
+    const initialJob = await ctx.runQuery(internal.jobs.getJobInternal, args);
+    if (initialJob?.imageProvider === "openai") {
+      await ctx.runMutation(internal.openAiDurable.initialize, { ...args,
+        batchSize: intEnv("OPENAI_BATCH_SEGMENT_SIZE", 100), concurrency: intEnv("OPENAI_BATCH_MAX_CONCURRENT", 2) });
+      return null;
+    }
     await ctx.runMutation(internal.jobs.markRunning, { jobId: args.jobId });
     await ctx.runMutation(internal.jobs.markBatchSubmitStarted, {
       jobId: args.jobId,
@@ -170,23 +188,32 @@ export const submitBatch = internalAction({
     const job = (await ctx.runQuery(internal.jobs.getJobInternal, {
       jobId: args.jobId,
     })) as Doc<"generationJobs"> | null;
-    if (!job || job.status === "cancelled") return;
+    if (!job || job.status === "cancelled") return null;
     const settings = (await ctx.runQuery(internal.settings.internalList, {
       shopId: job.shopId ?? null,
     })) as Record<string, unknown>;
-    const allImages = (await ctx.runQuery(internal.jobs.imagesForJob, {
-      jobId: args.jobId,
-    })) as Doc<"generatedImages">[];
+    // One bounded wave per action; queued images assigned to a segment are
+    // excluded so continuations never resubmit an existing provider batch.
+    // At most ten 30-second vibe passes per worker, then one 180-second
+    // submission wave: leave headroom under the Node action's 600-second limit.
+    const waveSize = Math.min(
+      BATCH_SUBMISSION_SEGMENT_SIZE * BATCH_MAX_CONCURRENT_SUBMISSIONS,
+      VIBE_ANALYSIS_MAX_CONCURRENT * 10,
+    );
+    const queuedImages = (await ctx.runQuery(
+      internal.jobs.queuedImagesForBatchSubmission,
+      { jobId: args.jobId, limit: waveSize + 1 },
+    )) as Doc<"generatedImages">[];
+    const hasMore = queuedImages.length > waveSize;
     const images = await Promise.all(
-      allImages
-        .filter((img) => img.status === "queued")
-        .map((image) => withResolvedModelReferenceUrl(ctx, image)),
+      queuedImages.slice(0, waveSize).map((image) =>
+        withResolvedModelReferenceUrl(ctx, image),
+      ),
     );
     if (!images.length) {
-      await ctx.runMutation(internal.jobs.finishJobIfDone, {
-        jobId: args.jobId,
-      });
-      return;
+      await ctx.runMutation(internal.jobs.markAllBatchesSubmitted, { jobId: args.jobId });
+      await ctx.runMutation(internal.jobs.finishJobIfDone, { jobId: args.jobId });
+      return null;
     }
     const provider = images[0].imageProvider === "gemini" ? "gemini" : "openai";
     const model =
@@ -246,127 +273,112 @@ export const submitBatch = internalAction({
       model,
     });
     try {
-      if (provider === "gemini") {
-        const referenceImageCache = new Map<string, Promise<Buffer>>();
-        const chunks = chunkArray(preparedImages, GEMINI_BATCH_SEGMENT_SIZE);
-        const indexedChunks = chunks.map((chunk, index) => ({ chunk, index }));
-        let submittedCount = 0;
-        let failedCount = 0;
-        await mapConcurrent(
-          indexedChunks,
-          GEMINI_BATCH_MAX_CONCURRENT_SUBMISSIONS,
-          async ({ chunk, index }) => {
-            const segmentId = (await ctx.runMutation(
-              internal.jobs.createBatchSegment,
-              {
-                jobId: args.jobId,
-                provider,
-                imageCount: chunk.length,
-              },
-            )) as Id<"generationBatchSegments">;
-            const startedAt = Date.now();
-            try {
-              await ctx.runMutation(internal.jobs.assignImagesToBatchSegment, {
-                segmentId,
-                imageIds: chunk.map((image) => image._id),
-              });
-              const submitted = await submitGeminiBatch({
-                images: chunk,
-                settings,
-                model,
-                referenceImageCache,
-              });
-              await ctx.runMutation(internal.jobs.setBatchSegmentSubmitted, {
-                segmentId,
-                batchId: submitted.batchId,
-                batchStatus: submitted.batchStatus,
-                inputFileName: submitted.inputFileName,
-              });
-              await ctx.runMutation(internal.jobs.markSegmentImagesGenerating, {
-                segmentId,
-                imageIds: chunk.map((image) => image._id),
-                providerBatchId: submitted.batchId,
-              });
-              submittedCount += chunk.length;
-              log("batch", "segment submitted", {
-                jobId: args.jobId,
-                segmentId,
-                segmentIndex: index,
-                batchId: submitted.batchId,
-                count: chunk.length,
-                durationMs: Date.now() - startedAt,
-              });
+      const chunks = chunkArray(preparedImages, BATCH_SUBMISSION_SEGMENT_SIZE);
+      const indexedChunks = chunks.map((chunk, index) => ({ chunk, index }));
+      let submittedCount = 0;
+      let failedCount = 0;
+      await mapConcurrent(
+        indexedChunks,
+        BATCH_MAX_CONCURRENT_SUBMISSIONS,
+        async ({ chunk, index }) => {
+          const segmentId = (await ctx.runMutation(
+            internal.jobs.createBatchSegment,
+            {
+              jobId: args.jobId,
+              provider,
+              imageCount: chunk.length,
+            },
+          )) as Id<"generationBatchSegments">;
+          const startedAt = Date.now();
+          try {
+            await ctx.runMutation(internal.jobs.assignImagesToBatchSegment, {
+              segmentId,
+              imageIds: chunk.map((image) => image._id),
+            });
+            const submitted = provider === "gemini"
+              ? await submitGeminiBatch({
+                  images: chunk,
+                  settings,
+                  model,
+                  referenceImageCache: new Map<string, Promise<Buffer>>(),
+                })
+              : {
+                  ...(await submitOpenAiBatch({ images: chunk, settings, model })),
+                  inputFileName: null,
+                };
+            await ctx.runMutation(internal.jobs.setBatchSegmentSubmitted, {
+              segmentId,
+              batchId: submitted.batchId,
+              batchStatus: submitted.batchStatus,
+              inputFileName: submitted.inputFileName,
+            });
+            await ctx.runMutation(internal.jobs.markSegmentImagesGenerating, {
+              segmentId,
+              imageIds: chunk.map((image) => image._id),
+              providerBatchId: submitted.batchId,
+            });
+            submittedCount += chunk.length;
+            log("batch", "segment submitted", {
+              jobId: args.jobId,
+              segmentId,
+              segmentIndex: index,
+              batchId: submitted.batchId,
+              count: chunk.length,
+              durationMs: Date.now() - startedAt,
+            });
+            await ctx.scheduler.runAfter(
+              batchPollDelayMs(0),
+              internal.generation.pollBatchSegment,
+              { segmentId, attempt: 0 },
+            );
+          } catch (error) {
+            const message =
+              error instanceof Error ? error.message : String(error);
+            failedCount += chunk.length;
+            log("batch", "segment submit failed", {
+              jobId: args.jobId,
+              segmentId,
+              segmentIndex: index,
+              count: chunk.length,
+              error: message,
+            });
+            await ctx.runMutation(internal.jobs.setBatchSegmentStatus, {
+              segmentId,
+              status: "failed",
+              error: message,
+              failedCount: chunk.length,
+            });
+            if (provider === "openai") {
               await ctx.scheduler.runAfter(
-                batchPollDelayMs(0),
-                internal.generation.pollBatchSegment,
-                { segmentId, attempt: 0 },
+                0,
+                internal.generation.cleanupFailedOpenAiBatchReferences,
+                { segmentId },
               );
-            } catch (error) {
-              const message =
-                error instanceof Error ? error.message : String(error);
-              failedCount += chunk.length;
-              log("batch", "segment submit failed", {
-                jobId: args.jobId,
-                segmentId,
-                segmentIndex: index,
-                count: chunk.length,
-                error: message,
-              });
-              await ctx.runMutation(internal.jobs.setBatchSegmentStatus, {
-                segmentId,
-                status: "failed",
-                error: message,
-                failedCount: chunk.length,
-              });
-              for (const image of chunk) {
-                await ctx.runMutation(internal.jobs.failImage, {
-                  imageId: image._id,
-                  error: message,
-                });
-              }
             }
-          },
-        );
-        await ctx.runMutation(internal.jobs.markAllBatchesSubmitted, {
-          jobId: args.jobId,
-        });
-        log("batch", "segments submitted", {
-          jobId: args.jobId,
-          segments: chunks.length,
-          submittedCount,
-          failedCount,
-        });
-        await ctx.runMutation(internal.jobs.finishJobIfDone, {
-          jobId: args.jobId,
-        });
-        return;
+            for (const image of chunk) {
+              await ctx.runMutation(internal.jobs.failImage, {
+                imageId: image._id,
+                error: message,
+              });
+            }
+          }
+        },
+      );
+      if (hasMore) {
+        await ctx.scheduler.runAfter(0, internal.generation.submitBatch, { jobId: args.jobId });
+      } else {
+        await ctx.runMutation(internal.jobs.markAllBatchesSubmitted, { jobId: args.jobId });
       }
-
-      const submitted =
-        {
-          ...(await submitOpenAiBatch({
-            images: preparedImages,
-            settings,
-            model,
-          })),
-          inputFileName: null,
-        };
-      await ctx.runMutation(internal.jobs.setBatchInfo, {
+      log("batch", "segments submitted", {
         jobId: args.jobId,
-        batchId: submitted.batchId,
-        batchStatus: submitted.batchStatus,
-        batchInputFileName: submitted.inputFileName,
+        segments: chunks.length,
+        submittedCount,
+        failedCount,
       });
-      await ctx.runMutation(internal.jobs.markImagesGenerating, {
+      await ctx.runMutation(internal.jobs.finishJobIfDone, {
         jobId: args.jobId,
-        providerBatchId: submitted.batchId,
       });
-      log("batch", "submitted", {
-        jobId: args.jobId,
-        batchId: submitted.batchId,
-        count: images.length,
-      });
-      await scheduleBatchPoll(ctx, args.jobId, 0);
+      return null;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       log("batch", "submit failed", {
@@ -397,6 +409,7 @@ export const submitBatch = internalAction({
         });
       }
     }
+    return null;
   },
 });
 
@@ -582,6 +595,7 @@ async function processTerminalSegment(
       batchId: segment.batchId,
       batchInputFileName: segment.inputFileName,
       batchResultOffset: segment.resultOffset ?? 0,
+      batchResultFileIndex: segment.resultFileIndex ?? 0,
     };
     log("batch", "segment ingesting", {
       jobId: job._id,
@@ -597,6 +611,12 @@ async function processTerminalSegment(
       poll.source,
       {
         resultOffset: segment.resultOffset ?? 0,
+        resultFileIndex: segment.resultFileIndex ?? 0,
+        onResultFileIndex: async (fileIndex) => {
+          await ctx.runMutation(internal.jobs.setBatchSegmentResultOffset, {
+            segmentId: segment._id, offset: 0, fileIndex,
+          });
+        },
         onResultOffset: async (offset) => {
           await ctx.runMutation(internal.jobs.setBatchSegmentResultOffset, {
             segmentId: segment._id,
@@ -660,11 +680,12 @@ async function pollOneSegment(
   options: PollBatchOptions = {},
 ): Promise<ManualPollResult | null> {
   if (isTerminalSegment(segment)) return null;
+  if (segment.phase) return { state: "pending", batchStatus: segment.batchStatus };
   const job = (await ctx.runQuery(internal.jobs.getJobInternal, {
     jobId: segment.jobId,
   })) as Doc<"generationJobs"> | null;
   if (!job || job.status !== "running" || job.executionMode !== "batch")
-    return null;
+      return null;
 
   if (!segment.batchId) {
     if (Date.now() - segment.updatedAt > BATCH_SUBMISSION_STUCK_MS) {
@@ -757,6 +778,7 @@ async function pollOneBatch(
   job: Doc<"generationJobs">,
   options: PollBatchOptions = {},
 ): Promise<ManualPollResult | null> {
+  if (job.openAiDurable) return { state: "pending", batchStatus: job.batchStatus };
   if (!job.batchId) {
     if (Date.now() - job.updatedAt > BATCH_SUBMISSION_STUCK_MS) {
       log("batch", "stuck job detected, failing", {
@@ -836,6 +858,7 @@ async function pollOneBatch(
 export const pollBatches = internalAction({
   args: {},
   handler: async (ctx) => {
+    await ctx.runMutation(internal.openAiDurable.resumeStarts, {});
     const segments = (await ctx.runQuery(
       internal.jobs.pendingBatchSegments,
       {},
@@ -1140,7 +1163,8 @@ async function processPostprocessingImage(
       imageType: image.imageType,
       extension: optimized.extension,
     });
-    const key = `generated/${safeHandle}/${image._id}/${Date.now().toString(36)}/${filename}`;
+    const outputIdentity = createHash("sha256").update(image.postProcessingInputUrl).digest("hex").slice(0, 24);
+    const key = `generated/${safeHandle}/${image._id}/${outputIdentity}/${filename}`;
     const storageUrl = await uploadToR2({
       bytes: optimized.bytes,
       key,
@@ -1161,6 +1185,7 @@ async function processPostprocessingImage(
       outputTokens: image.outputTokens,
       costUsd: image.costUsd,
       costRateMultiplier: image.costRateMultiplier,
+      expectedPostProcessingStartedAt: image.postProcessingStartedAt ?? undefined,
     });
     await cleanupStorageUrls(
       completion.cleanupUrls,
@@ -1188,6 +1213,7 @@ async function processPostprocessingImage(
       imageId: image._id,
       error: message,
       providerBatchId: image.providerBatchId,
+      expectedPostProcessingStartedAt: image.postProcessingStartedAt ?? undefined,
       providerRequestId:
         providerIds.providerRequestId ?? image.providerRequestId,
       providerResponseId:

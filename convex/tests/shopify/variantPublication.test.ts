@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 import { convexTest } from "convex-test";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { api } from "../../_generated/api";
+import { api, internal } from "../../_generated/api";
 import schema from "../../schema";
 import { shopifyGraphql } from "../../shopify/client";
 import {
@@ -108,6 +108,15 @@ describe("variant publication action", () => {
   beforeEach(() => {
     graphql.mockReset();
     graphql.mockImplementation(async (query, variables) => {
+      if (query.includes("query ProductPublicationMedia"))
+        return {
+          product: {
+            media: {
+              nodes: [],
+              pageInfo: { hasNextPage: false, endCursor: null },
+            },
+          },
+        };
       if (query === PRODUCT_UPDATE_MEDIA_MUTATION) {
         const media = (variables as { media: Array<{ alt: string }> }).media;
         return {
@@ -312,6 +321,354 @@ describe("variant publication action", () => {
         replaceExisting: false,
       }),
     ).rejects.toThrow("No approved");
+    expect(graphql).not.toHaveBeenCalled();
+  });
+
+  test("returns the persisted result on a repeated publication without creating media twice", async () => {
+    const { client, productId, imageIds } = await fixture();
+    const args = { productId, imageIds, replaceExisting: false };
+    const first = await client.action(api.shopify.pushProductImages, args);
+    const callCount = graphql.mock.calls.length;
+    expect(await client.action(api.shopify.pushProductImages, args)).toEqual(
+      first,
+    );
+    expect(graphql.mock.calls).toHaveLength(callCount);
+    expect(
+      graphql.mock.calls.filter(
+        ([query]) => query === PRODUCT_UPDATE_MEDIA_MUTATION,
+      ),
+    ).toHaveLength(1);
+  });
+
+  test("rejects a concurrent publication while the owner is awaiting Shopify", async () => {
+    const { client, productId, imageIds } = await fixture();
+    const original = graphql.getMockImplementation()!;
+    let release!: () => void;
+    let submitted!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      submitted = resolve;
+    });
+    graphql.mockImplementation(async (query, ...args) => {
+      if (query === PRODUCT_UPDATE_MEDIA_MUTATION) {
+        submitted();
+        await gate;
+      }
+      return original(query, ...args);
+    });
+    const args = { productId, imageIds, replaceExisting: false };
+    const first = client.action(api.shopify.pushProductImages, args);
+    await started;
+    await expect(
+      client.action(api.shopify.pushProductImages, args),
+    ).rejects.toThrow("déjà en cours");
+    release();
+    await first;
+    expect(
+      graphql.mock.calls.filter(
+        ([query]) => query === PRODUCT_UPDATE_MEDIA_MUTATION,
+      ),
+    ).toHaveLength(1);
+  });
+
+  test("reconciles accepted media after a lost response and retries only the remaining publication work", async () => {
+    const { t, client, productId, imageIds } = await fixture();
+    const original = graphql.getMockImplementation()!;
+    let accepted: Array<{ id: string; alt: string }> = [];
+    let interrupted = false;
+    graphql.mockImplementation(async (query, variables, ...rest) => {
+      if (query.includes("query ProductPublicationMedia"))
+        return {
+          product: {
+            media: {
+              nodes: accepted,
+              pageInfo: { hasNextPage: false, endCursor: null },
+            },
+          },
+        };
+      if (query === PRODUCT_UPDATE_MEDIA_MUTATION && !interrupted) {
+        interrupted = true;
+        accepted = (variables as { media: Array<{ alt: string }> }).media.map(
+          (row, index) => ({ id: `accepted-${index}`, alt: row.alt }),
+        );
+        throw new Error("Connection interrupted after Shopify acceptance");
+      }
+      return original(query, variables, ...rest);
+    });
+    const args = { productId, imageIds, replaceExisting: false };
+    await expect(
+      client.action(api.shopify.pushProductImages, args),
+    ).rejects.toThrow("interrupted");
+    expect(
+      await client.action(api.shopify.pushProductImages, args),
+    ).toMatchObject({ pushed: 2 });
+    expect(
+      graphql.mock.calls.filter(
+        ([query]) => query === PRODUCT_UPDATE_MEDIA_MUTATION,
+      ),
+    ).toHaveLength(1);
+    expect(await t.run((ctx) => ctx.db.get(imageIds[0]))).toMatchObject({
+      status: "uploaded",
+      shopifyMediaId: "accepted-0",
+    });
+  });
+
+  test("keeps a missing or ambiguous Shopify result uncertain and never resubmits media", async () => {
+    const { client, productId, imageIds } = await fixture();
+    const original = graphql.getMockImplementation()!;
+    let alt = "";
+    let ambiguous = false;
+    graphql.mockImplementation(async (query, variables, ...rest) => {
+      if (query.includes("query ProductPublicationMedia"))
+        return {
+          product: {
+            media: {
+              nodes: ambiguous
+                ? [
+                    { id: "a", alt },
+                    { id: "b", alt },
+                  ]
+                : [],
+              pageInfo: { hasNextPage: false, endCursor: null },
+            },
+          },
+        };
+      if (query === PRODUCT_UPDATE_MEDIA_MUTATION) {
+        alt = (variables as { media: Array<{ alt: string }> }).media[0].alt;
+        throw new Error("Response lost");
+      }
+      return original(query, variables, ...rest);
+    });
+    const args = { productId, imageIds: [imageIds[0]], replaceExisting: false };
+    await expect(
+      client.action(api.shopify.pushProductImages, args),
+    ).rejects.toThrow("Response lost");
+    await expect(
+      client.action(api.shopify.pushProductImages, args),
+    ).rejects.toThrow("incertaine");
+    ambiguous = true;
+    await expect(
+      client.action(api.shopify.pushProductImages, args),
+    ).rejects.toThrow("incertaine");
+    expect(
+      graphql.mock.calls.filter(
+        ([query]) => query === PRODUCT_UPDATE_MEDIA_MUTATION,
+      ),
+    ).toHaveLength(1);
+  });
+
+  test("reuses completed media when publication options change and permits a genuinely new stored output", async () => {
+    const { t, client, productId, imageIds } = await fixture();
+    await client.action(api.shopify.pushProductImages, {
+      productId,
+      imageIds,
+      replaceExisting: false,
+      replaceVariantMedia: true,
+    });
+    await client.action(api.shopify.pushProductImages, {
+      productId,
+      imageIds,
+      replaceExisting: false,
+      replaceVariantMedia: false,
+    });
+    expect(
+      graphql.mock.calls.filter(
+        ([query]) => query === PRODUCT_UPDATE_MEDIA_MUTATION,
+      ),
+    ).toHaveLength(1);
+    await t.run((ctx) =>
+      ctx.db.patch(imageIds[0], {
+        status: "generated",
+        shopifyMediaId: null,
+        storageUrl: "https://example.com/new-output.webp",
+      }),
+    );
+    await client.action(api.shopify.pushProductImages, {
+      productId,
+      imageIds,
+      replaceExisting: false,
+    });
+    const uploads = graphql.mock.calls.filter(
+      ([query]) => query === PRODUCT_UPDATE_MEDIA_MUTATION,
+    );
+    expect(uploads).toHaveLength(2);
+    expect((uploads[1][1] as { media: unknown[] }).media).toHaveLength(1);
+  });
+
+  test("resumes an expired action lease and fences stale owners before media creation", async () => {
+    const { t, productId } = await fixture();
+    await t.mutation(internal.shopifyPublications.claim, {
+      productId,
+      fingerprint: "one",
+      token: "old",
+    });
+    await t.run(async (ctx) => {
+      const row = await ctx.db
+        .query("productPublicationAttempts")
+        .withIndex("by_productId", (q) => q.eq("productId", productId))
+        .unique();
+      await ctx.db.patch(row!._id, { leaseExpiresAt: 0 });
+    });
+    expect(
+      await t.mutation(internal.shopifyPublications.claim, {
+        productId,
+        fingerprint: "one",
+        token: "new",
+      }),
+    ).toMatchObject({ resumed: true });
+    await expect(
+      t.mutation(internal.shopifyPublications.beginMedia, {
+        productId,
+        token: "old",
+        targetProductId: "product",
+        baselineMediaIds: [],
+        images: [],
+      }),
+    ).rejects.toThrow("ownership expired");
+    expect(
+      await t.run((ctx) => ctx.db.query("generatedMediaPublications").take(1)),
+    ).toEqual([]);
+  });
+
+  test("adopts already uploaded legacy outputs without recreating their Shopify media", async () => {
+    const { t, client, productId, imageIds } = await fixture();
+    await t.run(async (ctx) => {
+      for (const [index, imageId] of imageIds.entries())
+        await ctx.db.patch(imageId, {
+          status: "uploaded",
+          shopifyMediaId: `legacy-${index}`,
+          publishedShopifyProductId: "product",
+        });
+    });
+    const original = graphql.getMockImplementation()!;
+    graphql.mockImplementation(async (query, ...args) => {
+      if (query.includes("query ProductPublicationMedia"))
+        return {
+          product: {
+            media: {
+              nodes: imageIds.map((_, index) => ({
+                id: `legacy-${index}`,
+                alt: "Legacy",
+              })),
+              pageInfo: { hasNextPage: false, endCursor: null },
+            },
+          },
+        };
+      return original(query, ...args);
+    });
+    await client.action(api.shopify.pushProductImages, {
+      productId,
+      imageIds,
+      replaceExisting: false,
+    });
+    expect(
+      graphql.mock.calls.filter(
+        ([query]) => query === PRODUCT_UPDATE_MEDIA_MUTATION,
+      ),
+    ).toHaveLength(0);
+    const rows = await t.run((ctx) =>
+      ctx.db.query("generatedMediaPublications").take(3),
+    );
+    expect(rows.map((row) => row.shopifyMediaId).sort()).toEqual([
+      "legacy-0",
+      "legacy-1",
+    ]);
+  });
+
+  test("reuses the accepted remote file after an overwrite retouch changes an uploaded URL", async () => {
+    const { t, client, productId, imageIds } = await fixture();
+    await client.action(api.shopify.pushProductImages, {
+      productId,
+      imageIds,
+      replaceExisting: false,
+    });
+    await client.mutation(internal.jobs.insertRetouchedImage, {
+      sourceImageId: imageIds[0],
+      storageUrl: "https://example.com/retouched.webp",
+      saveMode: "overwrite",
+    });
+    const original = graphql.getMockImplementation()!;
+    graphql.mockImplementation(async (query, ...args) => {
+      if (query.includes("query ProductPublicationMedia"))
+        return {
+          product: {
+            media: {
+              nodes: [
+                { id: "media-0", alt: "Retouched" },
+                { id: "media-1", alt: "Other" },
+              ],
+              pageInfo: { hasNextPage: false, endCursor: null },
+            },
+          },
+        };
+      return original(query, ...args);
+    });
+    await client.action(api.shopify.pushProductImages, {
+      productId,
+      imageIds,
+      replaceExisting: false,
+    });
+    expect(
+      graphql.mock.calls.filter(
+        ([query]) => query === PRODUCT_UPDATE_MEDIA_MUTATION,
+      ),
+    ).toHaveLength(1);
+    expect(await t.run((ctx) => ctx.db.get(imageIds[0]))).toMatchObject({
+      storageUrl: "https://example.com/retouched.webp",
+      shopifyMediaId: "media-0",
+      status: "uploaded",
+    });
+  });
+
+  test("blocks uncertain sibling creation before another productDuplicate request", async () => {
+    const { t, productId } = await fixture();
+    const groupId = await t.run(async (ctx) => {
+      const product = (await ctx.db.get(productId))!;
+      const configId = await ctx.db.insert("visualGroupConfigs", {
+        shopId: product.shopId!,
+        productId,
+        optionNames: [],
+        publishMode: "separate_products",
+        analysisStatus: "ready",
+        createdAt: 1,
+        updatedAt: 1,
+      });
+      return ctx.db.insert("visualGroups", {
+        shopId: product.shopId!,
+        productId,
+        configId,
+        label: "Rouge",
+        key: "red",
+        position: 0,
+        optionValues: [],
+        createdAt: 1,
+        updatedAt: 1,
+      });
+    });
+    await t.mutation(internal.shopifyPublications.claim, {
+      productId,
+      fingerprint: "sibling",
+      token: "old",
+    });
+    await t.mutation(internal.shopifyPublications.beginSibling, {
+      productId,
+      token: "old",
+      groupId,
+    });
+    await t.mutation(internal.shopifyPublications.fail, {
+      productId,
+      token: "old",
+      error: "Response lost",
+    });
+    await expect(
+      t.mutation(internal.shopifyPublications.claim, {
+        productId,
+        fingerprint: "sibling",
+        token: "new",
+      }),
+    ).rejects.toThrow("produit séparé est incertaine");
     expect(graphql).not.toHaveBeenCalled();
   });
 });

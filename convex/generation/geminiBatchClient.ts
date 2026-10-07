@@ -1,6 +1,7 @@
 "use node";
 
 import type { Doc } from "../_generated/dataModel";
+import { withRequestTimeout } from "./requestTimeout";
 import { env } from "./runtime";
 import { mapConcurrent } from "./concurrency";
 import {
@@ -26,11 +27,13 @@ export async function uploadGeminiFile(args: {
   apiKey: string;
   body: string;
   displayName: string;
+  signal?: AbortSignal;
 }) {
   const bytes = Buffer.from(args.body);
   const start = await fetch(
     "https://generativelanguage.googleapis.com/upload/v1beta/files",
     {
+      signal: args.signal,
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -56,6 +59,7 @@ export async function uploadGeminiFile(args: {
     throw new Error("Gemini batch file upload start returned no upload URL.");
 
   const upload = await fetch(uploadUrl, {
+    signal: args.signal,
     method: "POST",
     headers: {
       "Content-Type": "application/jsonl",
@@ -84,6 +88,7 @@ export async function deleteGeminiFile(fileName: string | null | undefined) {
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/${fileName}`,
     {
+      signal: AbortSignal.timeout(10_000),
       method: "DELETE",
       headers: { "x-goog-api-key": apiKey },
     },
@@ -96,6 +101,18 @@ export async function deleteGeminiFile(fileName: string | null | undefined) {
 }
 
 export async function submitGeminiBatch(args: {
+  images: BatchImage[];
+  settings: Record<string, unknown>;
+  model: string;
+  referenceImageCache?: Map<string, Promise<Buffer>>;
+}) {
+  return withRequestTimeout("Gemini batch submission", 180_000, (signal) =>
+    submitGeminiBatchRequest({ ...args, signal }),
+  );
+}
+
+async function submitGeminiBatchRequest(args: {
+  signal: AbortSignal;
   images: BatchImage[];
   settings: Record<string, unknown>;
   model: string;
@@ -116,6 +133,7 @@ export async function submitGeminiBatch(args: {
     const referenceParts = await buildGeminiReferenceParts(
       referenceUrls,
       args.referenceImageCache,
+      args.signal,
     );
     return JSON.stringify({
       key: image._id,
@@ -138,10 +156,12 @@ export async function submitGeminiBatch(args: {
     apiKey,
     body: lines.join("\n"),
     displayName,
+    signal: args.signal,
   });
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(args.model)}:batchGenerateContent`,
     {
+      signal: args.signal,
       method: "POST",
       headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
       body: JSON.stringify({

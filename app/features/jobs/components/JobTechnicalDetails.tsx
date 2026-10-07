@@ -2,19 +2,24 @@ import { ImageStateBadge } from "@/components/common/ImageStateBadge";
 import type { Doc } from "@/lib/convex";
 import { formatUsd } from "@/lib/formatters";
 import { imageDisplayCost } from "../lib/jobDetailViewModel";
+import type { JobBatchSegment } from "../lib/batchJobProgress";
+import { JobBatchSegmentDetails } from "./JobBatchSegmentDetails";
 
 export function JobTechnicalDetails({
   images,
   job,
+  segments,
 }: {
   images: Doc<"generatedImages">[];
   job: Doc<"generationJobs">;
+  segments: JobBatchSegment[];
 }) {
   return (
     <details className="mt-5 rounded-lg border bg-background p-4">
       <summary className="cursor-pointer text-sm font-medium">
         Technical details
       </summary>
+      <JobBatchSegmentDetails segments={segments} />
       <div className="mt-4 grid gap-2">
         {images.map((image) => (
           <div

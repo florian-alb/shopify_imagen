@@ -54,6 +54,7 @@ export async function uploadToR2(args: {
   bytes: Buffer;
   key: string;
   contentType: string;
+  signal?: AbortSignal;
 }) {
   const config = r2Config(true);
   const client = r2Client(config);
@@ -65,6 +66,7 @@ export async function uploadToR2(args: {
       ContentType: args.contentType,
       CacheControl: "public, max-age=31536000, immutable",
     }),
+    { abortSignal: args.signal },
   );
   return `${config.publicBaseUrl}/${args.key}`;
 }

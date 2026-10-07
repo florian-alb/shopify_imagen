@@ -149,4 +149,31 @@ describe("job detail view model", () => {
       ),
     ).toBe(12);
   });
+
+  it("can poll a segmented bulk before the legacy job-level batch ID is present", () => {
+    const viewModel = createJobDetailViewModel({
+      filter: "all",
+      images: [],
+      job: generationJob({ executionMode: "batch", batchId: null, totalTasks: 100, completedTasks: 30, failedTasks: 20 }),
+      products: [],
+      pushTargetProductId: null,
+      storeHandle: null,
+      segments: [{
+        _id: "segment-1" as Id<"generationBatchSegments">,
+        _creationTime: 1,
+        createdAt: 1,
+        updatedAt: 1,
+        jobId: "job-1" as Id<"generationJobs">,
+        provider: "openai",
+        batchId: "batch-accepted",
+        phase: "waiting",
+        status: "running",
+        imageCount: 100,
+      }],
+    });
+
+    expect(viewModel.canForcePoll).toBe(true);
+    expect(viewModel.batchProgress?.waitingTasks).toBe(100);
+    expect(viewModel.jobProgressPercent).toBe(50);
+  });
 });

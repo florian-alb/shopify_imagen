@@ -14,6 +14,34 @@ class ReferenceImageHttpError extends Error {
   }
 }
 
+class ReferenceImageTooLargeError extends Error {}
+
+type ReferenceLimits = { maxBytes?: number; maxPixels?: number };
+
+async function readReferenceBody(response: Response, maxBytes?: number) {
+  if (!maxBytes) return Buffer.from(await response.arrayBuffer());
+  const declaredBytes = Number(response.headers.get("content-length"));
+  if (declaredBytes > maxBytes) {
+    await response.body?.cancel();
+    throw new ReferenceImageTooLargeError(`Supplier reference exceeds the ${maxBytes} byte download limit.`);
+  }
+  if (!response.body) throw new Error("Supplier reference has no response body.");
+  const reader = response.body.getReader();
+  const parts: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) return Buffer.concat(parts, total);
+      total += value.length;
+      if (total > maxBytes) throw new ReferenceImageTooLargeError(`Supplier reference exceeds the ${maxBytes} byte download limit.`);
+      parts.push(value);
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+}
+
 function isRetryableReferenceStatus(status: number) {
   return status === 408 || status === 429 || status >= 500;
 }
@@ -30,8 +58,9 @@ function referenceRetryDelay(retryAfter: string | null, attempt: number) {
     : backoff;
 }
 
-async function downloadReferenceImage(sourceUrl: string): Promise<Buffer> {
+async function downloadReferenceImage(sourceUrl: string, signal?: AbortSignal, maxBytes?: number): Promise<Buffer> {
   for (let attempt = 1; attempt <= REFERENCE_DOWNLOAD_ATTEMPTS; attempt += 1) {
+    signal?.throwIfAborted();
     const controller = new AbortController();
     const timeout = setTimeout(
       () => controller.abort(),
@@ -40,7 +69,7 @@ async function downloadReferenceImage(sourceUrl: string): Promise<Buffer> {
     let retryAfter: string | null = null;
     let failure: Error;
     try {
-      const response = await fetch(sourceUrl, { signal: controller.signal });
+      const response = await fetch(sourceUrl, { signal: signal ? AbortSignal.any([signal, controller.signal]) : controller.signal });
       if (!response.ok) {
         retryAfter = response.headers.get("retry-after");
         await response.body?.cancel().catch(() => {});
@@ -48,8 +77,10 @@ async function downloadReferenceImage(sourceUrl: string): Promise<Buffer> {
       }
       // Keep the timeout active while reading the body: a connection can fail
       // after the server has already returned successful response headers.
-      return Buffer.from(await response.arrayBuffer());
+      return await readReferenceBody(response, maxBytes);
     } catch (error) {
+      signal?.throwIfAborted();
+      if (error instanceof ReferenceImageTooLargeError) throw error;
       if (error instanceof ReferenceImageHttpError) {
         if (!isRetryableReferenceStatus(error.status)) throw error;
         failure = error;
@@ -80,11 +111,11 @@ async function downloadReferenceImage(sourceUrl: string): Promise<Buffer> {
   throw new Error("Supplier reference image download attempts exhausted.");
 }
 
-export async function normalizeReferenceImage(sourceUrl: string) {
-  const bytes = await downloadReferenceImage(sourceUrl);
+export async function normalizeReferenceImage(sourceUrl: string, signal?: AbortSignal, limits?: ReferenceLimits) {
+  const bytes = await downloadReferenceImage(sourceUrl, signal, limits?.maxBytes);
   // sharp (not jimp) so WebP/AVIF reference images decode correctly. Fit
   // within 1024px, flatten transparency onto white, output JPEG.
-  return sharp(bytes)
+  return sharp(bytes, { ...(limits?.maxPixels ? { limitInputPixels: limits.maxPixels } : {}) })
     .rotate()
     .resize({
       width: 1024,

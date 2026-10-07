@@ -156,6 +156,35 @@ describe("supplier reference image downloads", () => {
     await expect(normalizeReferenceImage(sourceUrl)).rejects.toThrow();
     expect(fetchMock).toHaveBeenCalledOnce();
   });
+
+  test("rejects an oversized durable reference before reading its declared body", async () => {
+    const response = new Response(new Uint8Array(image), { headers: { "content-length": "1025" } });
+    const cancel = vi.spyOn(response.body!, "cancel");
+    const fetchMock = vi.fn(async () => response);
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(normalizeReferenceImage(sourceUrl, undefined, { maxBytes: 1024 })).rejects.toThrow("1024 byte download limit");
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  test("bounds streamed references even without Content-Length and does not retry size errors", async () => {
+    const cancel = vi.fn();
+    const response = new Response(new ReadableStream<Uint8Array>({
+      pull(controller) { controller.enqueue(new Uint8Array(256)); }, cancel,
+    }));
+    const fetchMock = vi.fn(async () => response);
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(normalizeReferenceImage(sourceUrl, undefined, { maxBytes: 512 })).rejects.toThrow("512 byte download limit");
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  test("bounds decoded durable reference pixels before normalization", async () => {
+    const fetchMock = vi.fn(async () => imageResponse());
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(normalizeReferenceImage(sourceUrl, undefined, { maxBytes: 1024, maxPixels: 100 })).rejects.toThrow("pixel limit");
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
 });
 
 describe("Gemini batch reference cache", () => {

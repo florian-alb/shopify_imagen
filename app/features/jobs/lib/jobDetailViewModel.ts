@@ -1,6 +1,11 @@
 import { getReviewStatus, isPushReady, isReviewable } from "../../images/lib/review";
 import { getShopifyAdminUrl } from "../../shopify/lib/admin";
 import type { Doc, Id } from "../../../lib/convex";
+import {
+  createBatchJobProgress,
+  type BatchJobProgress,
+  type JobBatchSegment,
+} from "./batchJobProgress";
 
 export type ReviewFilter =
   | "all"
@@ -36,6 +41,7 @@ export type JobReviewCounts = {
 
 export type JobDetailViewModel = {
   approvedImages: Doc<"generatedImages">[];
+  batchProgress: BatchJobProgress | null;
   canCancelJob: boolean;
   canForcePoll: boolean;
   failedCount: number;
@@ -93,6 +99,7 @@ export function createJobDetailViewModel({
   job,
   products,
   pushTargetProductId,
+  segments = [],
   storeHandle,
 }: {
   filter: ReviewFilter;
@@ -100,6 +107,7 @@ export function createJobDetailViewModel({
   job: Doc<"generationJobs">;
   products: Doc<"products">[];
   pushTargetProductId: Id<"products"> | null;
+  segments?: JobBatchSegment[];
   storeHandle: string | null | undefined;
 }): JobDetailViewModel {
   const reviewableImages = images.filter(isReviewable);
@@ -143,10 +151,12 @@ export function createJobDetailViewModel({
 
   return {
     approvedImages,
+    batchProgress: createBatchJobProgress({ job, images, segments }),
     canCancelJob: job.status === "queued" || job.status === "running",
     canForcePoll:
       job.executionMode === "batch" &&
-      Boolean(job.batchId) &&
+      (Boolean(job.batchId) ||
+        segments.some((segment) => segment.batchId && segment.status !== "cancelled")) &&
       job.status === "running",
     failedCount,
     jobCost: images.reduce((sum, image) => sum + imageDisplayCost(image, job), 0),

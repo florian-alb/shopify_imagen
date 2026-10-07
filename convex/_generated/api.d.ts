@@ -47,7 +47,9 @@ import type * as generation_geminiStream from "../generation/geminiStream.js";
 import type * as generation_images from "../generation/images.js";
 import type * as generation_openAi from "../generation/openAi.js";
 import type * as generation_openAiBatch from "../generation/openAiBatch.js";
+import type * as generation_openAiDurableClient from "../generation/openAiDurableClient.js";
 import type * as generation_providerIds from "../generation/providerIds.js";
+import type * as generation_requestTimeout from "../generation/requestTimeout.js";
 import type * as generation_runtime from "../generation/runtime.js";
 import type * as generation_storage from "../generation/storage.js";
 import type * as generation_types from "../generation/types.js";
@@ -69,6 +71,8 @@ import type * as jobs_summaries from "../jobs/summaries.js";
 import type * as jobs_targets from "../jobs/targets.js";
 import type * as jobs_validators from "../jobs/validators.js";
 import type * as lib from "../lib.js";
+import type * as openAiDurable from "../openAiDurable.js";
+import type * as openAiDurableActions from "../openAiDurableActions.js";
 import type * as pricing from "../pricing.js";
 import type * as productVisualContext from "../productVisualContext.js";
 import type * as products from "../products.js";
@@ -91,10 +95,13 @@ import type * as shopify_media from "../shopify/media.js";
 import type * as shopify_oauth from "../shopify/oauth.js";
 import type * as shopify_productMapping from "../shopify/productMapping.js";
 import type * as shopify_productQuery from "../shopify/productQuery.js";
+import type * as shopify_publicationIdentity from "../shopify/publicationIdentity.js";
+import type * as shopify_publicationSchema from "../shopify/publicationSchema.js";
 import type * as shopify_publicationTargets from "../shopify/publicationTargets.js";
 import type * as shopify_reorder from "../shopify/reorder.js";
 import type * as shopify_scopes from "../shopify/scopes.js";
 import type * as shopify_variantMedia from "../shopify/variantMedia.js";
+import type * as shopifyPublications from "../shopifyPublications.js";
 import type * as shops from "../shops.js";
 import type * as userAccess from "../userAccess.js";
 import type * as users from "../users.js";
@@ -149,7 +156,9 @@ declare const fullApi: ApiFromModules<{
   "generation/images": typeof generation_images;
   "generation/openAi": typeof generation_openAi;
   "generation/openAiBatch": typeof generation_openAiBatch;
+  "generation/openAiDurableClient": typeof generation_openAiDurableClient;
   "generation/providerIds": typeof generation_providerIds;
+  "generation/requestTimeout": typeof generation_requestTimeout;
   "generation/runtime": typeof generation_runtime;
   "generation/storage": typeof generation_storage;
   "generation/types": typeof generation_types;
@@ -171,6 +180,8 @@ declare const fullApi: ApiFromModules<{
   "jobs/targets": typeof jobs_targets;
   "jobs/validators": typeof jobs_validators;
   lib: typeof lib;
+  openAiDurable: typeof openAiDurable;
+  openAiDurableActions: typeof openAiDurableActions;
   pricing: typeof pricing;
   productVisualContext: typeof productVisualContext;
   products: typeof products;
@@ -193,10 +204,13 @@ declare const fullApi: ApiFromModules<{
   "shopify/oauth": typeof shopify_oauth;
   "shopify/productMapping": typeof shopify_productMapping;
   "shopify/productQuery": typeof shopify_productQuery;
+  "shopify/publicationIdentity": typeof shopify_publicationIdentity;
+  "shopify/publicationSchema": typeof shopify_publicationSchema;
   "shopify/publicationTargets": typeof shopify_publicationTargets;
   "shopify/reorder": typeof shopify_reorder;
   "shopify/scopes": typeof shopify_scopes;
   "shopify/variantMedia": typeof shopify_variantMedia;
+  shopifyPublications: typeof shopifyPublications;
   shops: typeof shops;
   userAccess: typeof userAccess;
   users: typeof users;
@@ -232,4 +246,6 @@ export declare const internal: FilterApi<
   FunctionReference<any, "internal">
 >;
 
-export declare const components: {};
+export declare const components: {
+  workflow: import("@convex-dev/workflow/_generated/component.js").ComponentApi<"workflow">;
+};

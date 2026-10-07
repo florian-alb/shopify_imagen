@@ -1,6 +1,7 @@
 "use node";
 
 import { internal } from "../_generated/api";
+import { createHash } from "node:crypto";
 import type { Doc } from "../_generated/dataModel";
 import type { ActionCtx } from "../_generated/server";
 import { BATCH_PRICE_MULTIPLIER, estimateCostUsd } from "../pricing";
@@ -14,6 +15,7 @@ import { mapConcurrent } from "./concurrency";
 import { geminiBatchItem } from "./geminiBatch";
 import { deleteGeminiFile } from "./geminiBatchClient";
 import { cleanupOpenAiBatchReferencesForImage } from "./openAiBatch";
+import { ingestOpenAiBatchFilePage } from "./openAiDurableClient";
 import {
   consumeFirstInlineResponseArray,
   consumeJsonLines,
@@ -22,11 +24,14 @@ import {
 import { mimeToExtension } from "./formats";
 import { env, log } from "./runtime";
 import { uploadToR2 } from "./storage";
+import { withRequestTimeout } from "./requestTimeout";
 
 type BatchIngestOptions = {
   resultOffset?: number;
+  resultFileIndex?: number;
   chunkSize?: number;
   onResultOffset?: (offset: number) => Promise<void>;
+  onResultFileIndex?: (fileIndex: number) => Promise<void>;
 };
 
 async function cleanupOpenAiBatchReferencesIfTerminal(
@@ -43,6 +48,14 @@ export async function ingestBatchItem(
   image: Doc<"generatedImages">,
   result: BatchItem | undefined,
 ): Promise<BatchIngestCounts> {
+  const current: Doc<"generatedImages"> | null = await ctx.runQuery(
+    internal.openAiDurable.imageForIngestion, { imageId: image._id },
+  );
+  if (!current || (current.status !== "queued" && current.status !== "generating") ||
+    (current.batchSegmentId ?? null) !== (image.batchSegmentId ?? null) ||
+    (current.providerBatchId && current.providerBatchId !== job.batchId)) {
+    return { ingested: 0, failed: 0 };
+  }
   if (!result || result.error || !result.bytes) {
     const error = result?.error ?? "No batch result returned for this image.";
     log("batch", "image failed", {
@@ -54,6 +67,7 @@ export async function ingestBatchItem(
       imageId: image._id,
       error,
       providerBatchId: job.batchId,
+      expectedSegmentId: image.batchSegmentId ?? null,
       providerRequestId: result?.providerRequestId,
       providerResponseId: result?.providerResponseId,
     });
@@ -64,13 +78,11 @@ export async function ingestBatchItem(
   try {
     const contentType = result.contentType ?? "image/png";
     const extension = mimeToExtension(contentType);
-    const token = Date.now().toString(36);
+    const token = createHash("sha256").update(job.batchId ?? job._id).digest("hex").slice(0, 24);
     const key = `generated/batch-staging/${job._id}/${image._id}/${token}.${extension}`;
-    const inputUrl = await uploadToR2({
-      bytes: result.bytes,
-      key,
-      contentType,
-    });
+    const inputUrl = await withRequestTimeout("Batch result staging", 120_000, (signal) =>
+      uploadToR2({ bytes: result.bytes!, key, contentType, signal }),
+    );
     const usage = result.usage ?? {};
     const costUsd = estimateCostUsd(job.imageModel ?? "", usage, {
       batch: job.executionMode === "batch",
@@ -85,6 +97,7 @@ export async function ingestBatchItem(
         inputContentType: contentType,
         inputExtension: extension,
         providerBatchId: job.batchId,
+        expectedSegmentId: image.batchSegmentId ?? null,
         providerRequestId: result.providerRequestId,
         providerResponseId: result.providerResponseId,
         inputTokens: usage.inputTokens,
@@ -102,6 +115,9 @@ export async function ingestBatchItem(
     });
     return { ingested: changed ? 1 : 0, failed: 0 };
   } catch (error) {
+    // A transient staging failure must leave the provider result and cursor
+    // available for the next durable step, without paying to regenerate it.
+    if (job.imageProvider === "openai" && job.openAiDurable) throw error;
     const message = error instanceof Error ? error.message : String(error);
     log("batch", "image failed", {
       jobId: job._id,
@@ -112,6 +128,7 @@ export async function ingestBatchItem(
       imageId: image._id,
       error: message,
       providerBatchId: job.batchId,
+      expectedSegmentId: image.batchSegmentId ?? null,
       providerRequestId: result.providerRequestId,
       providerResponseId: result.providerResponseId,
     });
@@ -175,6 +192,57 @@ export async function ingestBatchResults(
       { ingested: 0, failed: 0 },
     );
     return { ...total, complete: true };
+  }
+
+  if (source.kind === "openai-file") {
+    const files = [source.outputFileId, source.errorFileId];
+    let fileIndex = options.resultFileIndex ?? job.batchResultFileIndex ?? 0;
+    let resultOffset = options.resultOffset ?? job.batchResultOffset ?? 0;
+    let ingested = 0;
+    let failed = 0;
+    const seen = new Set<string>();
+    const byId = new Map(pending.map((image) => [image._id as string, image]));
+    const onResultOffset = options.onResultOffset ?? (async (offset: number) => {
+      await ctx.runMutation(internal.jobs.setBatchResultOffset, { jobId: job._id, offset, fileIndex });
+    });
+    const onResultFileIndex = options.onResultFileIndex ?? (async (index: number) => {
+      await ctx.runMutation(internal.jobs.setBatchResultOffset, { jobId: job._id, offset: 0, fileIndex: index });
+    });
+    while (fileIndex < files.length) {
+      const fileId = files[fileIndex];
+      if (fileId) {
+        const page = await ingestOpenAiBatchFilePage({
+          fileId, byteOffset: resultOffset,
+          settings: { OPENAI_IMAGE_OUTPUT_FORMAT: source.outputFormat ?? "jpeg" },
+          maxItems: options.chunkSize ?? 2,
+          onItem: async (imageId, item, nextByteOffset) => {
+            const image = byId.get(imageId);
+            if (image && !seen.has(imageId)) {
+              const count = await ingestBatchItem(ctx, job, image, item);
+              ingested += count.ingested;
+              failed += count.failed;
+              seen.add(imageId);
+            }
+            await onResultOffset(nextByteOffset);
+          },
+        });
+        resultOffset = page.byteOffset;
+        await onResultOffset(resultOffset);
+        if (!page.done) return { ingested, failed, complete: false };
+      }
+      // Reset the cursor first: a crash before changing the file index can
+      // replay a completed output file, but can never skip its error file.
+      await onResultOffset(0);
+      fileIndex++;
+      resultOffset = 0;
+      await onResultFileIndex(fileIndex);
+    }
+    for (const image of pending) {
+      if (seen.has(image._id)) continue;
+      const count = await ingestBatchItem(ctx, job, image, undefined);
+      failed += count.failed;
+    }
+    return { ingested, failed, complete: true };
   }
 
   const apiKey = env("GEMINI_API_KEY");

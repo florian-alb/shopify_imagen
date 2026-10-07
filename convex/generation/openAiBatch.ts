@@ -1,18 +1,17 @@
 "use node";
 
-import { openAiUsage, OUTPUT_FORMAT_TO_MIME } from "./formats";
 import { normalizeReferenceImage } from "./images";
 import {
   deleteKeyFromR2,
   deleteR2ObjectsWithPrefix,
   uploadToR2,
 } from "./storage";
+import { withRequestTimeout } from "./requestTimeout";
 import { env, log } from "./runtime";
 import { mapConcurrent } from "./concurrency";
 import {
   isTransientPollStatus,
   generationInputUrlsForImage,
-  type BatchItem,
   type BatchPollResult,
 } from "./batchTypes";
 import type { PromptKind } from "../promptRuntime";
@@ -83,6 +82,17 @@ export async function submitOpenAiBatch(args: {
   settings: Record<string, unknown>;
   model: string;
 }) {
+  return withRequestTimeout("OpenAI batch submission", 180_000, (signal) =>
+    submitOpenAiBatchRequest({ ...args, signal }),
+  );
+}
+
+async function submitOpenAiBatchRequest(args: {
+  signal: AbortSignal;
+  images: OpenAiBatchImage[];
+  settings: Record<string, unknown>;
+  model: string;
+}) {
   const apiKey = env("OPENAI_API_KEY");
   if (!apiKey) throw new Error("OPENAI_API_KEY is required.");
   const size = String(
@@ -110,11 +120,13 @@ export async function submitOpenAiBatch(args: {
     for (let index = 0; index < referenceUrls.length; index += 1) {
       const referenceBytes = await normalizeReferenceImage(
         referenceUrls[index],
+        args.signal,
       );
       const referenceUrl = await uploadToR2({
         bytes: referenceBytes,
         key: openAiBatchReferenceKey(image._id, index),
         contentType: "image/jpeg",
+        signal: args.signal,
       });
       staged.push({ image_url: referenceUrl });
     }
@@ -142,6 +154,7 @@ export async function submitOpenAiBatch(args: {
     `imagen-${Date.now()}.jsonl`,
   );
   const fileResponse = await fetch("https://api.openai.com/v1/files", {
+    signal: args.signal,
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}` },
     body: fileForm,
@@ -157,6 +170,7 @@ export async function submitOpenAiBatch(args: {
   }
 
   const batchResponse = await fetch("https://api.openai.com/v1/batches", {
+    signal: args.signal,
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -205,7 +219,10 @@ export async function pollOpenAiBatch(
   }
   const status: string = payload?.status ?? "";
   const batchStatus = status || null;
-  if (status === "failed" || status === "expired" || status === "cancelled") {
+  const terminal = status === "failed" || status === "expired" || status === "cancelled";
+  // Expired/cancelled jobs can contain completed images. Recover those before
+  // failing missing tasks rather than discarding an existing output file.
+  if (terminal && !payload?.output_file_id && !payload?.error_file_id) {
     // Surface batch-level errors (e.g. unsupported model) instead of a
     // generic status, so the cause is visible directly in logs.
     const detail =
@@ -223,76 +240,32 @@ export async function pollOpenAiBatch(
       batchStatus,
     };
   }
-  if (status !== "completed") return { state: "pending", batchStatus };
+  if (status !== "completed" && !terminal) return { state: "pending", batchStatus };
 
   const outputFormat = String(
     settings.OPENAI_IMAGE_OUTPUT_FORMAT ??
       env("OPENAI_IMAGE_OUTPUT_FORMAT", "jpeg"),
   ).toLowerCase();
-  const mime =
-    OUTPUT_FORMAT_TO_MIME[outputFormat] ?? OUTPUT_FORMAT_TO_MIME.jpeg;
-  const results = new Map<string, BatchItem>();
-
-  const ingest = async (fileId: string | undefined) => {
-    if (!fileId) return;
-    const content = await fetch(
-      `https://api.openai.com/v1/files/${fileId}/content`,
-      {
-        headers: { Authorization: `Bearer ${apiKey}` },
-      },
-    );
-    if (!content.ok) return;
-    const text = await content.text();
-    for (const line of text.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      let parsed: any;
-      try {
-        parsed = JSON.parse(trimmed);
-      } catch {
-        continue;
-      }
-      const key: string | undefined = parsed?.custom_id;
-      if (!key) continue;
-      if (parsed?.error || (parsed?.response?.status_code ?? 200) >= 400) {
-        results.set(key, {
-          providerRequestId: parsed?.id ?? parsed?.response?.request_id ?? null,
-          providerResponseId: parsed?.response?.body?.id ?? null,
-          error:
-            parsed?.error?.message ??
-            parsed?.response?.body?.error?.message ??
-            "OpenAI batch item failed.",
-        });
-        continue;
-      }
-      const b64 = parsed?.response?.body?.data?.[0]?.b64_json;
-      if (!b64) {
-        results.set(key, { error: "OpenAI batch returned no image data." });
-        continue;
-      }
-      results.set(key, {
-        bytes: Buffer.from(b64, "base64"),
-        ...mime,
-        usage: openAiUsage(parsed?.response?.body?.usage),
-        providerRequestId: parsed?.id ?? parsed?.response?.request_id ?? null,
-        providerResponseId: parsed?.response?.body?.id ?? null,
-      });
-    }
+  return {
+    state: "done",
+    source: { kind: "openai-file", outputFileId: payload?.output_file_id ?? null, errorFileId: payload?.error_file_id ?? null, outputFormat },
+    batchStatus,
   };
-  await ingest(payload?.output_file_id);
-  await ingest(payload?.error_file_id);
-  return { state: "done", source: { kind: "items", results }, batchStatus };
 }
 
 export async function cancelOpenAiBatch(
   batchId: string,
 ): Promise<string | null> {
+  return withRequestTimeout("OpenAI batch cancellation", 30_000, (signal) => cancelOpenAiBatchRequest(batchId, signal));
+}
+
+async function cancelOpenAiBatchRequest(batchId: string, signal: AbortSignal): Promise<string | null> {
   const apiKey = env("OPENAI_API_KEY");
   if (!apiKey) throw new Error("OPENAI_API_KEY is required.");
   const response = await fetch(
     `https://api.openai.com/v1/batches/${batchId}/cancel`,
     {
+      signal,
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,

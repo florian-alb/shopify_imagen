@@ -14,6 +14,7 @@ export type BatchIngestResult = BatchIngestCounts & { complete: boolean };
 
 export type BatchResultSource =
   | { kind: "items"; results: Map<string, BatchItem> }
+  | { kind: "openai-file"; outputFileId: string | null; errorFileId: string | null; outputFormat?: string }
   | { kind: "gemini-file"; fileName: string }
   | { kind: "gemini-inline"; batchName: string };
 
