@@ -566,6 +566,11 @@ export const remove = mutation({
     if (!job || job.isHidden || !shopMatchesScope(job, scope))
       throw new Error("Job introuvable.");
     if (job.deletedAt != null) return null;
+    const activePublication = await ctx.db.query("imagePublishRuns")
+      .withIndex("by_jobId_and_status", q => q.eq("jobId", job._id).eq("status", "running"))
+      .first();
+    if (activePublication)
+      throw new Error("Une publication Shopify est encore en cours pour ce job. Attendez sa fin avant de le supprimer.");
     if (!isTerminalJobStatus(job.status))
       throw new Error("Terminez ou annulez le job avant de le supprimer.");
     // Probe selective indexes instead of reading up to 900 prompt payloads.

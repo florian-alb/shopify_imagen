@@ -595,6 +595,24 @@ export const removeReference = mutation({
   },
 });
 
+// Publication workers already validate the captured product/shop ownership.
+// Their configuration lookup must not depend on the user's current UI shop.
+export const publicationMode = internalQuery({
+  args: { productId: v.id("products") },
+  returns: v.union(
+    v.literal("variant_media"),
+    v.literal("separate_products"),
+    v.null(),
+  ),
+  handler: async (
+    ctx,
+    args,
+  ): Promise<Doc<"visualGroupConfigs">["publishMode"] | null> => {
+    const config = await configForProduct(ctx, args.productId);
+    return config ? singleProductConfig(config).publishMode : null;
+  },
+});
+
 export const analysisContext = internalQuery({
   args: {
     productId: v.id("products"),
