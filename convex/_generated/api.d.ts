@@ -65,6 +65,7 @@ import type * as http from "../http.js";
 import type * as jobs from "../jobs.js";
 import type * as jobs_engine from "../jobs/engine.js";
 import type * as jobs_lifecycle from "../jobs/lifecycle.js";
+import type * as jobs_listing from "../jobs/listing.js";
 import type * as jobs_planning from "../jobs/planning.js";
 import type * as jobs_prepare from "../jobs/prepare.js";
 import type * as jobs_summaries from "../jobs/summaries.js";
@@ -174,6 +175,7 @@ declare const fullApi: ApiFromModules<{
   jobs: typeof jobs;
   "jobs/engine": typeof jobs_engine;
   "jobs/lifecycle": typeof jobs_lifecycle;
+  "jobs/listing": typeof jobs_listing;
   "jobs/planning": typeof jobs_planning;
   "jobs/prepare": typeof jobs_prepare;
   "jobs/summaries": typeof jobs_summaries;
