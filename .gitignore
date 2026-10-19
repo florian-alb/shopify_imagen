@@ -28,6 +28,7 @@ output/downloads/*
 !output/downloads/.gitkeep
 output/references/*
 output/shopify-images/*
+output/seo-poc/
 
 # Caches
 .cache/

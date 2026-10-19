@@ -3,12 +3,12 @@ import sanitizeHtml from "sanitize-html"
 import {
   collectionKey,
   productLink,
-  safeKey,
   type CatalogProduct,
   type CollectionPlan,
   type MenuNode,
   type ProductLink,
 } from "./source"
+import { extractNavigation, type NavigationStatus } from "./navigation"
 
 export function cleanHtml(html: string) {
   return sanitizeHtml(html, {
@@ -51,100 +51,13 @@ const absolute = (value: string | undefined, origin: string) => {
 export function extractMenu(
   html: string,
   origin: string,
-): { menu: MenuNode[]; collections: CollectionPlan[] } {
-  const $ = load(html)
-  if (!/shopify/i.test(html))
+  options: { navigationOnly?: boolean } = {},
+): { menu: MenuNode[]; collections: CollectionPlan[]; navigationStatus: NavigationStatus } {
+  if (!options.navigationOnly && !/shopify/i.test(html))
     throw new Error(
       "Cette page n’a pas été identifiée comme une boutique Shopify.",
     )
-  const candidates = $(
-    "header nav, header [role=navigation], .header__inline-menu, header-menu, .mega-menu, #shopify-section-header nav, nav[aria-label], .menu-drawer__navigation",
-  )
-  let best: MenuNode[] = []
-  function nodes(root: ReturnType<typeof $>, depth: number): MenuNode[] {
-    if (depth > 12) return []
-    const list = root.is("ul,ol") ? root : root.find("ul,ol").first()
-    if (!list.length) return []
-    return list
-      .children("li")
-      .toArray()
-      .map((li, index) => {
-        const item = $(li)
-        const a = item.find("a, summary, button").first()
-        const label = a.clone()
-        label.find("svg,ul,ol,.icon").remove()
-        const title = label
-          .text()
-          .replace(/keyboard_arrow_down|expand_more/g, "")
-          .trim()
-        const href = a.attr("href")
-        return {
-          key: `${depth}-${index}-${safeKey(title)}`,
-          title,
-          url: href && !href.startsWith("#") ? absolute(href, origin) : null,
-          children: nodes(item, depth + 1),
-        }
-      })
-      .filter((n) => n.title)
-  }
-  // Choose one navigation tree; mobile duplicates must not double collection discovery.
-  const score = (items: MenuNode[]): number =>
-    items.reduce(
-      (n, item) =>
-        n +
-        (item.url && collectionKey(item.url, origin) ? 1 : 0) +
-        score(item.children),
-      0,
-    )
-  for (const candidate of candidates.toArray()) {
-    const result = nodes($(candidate), 0)
-    if (score(result) > score(best)) best = result
-  }
-  // Kuscheltierland uses custom elements and divs rather than nested UL lists.
-  const desktop = $("header .header__menu-desktop-list").first()
-  if (desktop.length) {
-    function customNodes(root: ReturnType<typeof $>): MenuNode[] {
-      return root
-        .children("a, dropdown-component, .header__submenu-item")
-        .toArray()
-        .map((el, i) => {
-          const item = $(el)
-          const label = (
-            item.is("a") ? item : item.find("button, summary, a").first()
-          ).clone()
-          label.find("svg,.icon,.material-symbols-outlined").remove()
-          const title = label.text().replace(/\s+/g, " ").trim()
-          const childRoot = item
-            .find(".header__subsubmenu, .dropdown-content")
-            .first()
-          return {
-            key: String(i),
-            title,
-            url: label.attr("href")
-              ? absolute(label.attr("href"), origin)
-              : null,
-            children: childRoot.length ? customNodes(childRoot) : [],
-          }
-        })
-        .filter((n) => n.title)
-    }
-    const result = customNodes(desktop)
-    if (score(result) >= score(best)) best = result
-  }
-  if (!best.length) {
-    const links = $(
-      "header a[href*='/collections/'], [role=navigation] a[href*='/collections/']",
-    )
-    best = links
-      .toArray()
-      .map((a, i) => ({
-        key: `link-${i}`,
-        title: $(a).text().trim(),
-        url: absolute($(a).attr("href"), origin),
-        children: [],
-      }))
-      .filter((n) => n.title)
-  }
+  const { menu: best, status: navigationStatus } = extractNavigation(html, origin, options.navigationOnly)
   const plans = new Map<string, CollectionPlan>()
   function walk(items: MenuNode[], parent = "") {
     items.forEach((n, i) => {
@@ -171,11 +84,11 @@ export function extractMenu(
     })
   }
   walk(best)
-  if (!plans.size)
+  if (!plans.size && !options.navigationOnly)
     throw new Error(
       "Aucune collection détectée dans le menu. Une lecture navigateur ou une adaptation du thème est nécessaire.",
     )
-  return { menu: best, collections: [...plans.values()] }
+  return { menu: best, collections: [...plans.values()], navigationStatus }
 }
 
 export function extractCollection(

@@ -1,11 +1,6 @@
-export const policyLanguages = [
-  { code: "fr", label: "Français", native: "Français", flag: "🇫🇷" },
-  { code: "en", label: "Anglais", native: "English", flag: "🇬🇧" },
-  { code: "de", label: "Allemand", native: "Deutsch", flag: "🇩🇪" },
-  { code: "es", label: "Espagnol", native: "Español", flag: "🇪🇸" },
-  { code: "it", label: "Italien", native: "Italiano", flag: "🇮🇹" },
-  { code: "nl", label: "Néerlandais", native: "Nederlands", flag: "🇳🇱" },
-] as const
+import { europeanLanguages } from "../../lib/languages"
+
+export const policyLanguages = europeanLanguages
 
 export type PolicyLanguage = typeof policyLanguages[number]["code"]
 export type TranslationLanguage = Exclude<PolicyLanguage, "fr">

@@ -1,11 +1,14 @@
 import { defineTable } from "convex/server"
 import { v } from "convex/values"
+import { tagLanguageValidator } from "./tags"
 export const catalogueTables = {
   catalogues: defineTable({
     ownerId: v.id("users"),
     origin: v.string(),
     mode: v.union(v.literal("ALL"), v.literal("TOP_N")),
     topN: v.optional(v.number()),
+    tagLanguage: v.optional(tagLanguageValidator),
+    tagVersion: v.optional(v.number()),
     status: v.union(
       v.literal("working"),
       v.literal("tags"),

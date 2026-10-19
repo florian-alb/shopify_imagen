@@ -1,5 +1,6 @@
 import { getConvexSize } from "convex/values"
 import type { CatalogProduct, MenuNode, ProductOverride } from "./source"
+import { normalizeTag, validCollectionTag } from "./tags"
 export type { CatalogProduct, MenuNode, ProductOverride } from "./source"
 
 export type Collection = {
@@ -10,6 +11,7 @@ export type Collection = {
   image: string | null
   tag: string
   validated: boolean
+  appliedTag?: string
   edited?: boolean
   outsideMenu: boolean
   membership: "pending" | "complete" | "failed"
@@ -96,11 +98,12 @@ export const identity = (origin: string, id: string) =>
 export function validateTags(collections: Collection[]) {
   const seen = new Set<string>()
   for (const c of collections) {
-    if (!/^[a-z0-9]+(?:[ -][a-z0-9]+)*$/.test(c.tag) || c.tag.length > 100)
-      throw new Error(`Tag anglais requis : ${c.title}`)
-    if (seen.has(c.tag))
+    const tag = normalizeTag(c.tag)
+    if (!validCollectionTag(tag))
+      throw new Error(`Tag invalide (minuscules, chiffres, espaces ou tirets, 100 caractères maximum) : ${c.title}`)
+    if (seen.has(tag))
       throw new Error(`Tag utilisé par plusieurs collections : ${c.tag}`)
-    seen.add(c.tag)
+    seen.add(tag)
   }
 }
 export function effective(
@@ -109,8 +112,8 @@ export function effective(
   override: ProductOverride = {},
 ) {
   const inherited = structure.collections
-    .filter((c) => c.validated && data.collections.includes(c.key))
-    .map((c) => c.tag)
+    .filter((c) => data.collections.includes(c.key))
+    .map((c) => c.validated ? c.tag : c.appliedTag ?? "")
   return {
     ...data,
     title: override.title ?? data.title,
