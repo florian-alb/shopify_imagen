@@ -54,6 +54,7 @@ export const publicationTables = {
     totalImages: v.number(),
     pushedImages: v.number(),
     workflowId: v.optional(v.string()),
+    tracksImageFeedback: v.optional(v.boolean()),
     error: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),

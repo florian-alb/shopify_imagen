@@ -1,6 +1,7 @@
 import { authTables } from "@convex-dev/auth/server";
 import { defineSchema, defineTable } from "convex/server";
 import { catalogueTables } from "./catalogue/schema";
+import { seoTables } from "./seo/schema";
 import { publicationTables } from "./shopify/publicationSchema";
 import { v } from "convex/values";
 import { promptConditionValidator } from "./promptConditions";
@@ -246,6 +247,7 @@ const googleFeedCondition = v.object({
 export default defineSchema({
   ...authTables,
   ...catalogueTables,
+  ...seoTables,
   ...publicationTables,
   users: defineTable({
     name: v.optional(v.string()),
@@ -875,6 +877,8 @@ export default defineSchema({
     reviewedAt: v.optional(v.number()),
     reviewedByUserId: v.optional(v.id("users")),
     shopifyMediaId: v.optional(v.union(v.string(), v.null())),
+    pushRunId: v.optional(v.id("imagePublishRuns")),
+    pushError: v.optional(v.string()),
     publishedShopifyProductId: v.optional(v.union(v.string(), v.null())),
     error: v.optional(v.union(v.string(), v.null())),
     inputTokens: v.optional(v.number()),

@@ -27,6 +27,7 @@ import {
   CollectionHttpError,
 } from "./catalogue/network";
 import { proposeTags } from "./catalogue/ai";
+import type { TagLanguage } from "./catalogue/tags";
 import { exportStorage, signedExport } from "./catalogue/storage";
 import { importStep } from "./catalogue/shopify";
 
@@ -64,15 +65,20 @@ export const download = action({
   },
 });
 export const suggestTags = action({
-  args: { id: v.id("catalogues") },
+  args: { id: v.id("catalogues"), replaceExisting: v.optional(v.boolean()) },
   returns: v.array(v.object({ key: v.string(), tag: v.string() })),
   handler: async (ctx, a): Promise<Array<{ key: string; tag: string }>> => {
-    const c = decode<{ structure: Structure }>(
-      await ctx.runQuery(api.catalogues.get, a),
+    const c = decode<{ structure: Structure; tagLanguage?: TagLanguage }>(
+      await ctx.runQuery(api.catalogues.get, { id: a.id }),
     );
-    return proposeTags(
-      c.structure.collections.filter((x) => !x.edited && !x.validated),
+    const proposals = await proposeTags(
+      c.structure.collections.filter((x) => a.replaceExisting || (!x.edited && !x.validated)),
+      c.tagLanguage ?? "en",
     );
+    const latest = decode<{ tagLanguage?: TagLanguage }>(await ctx.runQuery(api.catalogues.get, { id: a.id }));
+    if ((latest.tagLanguage ?? "en") !== (c.tagLanguage ?? "en"))
+      throw new Error("La langue a changé pendant la proposition. Relancez-la dans la nouvelle langue.");
+    return proposals;
   },
 });
 async function context(
@@ -94,6 +100,7 @@ async function checkpoint(
     lastImport?: string;
     delay?: number;
     error?: string;
+    suggestedLanguage?: TagLanguage;
   } = {},
 ) {
   if (work) {
@@ -341,6 +348,7 @@ async function discovery(
     try {
       for (const p of await proposeTags(
         s.collections.filter((x) => !x.edited && !x.validated),
+        c.tagLanguage ?? "en",
       )) {
         const col = s.collections.find((x) => x.key === p.key);
         if (col && !col.edited && !col.validated) col.tag = p.tag;
@@ -348,7 +356,7 @@ async function discovery(
     } catch (e) {
       error = `Propositions IA indisponibles : ${message(e)}. Saisissez les tags ou réessayez.`;
     }
-    return checkpoint(ctx, f, undefined, s, "tags", { error });
+    return checkpoint(ctx, f, undefined, s, "tags", { error, suggestedLanguage: c.tagLanguage ?? "en" });
   }
 }
 async function collect(
@@ -527,6 +535,7 @@ async function exportCatalogue(
           origin: c.origin,
           mode: c.mode,
           topN: c.topN,
+          tagLanguage: c.tagLanguage ?? "en",
           version: c.version,
           structure: s,
           total: c.total,

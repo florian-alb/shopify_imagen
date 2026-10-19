@@ -2,6 +2,7 @@
 /// <reference types="vite/client" />
 
 import workflowTest from "@convex-dev/workflow/test";
+import type { WorkflowId } from "@convex-dev/workflow";
 import { convexTest } from "convex-test";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { api, internal } from "../../_generated/api";
@@ -146,12 +147,32 @@ async function fixture(productCount = 3) {
 describe("durable job image publication", () => {
   test("executes without further browser requests and uses the initiating shop after a switch", async () => {
     const { t, client, userId, jobId, imageIds } = await fixture();
+    await t.run(async (ctx) => {
+      for (const id of imageIds)
+        await ctx.db.patch(id, { pushError: "Previous push failed" });
+    });
     const runId = await client.mutation(api.jobImagePublishing.start, {
       jobId,
       imageIds,
       replaceExisting: false,
     });
     expect(graphql).not.toHaveBeenCalled();
+    const queued = await Promise.all(
+      imageIds.map((id) => t.run((ctx) => ctx.db.get(id))),
+    );
+    expect(
+      queued.map((image) => ({
+        owner: image?.pushRunId,
+        status: image?.status,
+        error: image?.pushError,
+      })),
+    ).toEqual(
+      imageIds.map(() => ({
+        owner: runId,
+        status: "generated",
+        error: undefined,
+      })),
+    );
     await t.run(async (ctx) => {
       const otherShop = await ctx.db.insert("shops", {
         domain: "other.myshopify.com",
@@ -185,6 +206,9 @@ describe("durable job image publication", () => {
       "uploaded",
       "uploaded",
     ]);
+    expect(
+      images.every((image) => !image?.pushRunId && !image?.pushError),
+    ).toBe(true);
   });
 
   test("records an individual failure and publishes the next products without retrying the failed write", async () => {
@@ -225,6 +249,12 @@ describe("durable job image publication", () => {
           (call[1] as { product: { id: string } }).product.id === "product-0",
       ),
     ).toHaveLength(1);
+    const failed = await t.run((ctx) => ctx.db.get(imageIds[0]));
+    expect(failed).toMatchObject({
+      status: "generated",
+      pushError: expect.stringContaining("Shopify unavailable"),
+    });
+    expect(failed?.pushRunId).toBeUndefined();
   });
 
   test("simultaneous starts share one frozen selection and preserve the replace option", async () => {
@@ -284,6 +314,12 @@ describe("durable job image publication", () => {
         },
       ],
     });
+    const image = await t.run((ctx) => ctx.db.get(imageIds[0]));
+    expect(image).toMatchObject({
+      status: "generated",
+      pushError: expect.stringContaining("a changé"),
+    });
+    expect(image?.pushRunId).toBeUndefined();
   });
 
   test("counts partial uploads when gallery deletion fails and keeps the product error", async () => {
@@ -324,6 +360,114 @@ describe("durable job image publication", () => {
         },
       ],
     });
+    const image = await t.run((ctx) => ctx.db.get(imageIds[0]));
+    expect(image).toMatchObject({
+      status: "uploaded",
+      pushError: expect.stringContaining("Deletion failed"),
+    });
+    expect(image?.pushRunId).toBeUndefined();
+  });
+
+  test("clears queued feedback and records image errors when a workflow is interrupted", async () => {
+    const { t, client, jobId, imageIds } = await fixture();
+    const runId = await client.mutation(api.jobImagePublishing.start, {
+      jobId,
+      imageIds,
+      replaceExisting: false,
+    });
+    const run = (await t.run((ctx) => ctx.db.get(runId)))!;
+    await t.mutation(internal.jobImagePublishing.workflowCompleted, {
+      workflowId: run.workflowId as WorkflowId,
+      context: { runId },
+      result: { kind: "failed", error: "Worker interrupted" },
+    });
+    await t.finishAllScheduledFunctions(vi.runAllTimers, 200);
+    const images = await Promise.all(
+      imageIds.map((id) => t.run((ctx) => ctx.db.get(id))),
+    );
+    expect(
+      images.every(
+        (image) =>
+          image?.status === "generated" &&
+          !image.pushRunId &&
+          image.pushError === "Worker interrupted",
+      ),
+    ).toBe(true);
+    expect(await t.run((ctx) => ctx.db.get(runId))).toMatchObject({
+      status: "failed",
+      failedProducts: 3,
+    });
+    expect(graphql).not.toHaveBeenCalled();
+  });
+
+  test("older cleanup and worker completions cannot change feedback owned by another run", async () => {
+    const { t, client, jobId, imageIds } = await fixture(1);
+    const runId = await client.mutation(api.jobImagePublishing.start, {
+      jobId,
+      imageIds,
+      replaceExisting: false,
+    });
+    const newerRunId = await t.run(async (ctx) => {
+      const run = (await ctx.db.get(runId))!;
+      const { _id, _creationTime, ...fields } = run;
+      const newerRunId = await ctx.db.insert("imagePublishRuns", fields);
+      await ctx.db.patch(runId, { status: "failed", error: "Old failure" });
+      await ctx.db.patch(imageIds[0], {
+        pushRunId: newerRunId,
+        pushError: "New feedback",
+      });
+      return newerRunId;
+    });
+    await t.mutation(internal.jobImagePublishing.settleInterruptedProducts, {
+      runId,
+    });
+    expect(await t.run((ctx) => ctx.db.get(imageIds[0]))).toMatchObject({
+      pushRunId: newerRunId,
+      pushError: "New feedback",
+    });
+    await expect(
+      t.mutation(internal.shopify.markImagePushed, {
+        imageId: imageIds[0],
+        pushRunId: runId,
+        shopifyMediaId: "stale-media",
+      }),
+    ).rejects.toThrow("autre envoi");
+    vi.clearAllTimers();
+  });
+
+  test("running workflows created before image feedback flags remain compatible", async () => {
+    const { t, client, jobId, imageIds } = await fixture(1);
+    const runId = await client.mutation(api.jobImagePublishing.start, {
+      jobId,
+      imageIds,
+      replaceExisting: false,
+    });
+    await t.run(async (ctx) => {
+      await ctx.db.patch(runId, { tracksImageFeedback: undefined });
+      await ctx.db.patch(imageIds[0], { pushRunId: undefined });
+    });
+    await t.finishAllScheduledFunctions(vi.runAllTimers, 200);
+    expect(await t.run((ctx) => ctx.db.get(runId))).toMatchObject({
+      status: "completed",
+      pushedImages: 1,
+    });
+  });
+
+  test("does not grab an image while its regeneration is active", async () => {
+    const { t, client, jobId, imageIds } = await fixture(1);
+    await t.run((ctx) =>
+      ctx.db.patch(imageIds[0], { activeRetryImageId: imageIds[0] }),
+    );
+    await expect(
+      client.mutation(api.jobImagePublishing.start, {
+        jobId,
+        imageIds,
+        replaceExisting: false,
+      }),
+    ).rejects.toThrow("uniquement");
+    expect(
+      (await t.run((ctx) => ctx.db.get(imageIds[0])))?.pushRunId,
+    ).toBeUndefined();
   });
 
   test("rejects missing authentication, revoked approval, foreign jobs, and unapproved or published images", async () => {

@@ -45,6 +45,7 @@ import {
 } from "./prompts/repository";
 import { sanitizeModelReferences } from "./prompts/access";
 import { refreshProductSummary } from "./products";
+import { assertImageMutable } from "./shared/publicationGuards";
 import {
   ensureActiveShop,
   getActiveShopScope,
@@ -1247,6 +1248,7 @@ export const completeImage = internalMutation({
         reviewedAt: undefined,
         reviewedByUserId: undefined,
         shopifyMediaId: null,
+        pushError: undefined,
         error: null,
         inputTokens: args.inputTokens,
         outputTokens: args.outputTokens,
@@ -1568,9 +1570,9 @@ export const retouchSourceForSave = internalQuery({
     const userId = await requireUserId(ctx);
     const scope = await getActiveShopScope(ctx, userId);
     const image = await ctx.db.get(args.imageId);
+    if (!image || !shopMatchesScope(image, scope)) return null;
+    assertImageMutable(image);
     if (
-      !image ||
-      !shopMatchesScope(image, scope) ||
       !image.storageUrl ||
       (image.status !== "generated" && image.status !== "uploaded")
     ) {
@@ -1591,9 +1593,11 @@ export const insertRetouchedImage = internalMutation({
     const userId = await requireUserId(ctx);
     const scope = await getActiveShopScope(ctx, userId);
     const source = await ctx.db.get(args.sourceImageId);
+    if (!source || !shopMatchesScope(source, scope)) {
+      throw new Error("Source image not found.");
+    }
+    assertImageMutable(source);
     if (
-      !source ||
-      !shopMatchesScope(source, scope) ||
       !source.storageUrl ||
       (source.status !== "generated" && source.status !== "uploaded")
     ) {
@@ -1625,6 +1629,7 @@ export const insertRetouchedImage = internalMutation({
               shopifyMediaId: null,
             }),
         error: null,
+        pushError: undefined,
         updatedAt: now,
       });
       await refreshJobSummary(ctx, source.jobId);
@@ -1730,9 +1735,9 @@ export const reviewImages = mutation({
     const affectedJobIds = new Set<Id<"generationJobs">>();
     for (const imageId of Array.from(new Set(args.imageIds))) {
       const image = await ctx.db.get(imageId);
+      if (!image || !shopMatchesScope(image, scope)) continue;
+      assertImageMutable(image);
       if (
-        !image ||
-        !shopMatchesScope(image, scope) ||
         !image.storageUrl ||
         (image.status !== "generated" && image.status !== "uploaded")
       )
@@ -1770,6 +1775,7 @@ export const regenerateImage = mutation({
     if (!image || !shopMatchesScope(image, scope)) {
       throw new Error("Image not found.");
     }
+    assertImageMutable(image);
     if (isActiveImageStatus(image.status)) {
       throw new Error("Image regeneration is already in progress.");
     }

@@ -7,6 +7,8 @@ import { PageHeader, pageContentClass } from "@/components/page";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { TagLanguageSelect } from "./TagLanguageSelect";
+import type { TagLanguage } from "../../../../convex/catalogue/tags";
 
 type Summary = {
   id: string;
@@ -33,6 +35,7 @@ export function CatalogHome() {
   const [url, setUrl] = useState(""),
     [mode, setMode] = useState<"ALL" | "TOP_N">("ALL"),
     [n, setN] = useState("25"),
+    [tagLanguage, setTagLanguage] = useState<TagLanguage>("en"),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   return (
@@ -52,6 +55,7 @@ export function CatalogHome() {
             const id = await create({
               url,
               mode,
+              tagLanguage,
               ...(mode === "TOP_N" ? { topN: Number(n) } : {}),
             });
             await navigate({
@@ -76,6 +80,12 @@ export function CatalogHome() {
             autoComplete="url"
           />
         </label>
+        <div className="max-w-xs space-y-2">
+          <TagLanguageSelect value={tagLanguage} onChange={setTagLanguage} disabled={busy} />
+          <p className="text-sm text-muted-foreground">
+            Modifiable pendant l’analyse et après la découverte. Le contenu des fiches conserve sa langue d’origine.
+          </p>
+        </div>
         <fieldset className="space-y-3">
           <legend className="mb-3 text-sm font-medium">
             Produits à récupérer

@@ -1,4 +1,4 @@
-import { getReviewStatus, isPushReady, isReviewable } from "../../images/lib/review";
+import { canReviewImage, getReviewStatus, hasImagePushError, isImagePushing, isPushReady, isReviewable } from "../../images/lib/review";
 import { getShopifyAdminUrl } from "../../shopify/lib/admin";
 import type { Doc, Id } from "../../../lib/convex";
 import {
@@ -13,6 +13,7 @@ export type ReviewFilter =
   | "approved"
   | "rejected"
   | "failed"
+  | "pushing"
   | "pushed";
 
 export const reviewFilters: { value: ReviewFilter; label: string }[] = [
@@ -21,6 +22,7 @@ export const reviewFilters: { value: ReviewFilter; label: string }[] = [
   { value: "approved", label: "Approved" },
   { value: "rejected", label: "Rejected" },
   { value: "failed", label: "Errors" },
+  { value: "pushing", label: "Pushing" },
   { value: "pushed", label: "Pushed" },
 ];
 
@@ -36,6 +38,7 @@ export type JobReviewCounts = {
   approved: number;
   rejected: number;
   failed: number;
+  pushing: number;
   pushed: number;
 };
 
@@ -67,7 +70,8 @@ export function matchesJobReviewFilter(
   filter: ReviewFilter,
 ) {
   if (filter === "all") return true;
-  if (filter === "failed") return image.status === "failed";
+  if (filter === "failed") return image.status === "failed" || hasImagePushError(image);
+  if (filter === "pushing") return isImagePushing(image);
   if (filter === "pushed") return image.status === "uploaded";
   return isReviewable(image) && getReviewStatus(image) === filter;
 }
@@ -120,14 +124,15 @@ export function createJobDetailViewModel({
   const rejectedCount = reviewableImages.filter(
     (image) => getReviewStatus(image) === "rejected",
   ).length;
-  const failedCount = images.filter((image) => image.status === "failed").length;
+  const failedCount = images.filter((image) => image.status === "failed" || hasImagePushError(image)).length;
+  const pushingCount = images.filter(isImagePushing).length;
   const pushedCount = images.filter(
     (image) => image.status === "uploaded",
   ).length;
   const visibleImages = images.filter((image) =>
     matchesJobReviewFilter(image, filter),
   );
-  const visibleReviewable = visibleImages.filter(isReviewable);
+  const visibleReviewable = visibleImages.filter(canReviewImage);
   const pushableImages = images.filter(
     (image) => isPushReady(image) && image.status === "generated",
   );
@@ -183,6 +188,7 @@ export function createJobDetailViewModel({
       approved: approvedImages.length,
       rejected: rejectedCount,
       failed: failedCount,
+      pushing: pushingCount,
       pushed: pushedCount,
     },
     selectedPushableImages,

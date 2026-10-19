@@ -41,6 +41,20 @@ Le filtre de collection renvoyait uniquement les correspondances d’un lot tech
 
 Le client assemble désormais les lots réactifs jusqu’à 25 correspondances et une correspondance de prélecture, ou la fin du catalogue. Les données existantes ne nécessitent aucune migration ou nouvelle collecte. Le test Convex couvre 40 produits dispersés, sans doublon et dans l’ordre. Le banc navigateur `?scenario=pagination` reproduit 964 produits : première page 25, deuxième 15, Suivant désactivé à la fin, retour à la première page, recherche d’un produit de fin de catalogue depuis la deuxième page et filtre d’état vide. Ces contrôles navigateur utilisent des données simulées.
 
+## Langue et édition des tags — 19 octobre 2026
+
+Le choix de langue est disponible avant lancement et modifiable pendant/après la découverte. Anglais reste le défaut des catalogues existants. Les accents et autres alphabets sont acceptés ; les doublons sont détectés après normalisation NFC. L’application des tags aux produits est séparée du lancement de la collecte. Un brouillon conserve les derniers tags appliqués et les tags manuels propres aux fiches restent prioritaires.
+
+- Suite complète : **546 tests réussis, 71 fichiers**. Cinq nouveaux tests Convex couvrent la langue initiale et en cours de travail, les propositions IA après validation, la propagation liste/fiche/export, les brouillons, les overrides, les collisions Unicode, les écritures concurrentes, la fusion des checkpoints et les résultats IA dans une ancienne langue. IA, réseau, R2 et Shopify sont simulés dans ces tests.
+- Typage app/Convex, contrat **114 références frontend**, lint ciblé, build et `git diff --check` réussis. Avertissement existant sur les gros chunks du build.
+- Backend accepté avec `npx convex dev --once --typecheck enable` sur **dev `curious-greyhound-437`**. Le déploiement global a repris les fichiers SEO préexistants du workspace ; aucun import Shopify réel ni écriture de production.
+- Banc navigateur isolé : français sélectionné dans le formulaire de départ puis conservé dans l’étape Tags ; reproposition simulée en français ; correction `oiseaux-été`, validation sans collecte, tag visible dans la collection puis dans une fiche membre ; console sans erreur ni avertissement.
+- Captures simulées : [éditeur de tags](../output/catalogue-tags/tags-francais.png), [fiche avec les tags synchronisés](../output/catalogue-tags/produit-tags-synchronises.png).
+
+Cette qualification ne prouve pas un parcours navigateur authentifié, la qualité linguistique d’une réponse Gemini réelle, un nouvel export R2 réel ou un import Shopify réel. Les limites historiques ci-dessous restent applicables.
+
+Le sélecteur de langue est désormais le composant UI partagé `LanguageSelect`, réutilisé pour le catalogue, le SEO et les politiques. Les libellés, drapeaux et l’ordre sont centralisés ; les langues prises en charge restent propres à chaque module. Contrôle sur les bancs catalogue/SEO : drapeaux et coche visibles, choix conservé, sélection au clavier par libellé, console sans erreur ni avertissement. [Capture du catalogue simulé](../output/shared-language-select/catalogue.png). Suite complète de 546 tests, contrôles de typage/lint/build et contrat frontend réussis ; cette modification est uniquement frontend.
+
 ## Export réel Convex → R2
 
 Une fixture synthétique dédiée à l’export a été créée sur le dev avec une fiche et un complément HTML. La mutation publique d’export a été appelée avec l’identité CLI de son propriétaire. Une vérification serveur a téléchargé le fichier final et listé le préfixe :
@@ -67,6 +81,8 @@ Les dix anciennes tables ont été vérifiées vides après retrait. Les deux no
 Deux réponses MCP perdues ont conduit à vérifier l’état et continuer avec la CLI. Les compteurs d’appels ne sont donc pas présentés comme un inventaire exhaustif avant suppression ; la preuve finale est le contrôle du vide. L’audit de 21 pages récentes des fonctions planifiées n’a trouvé aucun ancien job en attente à annuler ; il n’est pas exhaustif de l’historique système. Les anciennes opérations étaient inactives à l’inventaire, leurs points d’entrée et crons ont été retirés. L’historique système Convex partagé n’a pas été purgé.
 
 ## Limites restant à qualifier
+
+Évolution du 16 octobre 2026 : le lecteur de navigation est partagé avec le module SEO via un mode optionnel de `extractMenu`. Le mode catalogue garde sa garde Shopify et sa projection de collections. Les tests ciblés de navigation, observations SEO et catalogue passent (36 cas), notamment les sous-menus Shopware imbriqués et les doublons desktop/mobile. Le HTML public Small Foot fourni pour le test SEO permet de vérifier 157 nœuds hiérarchiques. Cette preuve d’extraction ne constitue pas une nouvelle collecte catalogue, un import Shopify ou un E2E catalogue authentifié ; les limites ci-dessous restent applicables.
 
 - Pas de nouvelle collecte exhaustive des 964 fiches/115 collections du pilote : les mesures du 29 septembre restent des vérifications préalables, pas des résultats de ce moteur.
 - Pas de mesure de performance réseau en grand volume. Deux tables remplacent les anciens index de suffixes ; les filtres exacts parcourent des pages bornées, ce qui peut multiplier les lectures pour une recherche rare.

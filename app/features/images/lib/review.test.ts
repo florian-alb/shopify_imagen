@@ -3,7 +3,10 @@ import { describe, expect, it } from "vitest";
 import type { Doc } from "@/lib/convex";
 
 import {
+  canReviewImage,
   getReviewStatus,
+  hasImagePushError,
+  isImagePushing,
   isPushReady,
   isReviewable,
   reviewAggregateBadge,
@@ -53,6 +56,35 @@ describe("generated image review helpers", () => {
       false,
     );
     expect(isPushReady(generatedImage({ status: "failed" }))).toBe(false);
+  });
+
+  it("keeps queued publication images visible but prevents a second push or review", () => {
+    const image = generatedImage({
+      reviewStatus: "approved",
+      pushRunId: "publish-run" as never,
+    });
+    expect(isReviewable(image)).toBe(true);
+    expect(isImagePushing(image)).toBe(true);
+    expect(isPushReady(image)).toBe(false);
+    expect(canReviewImage(image)).toBe(false);
+    expect(generatedImageStateLabel(image)).toBe("Pushing");
+    expect(generatedImageStateTone(image)).toBe("warning");
+    expect(isImagePushing({ ...image, status: "uploaded" })).toBe(true);
+  });
+
+  it("exposes push errors without turning a generated photo into a generation failure", () => {
+    const image = generatedImage({
+      reviewStatus: "approved",
+      pushError: "Shopify unavailable",
+    });
+    expect(isReviewable(image)).toBe(true);
+    expect(hasImagePushError(image)).toBe(true);
+    expect(isImagePushing(image)).toBe(false);
+    expect(isPushReady(image)).toBe(true);
+    expect(generatedImageStateLabel(image)).toBe("Push failed");
+    expect(generatedImageStateTone(image)).toBe("danger");
+    expect(generatedImageStateLabel({ ...image, status: "uploaded" })).toBe("Pushed · error");
+    expect(generatedImageStateLabel({ ...image, pushError: undefined, status: "uploaded" })).toBe("Pushed");
   });
 });
 

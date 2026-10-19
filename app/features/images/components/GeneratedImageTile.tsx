@@ -18,7 +18,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { getReviewStatus, isReviewable } from "@/features/images/lib/review";
+import { getReviewStatus, isImagePushing, isReviewable } from "@/features/images/lib/review";
 import type { Doc } from "@/lib/convex";
 
 type ReviewStatus = "approved" | "rejected";
@@ -52,7 +52,8 @@ export function GeneratedImageTile({
   onRetry?: () => void;
 }) {
   const retryActive = Boolean(image.activeRetryImageId);
-  const busy = retrying || regenerating || retryActive;
+  const pushing = isImagePushing(image);
+  const busy = retrying || regenerating || retryActive || pushing;
   const displayStatus = retryActive ? "regenerating" : image.status;
   const retryError =
     !retryActive && image.retryError && image.retryError !== image.error
@@ -114,7 +115,7 @@ export function GeneratedImageTile({
           size="icon-sm"
           aria-label={`Retoucher ${imageLabel}`}
           title="Retoucher"
-          disabled={!image.storageUrl}
+          disabled={!image.storageUrl || pushing}
           onClick={onRetouch}
           className="absolute top-1.5 right-10 bg-background/80 opacity-0 backdrop-blur-sm transition group-hover:opacity-100 focus-visible:opacity-100"
         >
@@ -126,6 +127,7 @@ export function GeneratedImageTile({
           variant="destructive"
           size="icon-sm"
           aria-label={`Delete ${imageLabel}`}
+          disabled={pushing}
           onClick={onDelete}
           className="absolute top-1.5 right-1.5 bg-background/80 opacity-0 backdrop-blur-sm transition group-hover:opacity-100 focus-visible:opacity-100"
         >
@@ -155,6 +157,17 @@ export function GeneratedImageTile({
         {retryError ? (
           <p className="line-clamp-2 text-xs text-destructive">
             Retry failed: {retryError}
+          </p>
+        ) : null}
+        {pushing ? (
+          <p className="flex items-center gap-1.5 text-xs text-muted-foreground" role="status">
+            <Loader2 className="size-3 animate-spin" />
+            Publishing to Shopify
+          </p>
+        ) : null}
+        {image.pushError && !pushing ? (
+          <p className="line-clamp-3 text-xs text-destructive" title={image.pushError}>
+            Shopify push: {image.pushError}
           </p>
         ) : null}
         {image.status === "failed" && onRetry ? (
@@ -191,7 +204,7 @@ export function GeneratedImageTile({
                       : "outline"
                   }
                   size="icon-sm"
-                  disabled={reviewing}
+                  disabled={reviewing || pushing}
                   onClick={() => onReview("approved")}
                 >
                   <Check />
@@ -205,7 +218,7 @@ export function GeneratedImageTile({
                       : "outline"
                   }
                   size="icon-sm"
-                  disabled={reviewing}
+                  disabled={reviewing || pushing}
                   onClick={() => onReview("rejected")}
                 >
                   <X />
@@ -218,7 +231,7 @@ export function GeneratedImageTile({
                 title="Regenerate"
                 variant="outline"
                 size="icon-sm"
-                disabled={regenerating}
+                disabled={regenerating || pushing}
                 onClick={onRegenerate}
               >
                 {regenerating ? (
@@ -234,7 +247,7 @@ export function GeneratedImageTile({
                 title="Retoucher"
                 variant="outline"
                 size="icon-sm"
-                disabled={!image.storageUrl}
+                disabled={!image.storageUrl || pushing}
                 onClick={onRetouch}
               >
                 <Paintbrush />
@@ -246,6 +259,7 @@ export function GeneratedImageTile({
                 title="Delete"
                 variant="destructive"
                 size="icon-sm"
+                disabled={pushing}
                 onClick={onDelete}
               >
                 <Trash2 />

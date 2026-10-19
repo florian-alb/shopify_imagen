@@ -15,6 +15,7 @@ import { internal } from "./_generated/api"
 import type { Doc, Id } from "./_generated/dataModel"
 import { requireUserId } from "./authz"
 import { sourceOrigin } from "./catalogue/source"
+import { normalizeTag, tagLanguageValidator } from "./catalogue/tags"
 import {
   decode,
   encode,
@@ -43,6 +44,10 @@ function unlocked(c: Doc<"catalogues">) {
     throw new Error(
       "Attendez la fin de l’opération ou relancez son étape en échec.",
     )
+}
+function tagsEditable(c: Doc<"catalogues">) {
+  if (c.work && ["import", "export"].includes(decode<Work>(c.work).kind))
+    throw new Error("Les tags sont figés pendant l’export ou l’import Shopify.")
 }
 function partial(c: Doc<"catalogues">, accepted: boolean) {
   const s = decode<Structure>(c.structure)
@@ -82,6 +87,7 @@ export const create = mutation({
     url: v.string(),
     mode: v.union(v.literal("ALL"), v.literal("TOP_N")),
     topN: v.optional(v.number()),
+    tagLanguage: v.optional(tagLanguageValidator),
   },
   returns: v.id("catalogues"),
   handler: async (ctx, args) => {
@@ -97,6 +103,8 @@ export const create = mutation({
       ownerId,
       origin,
       mode: args.mode,
+      tagLanguage: args.tagLanguage ?? "en",
+      tagVersion: 0,
       ...(args.mode === "TOP_N" ? { topN: args.topN } : {}),
       status: "working",
       phase: "menu",
@@ -306,10 +314,28 @@ export const saveProduct = mutation({
     return null
   },
 })
+export const setTagLanguage = mutation({
+  args: { id: v.id("catalogues"), language: tagLanguageValidator, tagVersion: v.number() },
+  returns: v.null(),
+  handler: async (ctx, a) => {
+    const c = await owned(ctx, a.id)
+    tagsEditable(c)
+    if (a.tagVersion !== (c.tagVersion ?? 0))
+      throw new Error("Les tags ont changé. Relisez-les avant d’enregistrer.")
+    if (a.language !== (c.tagLanguage ?? "en"))
+      await ctx.db.patch(c._id, {
+        tagLanguage: a.language,
+        version: c.version + 1,
+        updatedAt: Date.now(),
+      })
+    return null
+  },
+})
 export const saveTags = mutation({
   args: {
     id: v.id("catalogues"),
     version: v.number(),
+    tagVersion: v.optional(v.number()),
     values: v.array(v.object({ key: v.string(), tag: v.string() })),
     validate: v.boolean(),
     collect: v.boolean(),
@@ -317,29 +343,36 @@ export const saveTags = mutation({
   returns: v.null(),
   handler: async (ctx, a) => {
     const c = await owned(ctx, a.id)
-    unlocked(c)
-    if (a.version !== c.version)
+    tagsEditable(c)
+    if (a.tagVersion !== undefined ? a.tagVersion !== (c.tagVersion ?? 0) : a.version !== c.version)
       throw new Error("Le catalogue a changé. Rechargez les tags.")
+    if (a.collect && c.work && c.status === "working")
+      throw new Error("La découverte ou la collecte est déjà en cours. Enregistrez les tags sans la relancer.")
     const s = decode<Structure>(c.structure)
     for (const value of a.values) {
       const col = s.collections.find((x) => x.key === value.key)
       if (!col) throw new Error("Collection inconnue.")
-      if (col.tag !== value.tag.trim()) {
-        col.tag = value.tag.trim()
+      if (col.tag !== normalizeTag(value.tag)) {
+        if (col.validated) col.appliedTag = col.tag
+        col.tag = normalizeTag(value.tag)
         col.validated = false
         col.edited = true
       }
     }
     if (a.validate) {
       validateTags(s.collections)
-      for (const value of a.values)
-        s.collections.find((x) => x.key === value.key)!.validated = true
+      for (const value of a.values) {
+        const col = s.collections.find((x) => x.key === value.key)!
+        col.validated = true
+        col.appliedTag = col.tag
+      }
     }
     if (a.collect && s.collections.some((x) => !x.validated))
       throw new Error("Validez tous les tags avant la collecte.")
     guardSize({ ...c, structure: encode(s) })
     await ctx.db.patch(c._id, {
       structure: encode(s),
+      tagVersion: (c.tagVersion ?? 0) + 1,
       version: c.version + 1,
       updatedAt: Date.now(),
     })
@@ -546,6 +579,7 @@ export const checkpoint = internalMutation({
     ...fenceArgs,
     work: v.optional(v.string()),
     structure: v.optional(v.string()),
+    suggestedLanguage: v.optional(tagLanguageValidator),
     status: v.optional(
       v.union(
         v.literal("working"),
@@ -564,6 +598,28 @@ export const checkpoint = internalMutation({
   handler: async (ctx, a) => {
     const c = await fenced(ctx, a),
       s = decode<Structure>(a.structure ?? c.structure)
+    // A language can change while the AI request is in flight. Retry this step
+    // with the current language instead of committing the obsolete proposals.
+    if (a.suggestedLanguage && a.suggestedLanguage !== (c.tagLanguage ?? "en")) {
+      await ctx.db.patch(c._id, { lease: undefined, leaseUntil: undefined })
+      await ctx.scheduler.runAfter(0, internal.catalogueActions.work, {
+        id: c._id, generation: c.generation,
+      })
+      return null
+    }
+    const current = decode<Structure>(c.structure)
+    const savedTags = new Map(current.collections.map((col) => [col.key, col]))
+    const work = c.work ? decode<Work>(c.work) : null
+    if (a.structure && work && ["discover", "collect", "add"].includes(work.kind)) {
+      for (const col of s.collections) {
+        const saved = savedTags.get(col.key)
+        if (!saved || (a.suggestedLanguage && !saved.edited && !saved.validated)) continue
+        col.tag = saved.tag
+        col.validated = saved.validated
+        col.edited = saved.edited
+        col.appliedTag = saved.appliedTag
+      }
+    }
     const version = c.version + Number(encode(s) !== c.structure)
     const patch = {
       work: a.work,
@@ -587,6 +643,7 @@ export const checkpoint = internalMutation({
       lease: undefined,
       leaseUntil: undefined,
       version,
+      ...(a.suggestedLanguage ? { tagVersion: (c.tagVersion ?? 0) + 1 } : {}),
       updatedAt: Date.now(),
       ...(a.exportKey
         ? { exportKey: a.exportKey, exportVersion: version }

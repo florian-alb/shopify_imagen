@@ -16,6 +16,7 @@ import {
 import { extractProduct, cleanHtml } from "./extract";
 import { readFileSync } from "node:fs";
 import { targetMenu } from "./shopify";
+import { validCollectionTag, type TagLanguage } from "./tags";
 
 const source = vi.hoisted(() => ({
   pages: new Map<string, string>(),
@@ -26,6 +27,7 @@ const source = vi.hoisted(() => ({
   exportToken: "",
   uploadToken: "",
   finishLost: false,
+  tagLanguages: [] as string[],
 }));
 vi.mock("./network", () => ({
   withSourceBudget: (run: () => Promise<unknown>) => run(),
@@ -41,8 +43,10 @@ vi.mock("./network", () => ({
   },
 }));
 vi.mock("./ai", () => ({
-  proposeTags: async (cols: Array<{ key: string }>) =>
-    cols.map((c) => ({ key: c.key, tag: c.key })),
+  proposeTags: async (cols: Array<{ key: string }>, language: string) => {
+    source.tagLanguages.push(language);
+    return cols.map((c) => ({ key: c.key, tag: c.key }));
+  },
 }));
 vi.mock("./storage", () => ({
   signedExport: vi.fn(),
@@ -160,7 +164,7 @@ afterEach(() => {
   vi.clearAllTimers();
   vi.useRealTimers();
 });
-async function setup(mode: "ALL" | "TOP_N" = "ALL", topN?: number) {
+async function setup(mode: "ALL" | "TOP_N" = "ALL", topN?: number, tagLanguage?: TagLanguage) {
   const t = convexTest(schema, modules),
     owner = await t.run((ctx) =>
       ctx.db.insert("users", { approvalStatus: "approved" }),
@@ -169,6 +173,7 @@ async function setup(mode: "ALL" | "TOP_N" = "ALL", topN?: number) {
   const id = await user.mutation(api.catalogues.create, {
     url: origin,
     mode,
+    ...(tagLanguage ? { tagLanguage } : {}),
     ...(topN ? { topN } : {}),
   });
   const read = () => t.query(internal.catalogues.context, { id });
@@ -309,6 +314,135 @@ test("tag confirmation, collisions, ownership, stale edits and stale workers are
   ).rejects.toThrow("périmée");
   expect((await read())?.total).toBe(4);
 });
+test("tag language is selectable before discovery, editable during work, and used for all AI proposals", async () => {
+  const f = await setup("ALL", undefined, "fr");
+  expect((await f.read())?.tagLanguage).toBe("fr");
+  await f.user.mutation(api.catalogues.setTagLanguage, {
+    id: f.id, language: "de", tagVersion: 0,
+  });
+  await f.drain();
+  expect(source.tagLanguages.at(-1)).toBe("de");
+  await f.validate();
+  await f.drain();
+  const c = (await f.read())!, original = decode<Structure>(c.structure);
+  await f.user.mutation(api.catalogues.setTagLanguage, {
+    id: f.id, language: "fr", tagVersion: c.tagVersion!,
+  });
+  expect(decode<Structure>((await f.read())!.structure)).toEqual(original);
+  const proposals = await f.user.action(api.catalogueActions.suggestTags, { id: f.id, replaceExisting: true });
+  expect(proposals).toHaveLength(original.collections.length);
+  expect(source.tagLanguages.at(-1)).toBe("fr");
+  const legacy = await setup();
+  expect((await legacy.read())?.tagLanguage).toBe("en");
+});
+
+test("collection tag changes reach lists, details and exports while drafts and manual product tags remain intact", async () => {
+  const f = await setup();
+  await f.drain();
+  await f.validate();
+  await f.drain();
+  const page = await f.t.query(internal.catalogues.page, { id: f.id, selected: true });
+  const inherited = page.page.find((p) => p.handle === "a")!;
+  const manual = page.page.find((p) => p.handle === "b")!;
+  await f.user.mutation(api.catalogues.saveProduct, {
+    id: f.id, productId: manual._id, version: (await f.read())!.version,
+    override: { title: "Mon titre", tags: ["personnel"] },
+  });
+  const c = (await f.read())!;
+  const values = decode<Structure>(c.structure).collections.map((col) => ({
+    key: col.key, tag: col.key === "cats" ? "chats-d’été" : col.tag,
+  }));
+  // Apostrophes stay invalid; accented lowercase words are supported.
+  expect(validCollectionTag(values[0].tag)).toBe(false);
+  values.find((x) => x.key === "cats")!.tag = "chats-été";
+  await f.user.mutation(api.catalogues.saveTags, {
+    id: f.id, version: c.version, tagVersion: c.tagVersion,
+    values, validate: false, collect: false,
+  });
+  let detail = decode<{ data: { tags: string[] } }>(await f.user.query(api.catalogues.product, { id: f.id, productId: inherited._id }));
+  expect(detail.data.tags).toContain("cats");
+  expect(detail.data.tags).not.toContain("chats-été");
+  const draft = (await f.read())!;
+  await f.user.mutation(api.catalogues.saveTags, {
+    id: f.id, version: draft.version, tagVersion: draft.tagVersion,
+    values, validate: true, collect: false,
+  });
+  const applied = (await f.read())!;
+  expect(applied.status).toBe("ready");
+  expect(applied.generation).toBe(c.generation);
+  expect(applied.work).toBeUndefined();
+  detail = decode(await f.user.query(api.catalogues.product, { id: f.id, productId: inherited._id }));
+  expect(detail.data.tags).toEqual(["chats-été", "dogs"]);
+  const manualDetail = decode<{ data: { tags: string[]; title: string } }>(await f.user.query(api.catalogues.product, { id: f.id, productId: manual._id }));
+  expect(manualDetail.data).toMatchObject({ tags: ["personnel"], title: "Mon titre" });
+  expect((await f.t.query(internal.catalogues.byId, { id: inherited._id }))?.jsonSource).toBe(inherited.jsonSource);
+  const list = await f.user.query(api.catalogues.products, { id: f.id, search: "", state: "", collection: "", sort: "rank", paginationOpts: { cursor: null, numItems: 25 } });
+  expect(list.page.map((row) => decode<{ id: string; tags: string[] }>(row)).find((row) => row.id === inherited._id)?.tags).toEqual(detail.data.tags);
+  await f.user.mutation(api.catalogues.exportJson, { id: f.id, allowPartial: false });
+  await f.drain();
+  const exported = JSON.parse(source.exportText);
+  expect(exported.products.find((p: { url: string }) => p.url === inherited.url).data.tags).toEqual(detail.data.tags);
+});
+
+test("in-flight workers preserve saved tags and accept tag edits despite discovery progress", async () => {
+  const f = await setup();
+  const c = await f.drain(), snapshot = decode<Structure>(c.structure);
+  await f.t.run((ctx) => ctx.db.patch(f.id, {
+    status: "working", work: encode({ kind: "discover", phase: "members" }), version: c.version + 1,
+  }));
+  const fence = { id: f.id, generation: c.generation, token: "tag-worker" };
+  await f.t.mutation(internal.catalogues.claim, fence);
+  await f.user.mutation(api.catalogues.saveTags, {
+    id: f.id, version: c.version, tagVersion: c.tagVersion,
+    values: [{ key: "cats", tag: "chats" }], validate: true, collect: false,
+  });
+  await f.t.mutation(internal.catalogues.checkpoint, {
+    ...fence, structure: encode(snapshot), status: "tags",
+  });
+  const changed = (await f.read())!;
+  expect(decode<Structure>(changed.structure).collections.find((x) => x.key === "cats")).toMatchObject({ tag: "chats", validated: true });
+  await expect(f.user.mutation(api.catalogues.saveTags, {
+    id: f.id, version: changed.version, tagVersion: c.tagVersion,
+    values: [{ key: "cats", tag: "autre" }], validate: true, collect: false,
+  })).rejects.toThrow("changé");
+});
+
+test("obsolete automatic AI proposals are retried after a language change", async () => {
+  const f = await setup();
+  const c = await f.drain();
+  const snapshot = decode<Structure>(c.structure);
+  await f.t.run((ctx) => ctx.db.patch(f.id, { status: "working", work: encode({ kind: "discover", phase: "suggest" }) }));
+  const fence = { id: f.id, generation: c.generation, token: "ai-worker" };
+  await f.t.mutation(internal.catalogues.claim, fence);
+  await f.user.mutation(api.catalogues.setTagLanguage, { id: f.id, language: "fr", tagVersion: c.tagVersion! });
+  snapshot.collections[0].tag = "obsolete-english";
+  await f.t.mutation(internal.catalogues.checkpoint, {
+    ...fence, structure: encode(snapshot), status: "tags", suggestedLanguage: "en",
+  });
+  const changed = (await f.read())!;
+  expect(changed.status).toBe("working");
+  expect(changed.lease).toBeUndefined();
+  expect(decode<Structure>(changed.structure).collections[0].tag).not.toBe("obsolete-english");
+  await f.drain();
+  expect(source.tagLanguages.at(-1)).toBe("fr");
+});
+
+test("tag edits enforce ownership, normalized uniqueness, and import/export snapshot locks", async () => {
+  const f = await setup();
+  const c = await f.drain();
+  const other = f.t.withIdentity({ subject: await f.t.run((ctx) => ctx.db.insert("users", { approvalStatus: "approved" })) });
+  await expect(other.mutation(api.catalogues.setTagLanguage, { id: f.id, language: "fr", tagVersion: c.tagVersion! })).rejects.toThrow("inaccessible");
+  const values = decode<Structure>(c.structure).collections.map((col, i) => ({ key: col.key, tag: i === 0 ? "été" : i === 1 ? "e\u0301te\u0301" : col.tag }));
+  await expect(f.user.mutation(api.catalogues.saveTags, { id: f.id, version: c.version, values, validate: true, collect: false })).rejects.toThrow("plusieurs");
+  for (const kind of ["export", "import"] as const) {
+    await f.t.run((ctx) => ctx.db.patch(f.id, { status: "blocked", work: encode({ kind, phase: "setup" }) }));
+    await expect(f.user.mutation(api.catalogues.setTagLanguage, { id: f.id, language: "fr", tagVersion: c.tagVersion! })).rejects.toThrow("figés");
+    await expect(f.user.mutation(api.catalogues.saveTags, { id: f.id, version: c.version, values: [], validate: false, collect: false })).rejects.toThrow("figés");
+  }
+  for (const tag of ["été", "mocassins-femme", "plüschtiere", "ぬいぐるみ", "ألعاب"]) expect(validCollectionTag(tag)).toBe(true);
+  for (const tag of ["", "Été", "tag,tag", "-tag", "tag  tag", "a".repeat(101)]) expect(validCollectionTag(tag)).toBe(false);
+});
+
 test("worker replay merges URL discovery and does not double counters", async () => {
   const { t, id } = await setup();
   const fence = { id, generation: 1, token: "lease" };

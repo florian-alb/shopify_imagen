@@ -1,4 +1,3 @@
-import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { Doc } from "@/lib/convex";
 import {
@@ -51,6 +50,8 @@ export function JobReviewToolbar({
                     ? counts.rejected
                     : item.value === "failed"
                       ? counts.failed
+                      : item.value === "pushing"
+                        ? counts.pushing
                       : counts.pushed;
 
           return (

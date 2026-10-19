@@ -184,10 +184,11 @@ export const advance = internalAction({
     )
       return { done: true, delayMs: 0 };
     if (data.job.status !== "running") {
-      if (
-        claimed &&
-        (data.segment.phase === "recovering" || data.segment.submissionRejected)
-      ) {
+      if (data.segment.phase === "recovering" || data.segment.submissionRejected) {
+        // The last result can finish the job while another worker still owns
+        // its recovery lease. Keep the workflow alive until cleanup can claim
+        // it instead of completing successfully with a reserved global slot.
+        if (!claimed) return { done: false, delayMs: 30_000 };
         await ctx.runMutation(internal.openAiDurable.finish, {
           ...args,
           token,

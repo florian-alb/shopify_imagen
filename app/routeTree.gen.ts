@@ -20,6 +20,8 @@ import { Route as JobsIndexRouteImport } from './routes/jobs/index'
 import { Route as JobsJobIdRouteImport } from './routes/jobs/$jobId'
 import { Route as ProductsIndexRouteImport } from './routes/products/index'
 import { Route as ProductsProductIdRouteImport } from './routes/products/$productId'
+import { Route as SeoIndexRouteImport } from './routes/seo/index'
+import { Route as SeoProjectIdRouteImport } from './routes/seo/$projectId'
 import { Route as SettingsIndexRouteImport } from './routes/settings/index'
 import { Route as SettingsPromptsRouteImport } from './routes/settings/prompts'
 import { Route as GoogleFeedHistoryIndexRouteImport } from './routes/google-feed/history/index'
@@ -81,6 +83,16 @@ const ProductsProductIdRoute = ProductsProductIdRouteImport.update({
   path: '/products/$productId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SeoIndexRoute = SeoIndexRouteImport.update({
+  id: '/seo/',
+  path: '/seo/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SeoProjectIdRoute = SeoProjectIdRouteImport.update({
+  id: '/seo/$projectId',
+  path: '/seo/$projectId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SettingsIndexRoute = SettingsIndexRouteImport.update({
   id: '/settings/',
   path: '/settings/',
@@ -114,12 +126,14 @@ export interface FileRoutesByFullPath {
   '/catalog-import/$exportId': typeof CatalogImportExportIdRoute
   '/jobs/$jobId': typeof JobsJobIdRoute
   '/products/$productId': typeof ProductsProductIdRoute
+  '/seo/$projectId': typeof SeoProjectIdRoute
   '/settings/prompts': typeof SettingsPromptsRoute
   '/bulk-operations/': typeof BulkOperationsIndexRoute
   '/catalog-import/': typeof CatalogImportIndexRoute
   '/google-feed/': typeof GoogleFeedIndexRoute
   '/jobs/': typeof JobsIndexRoute
   '/products/': typeof ProductsIndexRoute
+  '/seo/': typeof SeoIndexRoute
   '/settings/': typeof SettingsIndexRoute
   '/google-feed/history/': typeof GoogleFeedHistoryIndexRoute
   '/google-feed/preview/': typeof GoogleFeedPreviewIndexRoute
@@ -132,12 +146,14 @@ export interface FileRoutesByTo {
   '/catalog-import/$exportId': typeof CatalogImportExportIdRoute
   '/jobs/$jobId': typeof JobsJobIdRoute
   '/products/$productId': typeof ProductsProductIdRoute
+  '/seo/$projectId': typeof SeoProjectIdRoute
   '/settings/prompts': typeof SettingsPromptsRoute
   '/bulk-operations': typeof BulkOperationsIndexRoute
   '/catalog-import': typeof CatalogImportIndexRoute
   '/google-feed': typeof GoogleFeedIndexRoute
   '/jobs': typeof JobsIndexRoute
   '/products': typeof ProductsIndexRoute
+  '/seo': typeof SeoIndexRoute
   '/settings': typeof SettingsIndexRoute
   '/google-feed/history': typeof GoogleFeedHistoryIndexRoute
   '/google-feed/preview': typeof GoogleFeedPreviewIndexRoute
@@ -151,12 +167,14 @@ export interface FileRoutesById {
   '/catalog-import/$exportId': typeof CatalogImportExportIdRoute
   '/jobs/$jobId': typeof JobsJobIdRoute
   '/products/$productId': typeof ProductsProductIdRoute
+  '/seo/$projectId': typeof SeoProjectIdRoute
   '/settings/prompts': typeof SettingsPromptsRoute
   '/bulk-operations/': typeof BulkOperationsIndexRoute
   '/catalog-import/': typeof CatalogImportIndexRoute
   '/google-feed/': typeof GoogleFeedIndexRoute
   '/jobs/': typeof JobsIndexRoute
   '/products/': typeof ProductsIndexRoute
+  '/seo/': typeof SeoIndexRoute
   '/settings/': typeof SettingsIndexRoute
   '/google-feed/history/': typeof GoogleFeedHistoryIndexRoute
   '/google-feed/preview/': typeof GoogleFeedPreviewIndexRoute
@@ -171,12 +189,14 @@ export interface FileRouteTypes {
     | '/catalog-import/$exportId'
     | '/jobs/$jobId'
     | '/products/$productId'
+    | '/seo/$projectId'
     | '/settings/prompts'
     | '/bulk-operations/'
     | '/catalog-import/'
     | '/google-feed/'
     | '/jobs/'
     | '/products/'
+    | '/seo/'
     | '/settings/'
     | '/google-feed/history/'
     | '/google-feed/preview/'
@@ -189,12 +209,14 @@ export interface FileRouteTypes {
     | '/catalog-import/$exportId'
     | '/jobs/$jobId'
     | '/products/$productId'
+    | '/seo/$projectId'
     | '/settings/prompts'
     | '/bulk-operations'
     | '/catalog-import'
     | '/google-feed'
     | '/jobs'
     | '/products'
+    | '/seo'
     | '/settings'
     | '/google-feed/history'
     | '/google-feed/preview'
@@ -207,12 +229,14 @@ export interface FileRouteTypes {
     | '/catalog-import/$exportId'
     | '/jobs/$jobId'
     | '/products/$productId'
+    | '/seo/$projectId'
     | '/settings/prompts'
     | '/bulk-operations/'
     | '/catalog-import/'
     | '/google-feed/'
     | '/jobs/'
     | '/products/'
+    | '/seo/'
     | '/settings/'
     | '/google-feed/history/'
     | '/google-feed/preview/'
@@ -226,12 +250,14 @@ export interface RootRouteChildren {
   CatalogImportExportIdRoute: typeof CatalogImportExportIdRoute
   JobsJobIdRoute: typeof JobsJobIdRoute
   ProductsProductIdRoute: typeof ProductsProductIdRoute
+  SeoProjectIdRoute: typeof SeoProjectIdRoute
   SettingsPromptsRoute: typeof SettingsPromptsRoute
   BulkOperationsIndexRoute: typeof BulkOperationsIndexRoute
   CatalogImportIndexRoute: typeof CatalogImportIndexRoute
   GoogleFeedIndexRoute: typeof GoogleFeedIndexRoute
   JobsIndexRoute: typeof JobsIndexRoute
   ProductsIndexRoute: typeof ProductsIndexRoute
+  SeoIndexRoute: typeof SeoIndexRoute
   SettingsIndexRoute: typeof SettingsIndexRoute
   GoogleFeedHistoryIndexRoute: typeof GoogleFeedHistoryIndexRoute
   GoogleFeedPreviewIndexRoute: typeof GoogleFeedPreviewIndexRoute
@@ -317,6 +343,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProductsProductIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/seo/': {
+      id: '/seo/'
+      path: '/seo'
+      fullPath: '/seo/'
+      preLoaderRoute: typeof SeoIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/seo/$projectId': {
+      id: '/seo/$projectId'
+      path: '/seo/$projectId'
+      fullPath: '/seo/$projectId'
+      preLoaderRoute: typeof SeoProjectIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings/': {
       id: '/settings/'
       path: '/settings'
@@ -362,12 +402,14 @@ const rootRouteChildren: RootRouteChildren = {
   CatalogImportExportIdRoute: CatalogImportExportIdRoute,
   JobsJobIdRoute: JobsJobIdRoute,
   ProductsProductIdRoute: ProductsProductIdRoute,
+  SeoProjectIdRoute: SeoProjectIdRoute,
   SettingsPromptsRoute: SettingsPromptsRoute,
   BulkOperationsIndexRoute: BulkOperationsIndexRoute,
   CatalogImportIndexRoute: CatalogImportIndexRoute,
   GoogleFeedIndexRoute: GoogleFeedIndexRoute,
   JobsIndexRoute: JobsIndexRoute,
   ProductsIndexRoute: ProductsIndexRoute,
+  SeoIndexRoute: SeoIndexRoute,
   SettingsIndexRoute: SettingsIndexRoute,
   GoogleFeedHistoryIndexRoute: GoogleFeedHistoryIndexRoute,
   GoogleFeedPreviewIndexRoute: GoogleFeedPreviewIndexRoute,

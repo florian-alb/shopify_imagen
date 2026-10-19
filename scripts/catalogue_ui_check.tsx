@@ -18,6 +18,7 @@ import {
   type CatalogProduct,
 } from "../convex/catalogue/model"
 import type { Id } from "../convex/_generated/dataModel"
+import type { TagLanguage } from "../convex/catalogue/tags"
 import raw from "../convex/catalogue/fixtures/kuscheltierland.json"
 import "../app/styles.css"
 
@@ -64,6 +65,8 @@ let catalogue = {
   work: null,
   version: 1,
   generation: 1,
+  tagLanguage: "en" as TagLanguage,
+  tagVersion: 0,
   total: 4,
   complete: 3,
   failed: 1,
@@ -279,10 +282,15 @@ const client = {
     } else if (name === "catalogues:saveTags") {
       for (const v of a.values as Array<{ key: string; tag: string }>) {
         const col = structure.collections.find((c) => c.key === v.key)!
+        if (col.validated) col.appliedTag = col.tag
         col.tag = v.tag
         col.validated = Boolean(a.validate)
+        if (col.validated) col.appliedTag = col.tag
       }
+      catalogue.tagVersion++
       if (a.collect) catalogue.status = "ready"
+    } else if (name === "catalogues:setTagLanguage") {
+      catalogue.tagLanguage = a.language as TagLanguage
     } else if (name === "catalogues:retry") {
       rows.forEach((p) => {
         p.state = "complete"
@@ -297,6 +305,7 @@ const client = {
         ...catalogue,
         mode: String(a.mode),
         topN: Number(a.topN ?? 4),
+        tagLanguage: (a.tagLanguage ?? "en") as TagLanguage,
         status: "tags",
       }
       structure.collections.forEach((c) => (c.validated = false))
@@ -310,7 +319,7 @@ const client = {
   },
   async action(ref: Parameters<typeof getFunctionName>[0]) {
     if (getFunctionName(ref) === "catalogueActions:suggestTags")
-      return structure.collections.map((c) => ({ key: c.key, tag: c.tag }))
+      return structure.collections.map((c, i) => ({ key: c.key, tag: catalogue.tagLanguage === "fr" ? ["oiseaux", "peluches", "nouveautés"][i] : c.tag }))
     throw new Error("Simulation : pas de téléchargement R2.")
   },
 } as unknown as ConvexReactClient
