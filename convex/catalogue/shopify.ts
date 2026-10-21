@@ -6,7 +6,7 @@ import { internal } from "../_generated/api"
 import type { Doc, Id } from "../_generated/dataModel"
 import { shopifyGraphql } from "../shopify/client"
 import { shopifyCredentialsForShop } from "../shopScope"
-import { REQUIRED_SHOPIFY_ADMIN_SCOPES } from "../shopify/scopes"
+import { allImportElements } from "./importSelection"
 import {
   decode,
   encode,
@@ -71,6 +71,11 @@ export async function importStep(
   })
   const credentials = shopifyCredentialsForShop(shop),
     s = decode<Structure>(c.structure)
+  const selection = w.selection ?? allImportElements
+  // Stable across retries, distinct from the next import of the same catalogue version.
+  w.generation ??= f.generation
+  const currentResult = (result: RemoteResult) =>
+    result.importGeneration === w.generation || (!w.selection && result.importGeneration === undefined)
   const request = <T>(q: string, variables: Record<string, unknown> = {}) =>
     shopifyGraphql<T>(q, variables, undefined, credentials, {
       timeoutMs: 30_000,
@@ -90,58 +95,75 @@ export async function importStep(
       productId: p._id,
       state: p.state,
       attempts: p.attempts,
-      remote: encode({ ...result, catalogueVersion: w.importVersion }),
+      remote: encode({ ...result, catalogueVersion: w.importVersion, importGeneration: w.generation }),
     })
   if (w.phase === "setup") {
     const diagnostic = await request<{
       currentAppInstallation: { accessScopes: Array<{ handle: string }> }
       shop: { currencyCode: string; primaryDomain: { url: string } }
     }>(gql.DIAGNOSTIC)
-    const missing = REQUIRED_SHOPIFY_ADMIN_SCOPES.filter(
+    const required = [
+      ...(selection.products || selection.collections ? ["write_products"] : ["read_products"]),
+      ...(selection.products ? ["write_files"] : []),
+      ...(selection.menu ? ["write_online_store_navigation"] : []),
+    ]
+    const missing = required.filter(
       (scope) =>
         !diagnostic.currentAppInstallation.accessScopes.some(
-          (x) => x.handle === scope,
+          (x) => x.handle === scope || (scope === "read_products" && x.handle === "write_products"),
         ),
     )
     if (missing.length)
       throw new Error(`Autorisations manquantes : ${missing.join(", ")}`)
-    const defs = await request<{
-      metafieldDefinitions: {
-        nodes: Array<{
-          type: { name: string }
-          capabilities: { uniqueValues: { enabled: boolean } }
-        }>
+    if (selection.products) {
+      const defs = await request<{
+        metafieldDefinitions: {
+          nodes: Array<{
+            type: { name: string }
+            capabilities: { uniqueValues: { enabled: boolean } }
+          }>
+        }
+      }>(gql.DEFINITIONS, { ownerType: "PRODUCT" })
+      if (defs.metafieldDefinitions.nodes.length) {
+        const d = defs.metafieldDefinitions.nodes[0]
+        if (d.type.name !== "id" || !d.capabilities.uniqueValues.enabled)
+          throw new Error(
+            "La définition d’identité Shopify existante est incompatible.",
+          )
+      } else {
+        const r = await request<{
+          metafieldDefinitionCreate: { userErrors: Errors }
+        }>(gql.DEFINITION, {
+          definition: {
+            name: "Source catalogue",
+            namespace: "imagen_catalog",
+            key: "source_id",
+            type: "id",
+            ownerType: "PRODUCT",
+            capabilities: { uniqueValues: { enabled: true } },
+          },
+        })
+        check(r.metafieldDefinitionCreate.userErrors)
       }
-    }>(gql.DEFINITIONS, { ownerType: "PRODUCT" })
-    if (defs.metafieldDefinitions.nodes.length) {
-      const d = defs.metafieldDefinitions.nodes[0]
-      if (d.type.name !== "id" || !d.capabilities.uniqueValues.enabled)
-        throw new Error(
-          "La définition d’identité Shopify existante est incompatible.",
-        )
-    } else {
-      const r = await request<{
-        metafieldDefinitionCreate: { userErrors: Errors }
-      }>(gql.DEFINITION, {
-        definition: {
-          name: "Source catalogue",
-          namespace: "imagen_catalog",
-          key: "source_id",
-          type: "id",
-          ownerType: "PRODUCT",
-          capabilities: { uniqueValues: { enabled: true } },
-        },
-      })
-      check(r.metafieldDefinitionCreate.userErrors)
     }
     w.domain = diagnostic.shop.primaryDomain.url
     w.currency = diagnostic.shop.currencyCode
-    w.phase = "collections"
+    w.phase = selection.collections || selection.menu ? "collections" : "products"
     w.collection = 0
     return next()
   }
   if (w.phase === "collections") {
-    const col = s.collections[w.collection ?? 0]
+    // A menu-only import resolves existing collections without creating them.
+    const needed = new Set<string>()
+    const visit = (nodes: Structure["menu"]) => {
+      for (const node of nodes) {
+        if (node.url) needed.add(decodeURIComponent(new URL(node.url, c.origin).pathname.split("/")[2]))
+        visit(node.children)
+      }
+    }
+    if (!selection.collections) visit(s.menu)
+    const collections = selection.collections ? s.collections : s.collections.filter((col) => needed.has(col.key))
+    const col = collections[w.collection ?? 0]
     if (!col) {
       w.phase = "products"
       w.collection = 0
@@ -164,6 +186,13 @@ export async function importStep(
     )
       throw new Error(`La collection ${handle} appartient à un autre import.`)
     if (!target) {
+      if (!selection.collections)
+        // This phase has only read collections; no products or menu were submitted.
+        return ctx.runMutation(internal.catalogues.checkpoint, {
+          ...f,
+          status: "partial",
+          error: `Collection absente pour le menu : ${col.title}. Préparez à nouveau l’import en sélectionnant aussi « Collections » pour la créer.`,
+        })
       const created = await request<{
         collectionCreate: { collection: Mapping | null; userErrors: Errors }
       }>(gql.COLLECTION_CREATE, {
@@ -196,6 +225,11 @@ export async function importStep(
     return next()
   }
   if (w.phase === "products") {
+    if (!selection.products) {
+      w.phase = "summary"
+      w.cursor = undefined
+      return next()
+    }
     if (w.bulk) {
       if (!w.bulk.id) {
         const recent = await request<{
@@ -297,6 +331,7 @@ export async function importStep(
         old &&
         old.shopId === w.shopId &&
         old.catalogueVersion === w.importVersion &&
+        currentResult(old) &&
         ["complete", "verifying"].includes(old.status)
       )
         continue
@@ -433,7 +468,7 @@ export async function importStep(
     })
     for (const p of page.page) {
       const r = p.remote ? decode<RemoteResult>(p.remote) : null
-      if (!r || r.shopId !== w.shopId || !r.id || r.status === "failed")
+      if (!r || !currentResult(r) || r.shopId !== w.shopId || !r.id || r.status === "failed")
         continue
       const data = effective(
         { ...decode<CatalogProduct>(p.data!), collections: p.collections },
@@ -469,7 +504,7 @@ export async function importStep(
           })
           continue
         }
-        const expected = s.collections
+        const expected = (selection.collections ? s.collections : [])
           .filter((x) => data.tags.includes(x.tag))
           .map((x) => w.mappings?.[x.key]?.id)
         const waiting =
@@ -490,7 +525,7 @@ export async function importStep(
               value.media.nodes.length < data.images.length)) ||
           value.media.nodes.some((m) => m.status === "FAILED") ||
           value.media.pageInfo.hasNextPage ||
-          value.collections.pageInfo.hasNextPage ||
+          (selection.collections && value.collections.pageInfo.hasNextPage) ||
           waiting ||
           data.tags.some((t) => !value.tags.includes(t))
         await remote(p, {
@@ -559,6 +594,10 @@ export async function importStep(
       created: 0,
       existing: 0,
     }
+    if (!selection.products) {
+      w.phase = "finish"
+      return next()
+    }
     const page: Page = await ctx.runQuery(internal.catalogues.page, {
       id: c._id,
       selected: true,
@@ -571,7 +610,7 @@ export async function importStep(
         decode<{ excluded?: boolean }>(p.override ?? "{}").excluded
       )
         w.summary.skipped++
-      else if (r && r.shopId === w.shopId && r.status === "complete") {
+      else if (r && currentResult(r) && r.shopId === w.shopId && r.status === "complete") {
         w.summary.complete++
         if (r.created) w.summary.created++
         else w.summary.existing++
@@ -582,23 +621,27 @@ export async function importStep(
     return next()
   }
   if (w.phase === "finish") {
-    const handle = `imagen-catalogue-${c._id}-v${w.importVersion}`,
-      found = await request<{ menus: { nodes: Mapping[] } }>(gql.MENUS, {
-        query: `handle:${handle}`,
-      })
-    let menu = found.menus.nodes.find((x) => x.handle === handle)
-    if (!menu) {
-      const created = await request<{
-        menuCreate: { menu: Mapping | null; userErrors: Errors }
-      }>(gql.MENU_CREATE, {
-        title: `Catalogue ${new URL(c.origin).hostname}`,
-        handle,
-        items: targetMenu(s, w.mappings ?? {}, c.origin),
-      })
-      check(created.menuCreate.userErrors)
-      menu = created.menuCreate.menu ?? undefined
+    let menuId: string | undefined
+    if (selection.menu) {
+      const handle = `imagen-catalogue-${c._id}-v${w.importVersion}`,
+        found = await request<{ menus: { nodes: Mapping[] } }>(gql.MENUS, {
+          query: `handle:${handle}`,
+        })
+      let menu = found.menus.nodes.find((x) => x.handle === handle)
+      if (!menu) {
+        const created = await request<{
+          menuCreate: { menu: Mapping | null; userErrors: Errors }
+        }>(gql.MENU_CREATE, {
+          title: `Catalogue ${new URL(c.origin).hostname}`,
+          handle,
+          items: targetMenu(s, w.mappings ?? {}, c.origin),
+        })
+        check(created.menuCreate.userErrors)
+        menu = created.menuCreate.menu ?? undefined
+      }
+      if (!menu) throw new Error("Création du menu non confirmée.")
+      menuId = menu.id
     }
-    if (!menu) throw new Error("Création du menu non confirmée.")
     await ctx.runMutation(internal.catalogues.checkpoint, {
       ...f,
       structure: encode(s),
@@ -608,7 +651,9 @@ export async function importStep(
         shopId: w.shopId,
         domain: w.domain,
         version: w.importVersion,
-        menuId: menu.id,
+        selection,
+        collections: selection.collections ? s.collections.length : 0,
+        ...(menuId ? { menuId } : {}),
         completedAt: Date.now(),
       }),
     })

@@ -1,6 +1,7 @@
 import { getConvexSize } from "convex/values"
 import type { CatalogProduct, MenuNode, ProductOverride } from "./source"
 import { normalizeTag, validCollectionTag } from "./tags"
+import type { ImportSelection } from "./importSelection"
 export type { CatalogProduct, MenuNode, ProductOverride } from "./source"
 
 export type Collection = {
@@ -44,6 +45,7 @@ export type Work = {
   retryAt?: number
   shopId?: string
   importVersion?: number
+  selection?: ImportSelection
   domain?: string
   currency?: string
   mappings?: Record<string, { id: string; handle: string }>
@@ -81,6 +83,7 @@ export type RemoteResult = {
   created?: boolean
   startedAt?: number
   catalogueVersion?: number
+  importGeneration?: number
 }
 export const emptyStructure = (): Structure => ({
   menu: [],

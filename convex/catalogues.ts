@@ -15,6 +15,8 @@ import { internal } from "./_generated/api"
 import type { Doc, Id } from "./_generated/dataModel"
 import { requireUserId } from "./authz"
 import { sourceOrigin } from "./catalogue/source"
+import { productCsv } from "./catalogue/csv"
+import { allImportElements, hasImportElements } from "./catalogue/importSelection"
 import { normalizeTag, tagLanguageValidator } from "./catalogue/tags"
 import {
   decode,
@@ -449,6 +451,49 @@ export const restartCollection = internalMutation({
     return null
   },
 })
+export const exportCsvPage = query({
+  args: {
+    id: v.id("catalogues"),
+    version: v.number(),
+    generation: v.number(),
+    allowPartial: v.boolean(),
+    cursor: v.union(v.string(), v.null()),
+  },
+  returns: v.object({
+    products: v.array(v.string()),
+    scanned: v.number(),
+    skipped: v.number(),
+    isDone: v.boolean(),
+    continueCursor: v.string(),
+  }),
+  handler: async (ctx, a) => {
+    const c = await owned(ctx, a.id)
+    if (c.work) throw new Error("Attendez la fin du traitement avant d’exporter le CSV.")
+    if (c.version !== a.version || c.generation !== a.generation)
+      throw new Error("Le catalogue a changé pendant l’export CSV. Relancez l’export.")
+    partial(c, a.allowPartial)
+    const structure = decode<Structure>(c.structure)
+    const page = await ctx.db.query("produits")
+      .withIndex("by_catalogue_group", (q) => q.eq("catalogueId", c._id).eq("selected", true))
+      .paginate({ cursor: a.cursor, numItems: 20, maximumRowsRead: 20, maximumBytesRead: 2_000_000 })
+    const products = page.page.flatMap((p) => {
+      if (p.state !== "complete" || !p.data || p.aliasOf) return []
+      const csv = productCsv(effective(
+        { ...decode<CatalogProduct>(p.data), collections: p.collections },
+        structure,
+        decode<ProductOverride>(p.override ?? "{}"),
+      ), p.jsonSource)
+      return csv ? [csv] : []
+    })
+    return {
+      products,
+      scanned: page.page.length,
+      skipped: page.page.length - products.length,
+      isDone: page.isDone,
+      continueCursor: page.continueCursor,
+    }
+  },
+})
 export const exportJson = mutation({
   args: { id: v.id("catalogues"), allowPartial: v.boolean() },
   returns: v.null(),
@@ -484,11 +529,15 @@ export const startImport = mutation({
     shopId: v.id("shops"),
     allowPartial: v.boolean(),
     version: v.number(),
+    selection: v.optional(v.object({ products: v.boolean(), collections: v.boolean(), menu: v.boolean() })),
   },
   returns: v.null(),
   handler: async (ctx, a) => {
     const c = await owned(ctx, a.id)
     unlocked(c)
+    const selection = a.selection ?? allImportElements
+    if (!hasImportElements(selection))
+      throw new Error("Choisissez au moins un élément à importer.")
     partial(c, a.allowPartial)
     if (c.version !== a.version)
       throw new Error("Le catalogue a changé. Préparez à nouveau l’import.")
@@ -520,6 +569,7 @@ export const startImport = mutation({
       phase: "setup",
       shopId: a.shopId,
       importVersion: c.version,
+      selection,
       allowPartial: a.allowPartial,
       mappings: {},
     })

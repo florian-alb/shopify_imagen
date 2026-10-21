@@ -203,6 +203,78 @@ async function setup(mode: "ALL" | "TOP_N" = "ALL", topN?: number, tagLanguage?:
   };
   return { t, user, id, owner, read, drain, validate };
 }
+test("CSV enforces authentication, ownership, partial acknowledgement and a stable catalogue", async () => {
+  const f = await setup();
+  let c = (await f.read())!;
+  const request = () => ({ id: f.id, version: c.version, generation: c.generation, allowPartial: true, cursor: null });
+  await expect(f.user.query(api.catalogues.exportCsvPage, request())).rejects.toThrow("fin du traitement");
+  await f.drain();
+  c = (await f.read())!;
+  await expect(f.t.query(api.catalogues.exportCsvPage, request())).rejects.toThrow();
+  const other = f.t.withIdentity({ subject: await f.t.run((ctx) => ctx.db.insert("users", { approvalStatus: "approved" })) });
+  await expect(other.query(api.catalogues.exportCsvPage, request())).rejects.toThrow("inaccessible");
+  await expect(f.user.query(api.catalogues.exportCsvPage, { ...request(), allowPartial: false })).rejects.toThrow("incomplet");
+  await f.validate();
+  await f.drain();
+  c = (await f.read())!;
+  await expect(f.user.query(api.catalogues.exportCsvPage, { ...request(), version: c.version - 1 })).rejects.toThrow("a changé");
+  await expect(f.user.query(api.catalogues.exportCsvPage, { ...request(), generation: c.generation - 1 })).rejects.toThrow("a changé");
+});
+
+test("CSV exports effective values and skips excluded, failed, unselected and alias rows", async () => {
+  const f = await setup();
+  await f.drain();
+  await f.validate();
+  await f.drain();
+  const page = await f.t.query(internal.catalogues.page, { id: f.id, selected: true });
+  const manual = page.page.find((p) => p.handle === "b")!;
+  const excluded = page.page.find((p) => p.handle === "a")!;
+  await f.user.mutation(api.catalogues.saveProduct, { id: f.id, productId: manual._id, version: (await f.read())!.version, override: { title: "Titre manuel", tags: ["été"] } });
+  await f.user.mutation(api.catalogues.saveProduct, { id: f.id, productId: excluded._id, version: (await f.read())!.version, override: { excluded: true } });
+  await f.t.run(async (ctx) => {
+    await ctx.db.patch(page.page.find((p) => p.handle === "c")!._id, { state: "failed" });
+    await ctx.db.patch(page.page.find((p) => p.handle === "d")!._id, { selected: false });
+    const { _id, _creationTime, ...copy } = manual;
+    void _creationTime;
+    await ctx.db.insert("produits", { ...copy, handle: "alias", identity: "alias", aliasOf: _id });
+  });
+  const c = (await f.read())!;
+  const result = await f.user.query(api.catalogues.exportCsvPage, { id: f.id, version: c.version, generation: c.generation, allowPartial: true, cursor: null });
+  expect(result).toMatchObject({ scanned: 4, skipped: 3, isDone: true });
+  expect(result.products).toHaveLength(1);
+  expect(result.products[0]).toContain("Titre manuel,b,");
+  expect(result.products[0]).toContain(",été,FALSE,draft,");
+  expect((await f.read())!.exportKey).toBeUndefined();
+});
+
+test("CSV paginates beyond empty batches and refuses a changed version between pages", async () => {
+  const f = await setup();
+  await f.drain();
+  await f.validate();
+  await f.drain();
+  const page = await f.t.query(internal.catalogues.page, { id: f.id, selected: true });
+  await f.t.run(async (ctx) => {
+    const { _id, _creationTime, ...copy } = page.page[0];
+    void _id; void _creationTime;
+    for (let i = 0; i < 45; i++) await ctx.db.insert("produits", { ...copy, handle: `extra-${i}`, identity: `extra-${i}`, state: i < 40 ? "failed" : "complete" });
+  });
+  const c = (await f.read())!;
+  const args = { id: f.id, version: c.version, generation: c.generation, allowPartial: true };
+  let cursor: string | null = null, scanned = 0, exported = 0;
+  do {
+    const result: { scanned: number; products: string[]; isDone: boolean; continueCursor: string } = await f.user.query(api.catalogues.exportCsvPage, { ...args, cursor });
+    expect(result.scanned).toBeLessThanOrEqual(20);
+    scanned += result.scanned;
+    exported += result.products.length;
+    if (result.isDone) break;
+    cursor = result.continueCursor;
+  } while (cursor !== null);
+  expect(scanned).toBe(49);
+  expect(exported).toBe(9);
+  await f.user.mutation(api.catalogues.saveProduct, { id: f.id, productId: page.page[0]._id, version: c.version, override: { title: "Modifié" } });
+  await expect(f.user.query(api.catalogues.exportCsvPage, { ...args, cursor })).rejects.toThrow("a changé");
+});
+
 test("Top N is global, paginated, deduplicated, and never downloads unselected fiches", async () => {
   const { t, id, drain, validate } = await setup("TOP_N", 3);
   const c = await drain(),
