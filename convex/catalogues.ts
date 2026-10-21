@@ -16,6 +16,7 @@ import type { Doc, Id } from "./_generated/dataModel"
 import { requireUserId } from "./authz"
 import { sourceOrigin } from "./catalogue/source"
 import { productCsv } from "./catalogue/csv"
+import { allImportElements, hasImportElements } from "./catalogue/importSelection"
 import { normalizeTag, tagLanguageValidator } from "./catalogue/tags"
 import {
   decode,
@@ -528,11 +529,15 @@ export const startImport = mutation({
     shopId: v.id("shops"),
     allowPartial: v.boolean(),
     version: v.number(),
+    selection: v.optional(v.object({ products: v.boolean(), collections: v.boolean(), menu: v.boolean() })),
   },
   returns: v.null(),
   handler: async (ctx, a) => {
     const c = await owned(ctx, a.id)
     unlocked(c)
+    const selection = a.selection ?? allImportElements
+    if (!hasImportElements(selection))
+      throw new Error("Choisissez au moins un élément à importer.")
     partial(c, a.allowPartial)
     if (c.version !== a.version)
       throw new Error("Le catalogue a changé. Préparez à nouveau l’import.")
@@ -564,6 +569,7 @@ export const startImport = mutation({
       phase: "setup",
       shopId: a.shopId,
       importVersion: c.version,
+      selection,
       allowPartial: a.allowPartial,
       mappings: {},
     })

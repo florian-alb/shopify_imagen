@@ -20,6 +20,7 @@ import {
 import type { Id } from "../convex/_generated/dataModel"
 import type { TagLanguage } from "../convex/catalogue/tags"
 import { productCsv } from "../convex/catalogue/csv"
+import { allImportElements, hasImportElements, type ImportSelection } from "../convex/catalogue/importSelection"
 import raw from "../convex/catalogue/fixtures/kuscheltierland.json"
 import "../app/styles.css"
 
@@ -324,8 +325,18 @@ const client = {
         status: "tags",
       }
       structure.collections.forEach((c) => (c.validated = false))
-    } else if (name === "catalogues:startImport")
-      throw new Error("Simulation : aucun import Shopify réel n’est exécuté.")
+    } else if (name === "catalogues:startImport") {
+      const selection = (a.selection ?? allImportElements) as ImportSelection
+      if (!hasImportElements(selection)) throw new Error("Choisissez au moins un élément à importer.")
+      const complete = selection.products ? rows.filter((p) => p.state === "complete" && !p.override.excluded).length : 0
+      catalogue.lastImport = {
+        domain: "fixture.myshopify.com", selection,
+        collections: selection.collections ? structure.collections.length : 0,
+        ...(selection.menu ? { menuId: "fixture-menu" } : {}),
+        complete, created: complete, existing: 0, failed: 0,
+        skipped: selection.products ? rows.length - complete : 0,
+      }
+    }
     else if (name !== "catalogues:addCollection")
       throw new Error(`Unsupported fixture mutation: ${name}`)
     catalogue.version++

@@ -22,6 +22,7 @@ import type * as catalogue_ai from "../catalogue/ai.js";
 import type * as catalogue_csv from "../catalogue/csv.js";
 import type * as catalogue_extract from "../catalogue/extract.js";
 import type * as catalogue_graphql from "../catalogue/graphql.js";
+import type * as catalogue_importSelection from "../catalogue/importSelection.js";
 import type * as catalogue_model from "../catalogue/model.js";
 import type * as catalogue_navigation from "../catalogue/navigation.js";
 import type * as catalogue_network from "../catalogue/network.js";
@@ -145,6 +146,7 @@ declare const fullApi: ApiFromModules<{
   "catalogue/csv": typeof catalogue_csv;
   "catalogue/extract": typeof catalogue_extract;
   "catalogue/graphql": typeof catalogue_graphql;
+  "catalogue/importSelection": typeof catalogue_importSelection;
   "catalogue/model": typeof catalogue_model;
   "catalogue/navigation": typeof catalogue_navigation;
   "catalogue/network": typeof catalogue_network;

@@ -1,12 +1,14 @@
 /// <reference types="vite/client" />
 import { convexTest } from "convex-test"
+import { createHash } from "node:crypto"
 import { beforeEach, afterEach, expect, test, vi } from "vitest"
 import schema from "../schema"
-import { internal } from "../_generated/api"
+import { api, internal } from "../_generated/api"
 import { extractProduct } from "./extract"
 import { encode, decode, type Work, type RemoteResult } from "./model"
 import { productInput } from "./shopifyModel"
 import { REQUIRED_SHOPIFY_ADMIN_SCOPES } from "../shopify/scopes"
+import type { ImportSelection } from "./importSelection"
 
 const remote = vi.hoisted(() => ({
   calls: [] as Array<{ query: string; variables: Record<string, unknown> }>,
@@ -18,6 +20,9 @@ const remote = vi.hoisted(() => ({
   uploads: [] as string[],
   tags: ["merchant-manual"],
   failedMedia: false,
+  collectionExists: false,
+  membershipMissing: false,
+  scopes: [] as string[],
 }))
 vi.mock("../shopify/client", () => ({
   shopifyGraphql: async (query: string, variables: Record<string, unknown>) => {
@@ -25,7 +30,7 @@ vi.mock("../shopify/client", () => ({
     if (query.includes("CatalogImportDiagnostic"))
       return {
         currentAppInstallation: {
-          accessScopes: REQUIRED_SHOPIFY_ADMIN_SCOPES.map((handle) => ({
+          accessScopes: remote.scopes.map((handle) => ({
             handle,
           })),
         },
@@ -46,7 +51,11 @@ vi.mock("../shopify/client", () => ({
         },
       }
     if (query.includes("CatalogImportCollections"))
-      return { collections: { nodes: [] } }
+      return { collections: { nodes: remote.collectionExists ? [{
+        id: "gid://shopify/Collection/10",
+        handle: String(variables.query).slice("handle:".length),
+        metafield: { value: `source.example:cats:${createHash("sha256").update(JSON.stringify([["cat"], "all"])).digest("hex")}` },
+      }] : [] } }
     if (query.includes("CatalogImportCollection("))
       return {
         collectionCreate: {
@@ -124,7 +133,7 @@ vi.mock("../shopify/client", () => ({
             pageInfo: { hasNextPage: false },
           },
           collections: {
-            nodes: [{ id: "gid://shopify/Collection/10" }],
+            nodes: remote.membershipMissing ? [] : [{ id: "gid://shopify/Collection/10" }],
             pageInfo: { hasNextPage: false },
           },
         },
@@ -174,6 +183,9 @@ beforeEach(() => {
     uploads: [],
     tags: ["merchant-manual"],
     failedMedia: false,
+    collectionExists: false,
+    membershipMissing: false,
+    scopes: [...REQUIRED_SHOPIFY_ADMIN_SCOPES],
   })
   vi.stubGlobal(
     "fetch",
@@ -189,7 +201,7 @@ afterEach(() => {
   vi.useRealTimers()
   vi.unstubAllGlobals()
 })
-async function fixture() {
+async function fixture(selection?: ImportSelection) {
   const t = convexTest(schema, modules)
   const seeded = await t.run(async (ctx) => {
     const owner = await ctx.db.insert("users", { approvalStatus: "approved" }),
@@ -247,6 +259,7 @@ async function fixture() {
         phase: "setup",
         shopId,
         importVersion: 1,
+        ...(selection ? { selection } : {}),
         mappings: {},
       }),
       generation: 1,
@@ -285,7 +298,7 @@ async function fixture() {
       data: encode(data),
       inSitemap: true,
     })
-    return { id, productId, shopId }
+    return { id, productId, shopId, owner }
   })
   const run = async () => {
     for (let n = 0; n < 50; n++) {
@@ -295,13 +308,108 @@ async function fixture() {
       if (w.retryAt) vi.setSystemTime(w.retryAt + 1)
       await t.action(internal.catalogueActions.work, {
         id: c._id,
-        generation: 1,
+        generation: c.generation,
       })
     }
     throw new Error("did not finish")
   }
   return { t, ...seeded, run }
 }
+test.each([
+  { products: true, collections: false, menu: false },
+  { products: false, collections: true, menu: false },
+  { products: false, collections: false, menu: true },
+  { products: true, collections: true, menu: false },
+  { products: true, collections: false, menu: true },
+  { products: false, collections: true, menu: true },
+  { products: true, collections: true, menu: true },
+])("imports only the selected elements: %j", async (selection) => {
+  remote.collectionExists = !selection.collections
+  remote.membershipMissing = !selection.collections
+  remote.scopes = [
+    selection.products || selection.collections ? "write_products" : "read_products",
+    ...(selection.products ? ["write_files"] : []),
+    ...(selection.menu ? ["write_online_store_navigation"] : []),
+  ]
+  const f = await fixture(selection)
+  const c = await f.run()
+  expect(c.work).toBeUndefined()
+  expect(c.error).toBeUndefined()
+  const result = decode<{ selection: ImportSelection; complete: number; failed: number; collections: number; menuId?: string }>(c.lastImport!)
+  expect(result.selection).toEqual(selection)
+  expect(result.complete).toBe(selection.products ? 1 : 0)
+  expect(result.failed).toBe(0)
+  expect(result.collections).toBe(selection.collections ? 1 : 0)
+  expect(Boolean(result.menuId)).toBe(selection.menu)
+  expect(remote.calls.some((call) => call.query.includes("CatalogImportCollection("))).toBe(selection.collections)
+  expect(remote.calls.some((call) => call.query.includes("CatalogImportMenu("))).toBe(selection.menu)
+  expect(remote.uploads.length).toBe(selection.products ? 1 : 0)
+  const product = await f.t.query(internal.catalogues.byId, { id: f.productId })
+  if (!selection.products) {
+    expect(product?.remote).toBeUndefined()
+    expect(remote.calls.some((call) => /CatalogImport(?:Definitions|Definition\(|FindProduct|Tags|Upload|Bulk|Verify|Description)/.test(call.query))).toBe(false)
+  } else expect(decode<RemoteResult>(product!.remote!).status).toBe("complete")
+})
+
+test("menu without collections stops before writing if a destination collection is missing, and releases the lock", async () => {
+  const f = await fixture({ products: true, collections: false, menu: true })
+  const c = await f.run()
+  expect(c.status).toBe("partial")
+  expect(c.work).toBeUndefined()
+  expect(c.error).toContain("Collection absente pour le menu")
+  expect(remote.uploads).toHaveLength(0)
+  expect(remote.calls.some((call) => /CatalogImport(?:Collection\(|Menu\(|FindProduct|Bulk\()/.test(call.query))).toBe(false)
+  await f.t.withIdentity({ subject: f.owner }).mutation(api.catalogues.startImport, {
+    id: f.id, shopId: f.shopId, version: c.version, allowPartial: false,
+    selection: { products: true, collections: true, menu: true },
+  })
+  const retried = await f.run()
+  expect(retried.work).toBeUndefined()
+  expect(retried.error).toBeUndefined()
+  expect(decode<{ complete: number }>(retried.lastImport!).complete).toBe(1)
+})
+
+test("selection is validated and frozen by the public mutation, then retained on a blocked retry", async () => {
+  const f = await fixture()
+  await f.t.run((ctx) => ctx.db.patch(f.id, { status: "ready", work: undefined }))
+  const user = f.t.withIdentity({ subject: f.owner })
+  const args = { id: f.id, shopId: f.shopId, version: 1, allowPartial: false }
+  await expect(user.mutation(api.catalogues.startImport, { ...args, selection: { products: false, collections: false, menu: false } })).rejects.toThrow("au moins un")
+  const other = f.t.withIdentity({ subject: await f.t.run((ctx) => ctx.db.insert("users", { approvalStatus: "approved" })) })
+  await expect(other.mutation(api.catalogues.startImport, { ...args, selection: { products: true, collections: false, menu: false } })).rejects.toThrow("inaccessible")
+  const selection = { products: true, collections: false, menu: false }
+  await user.mutation(api.catalogues.startImport, { ...args, selection })
+  const c = (await f.t.query(internal.catalogues.context, { id: f.id }))!
+  expect(decode<Work>(c.work!).selection).toEqual(selection)
+  remote.uncertain = remote.unreconciled = true
+  const blocked = await f.run()
+  expect(blocked.status).toBe("blocked")
+  expect(decode<Work>(blocked.work!).selection).toEqual(selection)
+  await user.mutation(api.catalogues.retry, { id: f.id })
+  const retried = (await f.t.query(internal.catalogues.context, { id: f.id }))!
+  expect(decode<Work>(retried.work!).selection).toEqual(selection)
+})
+
+test("a subsequent import with collections rechecks products without reusing the previous run's result", async () => {
+  const f = await fixture({ products: true, collections: false, menu: false })
+  remote.membershipMissing = true
+  const first = await f.run()
+  expect(decode<{ created: number }>(first.lastImport!).created).toBe(1)
+  const checks = remote.calls.filter((call) => call.query.includes("CatalogImportVerify")).length
+  remote.membershipMissing = false
+  await f.t.withIdentity({ subject: f.owner }).mutation(api.catalogues.startImport, {
+    id: f.id, shopId: f.shopId, version: first.version, allowPartial: false,
+    selection: { products: true, collections: true, menu: false },
+  })
+  const second = await f.run()
+  expect(second.work).toBeUndefined()
+  expect(remote.calls.filter((call) => call.query.includes("CatalogImportVerify"))).toHaveLength(checks + 1)
+  expect(remote.uploads).toHaveLength(1)
+  expect(decode<{ created: number; existing: number }>(second.lastImport!)).toMatchObject({ created: 0, existing: 1 })
+  const product = await f.t.query(internal.catalogues.byId, { id: f.productId })
+  expect(decode<RemoteResult>(product!.remote!).importGeneration).toBe(second.generation)
+})
+
 test("creates drafts through a bounded bulk, retains source ID tuple and verifies result before menu", async () => {
   const f = await fixture(),
     c = await f.run()

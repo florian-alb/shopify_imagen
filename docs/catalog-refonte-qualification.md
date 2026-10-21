@@ -100,6 +100,15 @@ Deux réponses MCP perdues ont conduit à vérifier l’état et continuer avec 
 
 Cette preuve navigateur utilise le client Convex en mémoire du banc UI. Elle ne constitue pas un parcours authentifié sur le déploiement réel ni une validation de l’importeur Shopify ; aucun import Shopify réel n’a été lancé. Le découpage volumineux et les changements concurrents sont qualifiés par tests, pas par une exportation réseau de plusieurs milliers de produits.
 
+## Choix des éléments Shopify — 21 octobre 2026
+
+- **586 tests réussis, 74 fichiers**. Dix nouveaux cas couvrent les sept combinaisons non vides, la sélection vide refusée, l’ownership, la persistance du choix lors d’une soumission incertaine/reprise et l’arrêt sans création quand un menu demandé sans collections ne trouve pas sa destination. La préparation peut ensuite être relancée avec Collections cochées. Un import successif à la même version revérifie les appartenances sans recréer les produits. Les tests utilisent des permissions adaptées à chaque combinaison et vérifient l’absence d’appels aux mutations non sélectionnées. Les anciens tests sans `selection` conservent l’import complet.
+- `npm run typecheck`, `npx tsc --noEmit -p convex/tsconfig.json`, `npm run check:convex-contract` et `npm run build` réussis. Lint : zéro erreur, 67 avertissements existants hors des fichiers modifiés ; avertissement de taille des chunks conservé.
+- Banc navigateur isolé : trois cases accessibles cochées par défaut, choix Produits seul, résumé mis à jour, sélection vide bloquée, confirmation vers la boutique fictive et bilan sans annonce de collections/menu. Aucun message console de niveau erreur observé. Le banc utilise un client Convex en mémoire et n’exécute aucun import Shopify réel.
+- `npx convex dev --once` réussi sur **dev curious-greyhound-437**, y compris le contrôle des imports successifs. Aucune migration de schéma ni modification de production.
+
+Ces contrôles ne constituent pas un import réel ou un E2E authentifié. Les protections de réconciliation des soumissions incertaines restent actives.
+
 ## Limites restant à qualifier
 
 Évolution du 16 octobre 2026 : le lecteur de navigation est partagé avec le module SEO via un mode optionnel de `extractMenu`. Le mode catalogue garde sa garde Shopify et sa projection de collections. Les tests ciblés de navigation, observations SEO et catalogue passent (36 cas), notamment les sous-menus Shopware imbriqués et les doublons desktop/mobile. Le HTML public Small Foot fourni pour le test SEO permet de vérifier 157 nœuds hiérarchiques. Cette preuve d’extraction ne constitue pas une nouvelle collecte catalogue, un import Shopify ou un E2E catalogue authentifié ; les limites ci-dessous restent applicables.

@@ -20,6 +20,8 @@ import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { TagLanguageSelect } from "./TagLanguageSelect"
 import { CatalogCsvExport } from "./CatalogCsvExport"
+import { ImportConfirmation } from "./ImportConfirmation"
+import type { ImportSelection } from "../../../../convex/catalogue/importSelection"
 import { tagLanguages, normalizeTag, validCollectionTag, type TagLanguage } from "../../../../convex/catalogue/tags"
 import {
   Dialog,
@@ -46,7 +48,9 @@ type Catalogue = Omit<
   work: Work | null
   lastImport: {
     domain: string
-    menuId: string
+    menuId?: string
+    selection?: ImportSelection
+    collections?: number
     complete: number
     failed: number
     skipped: number
@@ -280,12 +284,19 @@ function Workspace({ c }: { c: Catalogue }) {
         {c.lastImport && (
           <div className="mt-4">
             <Notice>
-              Import traité vers {c.lastImport.domain} : {c.lastImport.complete}{" "}
-              réussites ({c.lastImport.created} créations,{" "}
-              {c.lastImport.existing} produits existants), {c.lastImport.failed}{" "}
-              échecs, {c.lastImport.skipped} fiches non importées. Consultez le
-              résultat de chaque fiche. Produits créés en brouillon ; menu non
-              affecté au thème.
+              Import traité vers {c.lastImport.domain}.{" "}
+              {c.lastImport.selection?.products !== false && (
+                <>
+                  {c.lastImport.complete} réussites ({c.lastImport.created} créations,{" "}
+                  {c.lastImport.existing} produits existants), {c.lastImport.failed}{" "}
+                  échecs, {c.lastImport.skipped} fiches non importées. Consultez le
+                  résultat de chaque fiche. Produits créés en brouillon.{" "}
+                </>
+              )}
+              {c.lastImport.collections !== undefined && c.lastImport.collections > 0 && (
+                <>{c.lastImport.collections} collections traitées. </>
+              )}
+              {c.lastImport.menuId && "Menu créé, non affecté au thème."}
             </Notice>
           </div>
         )}
@@ -405,16 +416,16 @@ function Workspace({ c }: { c: Catalogue }) {
         open={dialog !== null}
         onOpenChange={(open) => !open && setDialog(null)}
       >
-        <DialogContent className="sm:max-w-xl">
+        <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>
               {dialog === "export"
                 ? "Exporter ce catalogue incomplet"
-                : "Préparer l’import Shopify"}
+                : "Importer vers Shopify"}
             </DialogTitle>
             <DialogDescription>
               {c.total} produits · {c.structure.collections.length} collections
-              · {c.complete} fiches complètes
+              {dialog === "export" && <> · {c.complete} fiches complètes</>}
             </DialogDescription>
           </DialogHeader>
           {dialog === "export" ? (
@@ -443,7 +454,8 @@ function Workspace({ c }: { c: Catalogue }) {
             </>
           ) : dialog === "import" ? (
             <ImportConfirmation
-              c={c}
+              id={c._id}
+              version={c.version}
               partial={partial}
               close={() => setDialog(null)}
             />
@@ -1362,98 +1374,5 @@ function MenuTree({
         </li>
       ))}
     </ul>
-  )
-}
-function ImportConfirmation({
-  c,
-  partial,
-  close,
-}: {
-  c: Catalogue
-  partial: boolean
-  close: () => void
-}) {
-  const raw = useQuery(api.catalogues.destinationShops),
-    shops: Array<{ id: Id<"shops">; name?: string; domain: string }> = raw
-      ? decode(raw)
-      : [],
-    start = useMutation(api.catalogues.startImport)
-  const [shopId, setShopId] = useState(""),
-    [accepted, setAccepted] = useState(false),
-    [error, setError] = useState(""),
-    [busy, setBusy] = useState(false)
-  return (
-    <div className="space-y-4">
-      <label className="grid gap-2 text-sm">
-        Boutique de destination
-        <select
-          className={selectClass}
-          value={shopId}
-          onChange={(e) => setShopId(e.target.value)}
-        >
-          <option value="">Choisir une boutique</option>
-          {shops.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name || s.domain} · {s.domain}
-            </option>
-          ))}
-        </select>
-      </label>
-      <ul className="list-disc space-y-2 pl-5 text-sm">
-        <li>
-          Toutes les collections, y compris vides, avec une règle par tag.
-        </li>
-        <li>
-          {c.complete} fiches complètes ; exclusions manuelles respectées.{" "}
-          {c.total - c.complete} fiches incomplètes exclues.
-        </li>
-        <li>Créations et objets existants : à vérifier lors de l’import.</li>
-        <li>Produits créés en brouillon. Tags manuels existants conservés.</li>
-        <li>
-          Menu séparé, non affecté au thème. Aucune publication automatique.
-        </li>
-      </ul>
-      {partial && (
-        <label className="flex items-start gap-2 text-sm">
-          <input
-            type="checkbox"
-            className="mt-1"
-            checked={accepted}
-            onChange={(e) => setAccepted(e.target.checked)}
-          />
-          J’accepte d’importer ce catalogue incomplet.
-        </label>
-      )}
-      {error && (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      )}
-      <p className="text-sm font-medium">
-        Destination :{" "}
-        {shops.find((s) => s.id === shopId)?.domain ?? "Non choisie"}
-      </p>
-      <Button
-        disabled={!shopId || (partial && !accepted) || busy}
-        onClick={async () => {
-          setBusy(true)
-          try {
-            await start({
-              id: c._id,
-              shopId: shopId as Id<"shops">,
-              allowPartial: accepted,
-              version: c.version,
-            })
-            close()
-          } catch (e) {
-            setError(e instanceof Error ? e.message : "Import impossible.")
-          } finally {
-            setBusy(false)
-          }
-        }}
-      >
-        Confirmer l’import
-      </Button>
-    </div>
   )
 }
