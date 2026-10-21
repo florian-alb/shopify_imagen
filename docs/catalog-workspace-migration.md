@@ -16,6 +16,8 @@ Les anciennes opérations ne sont pas converties, rejouées ou affichées dans l
 
 La demande « reprendre là où ça a fail » remplace « Tout recommencer ». Une relance conserve les réussites, corrections et JSON intacts. Une soumission Shopify incertaine reste verrouillée jusqu’à réconciliation. Une opération partielle peut être exportée après acceptation, tout en conservant le point de reprise de sa collecte.
 
+Ajout du 21 octobre 2026 : l’export CSV Shopify ne nécessite aucune migration de données ni modification du stockage R2. Il lit les deux tables courantes par pages authentifiées, refuse tout travail actif ou bloqué et vérifie version/génération entre les pages. L’export JSON reste le chemin de sauvegarde complet, y compris pour les erreurs et les informations absentes ; le CSV contient seulement les fiches complètes non exclues.
+
 ## Production et retour arrière
 
 La production n’a pas reçu cette refonte ni ce nettoyage. Toute transition future exige un nouvel inventaire, une décision explicite sur ses données et un déploiement adapté ; **ne pas pousser aveuglément ce retrait de schéma en production**. L’autorisation dev de cette session n’est pas réutilisable pour la production.

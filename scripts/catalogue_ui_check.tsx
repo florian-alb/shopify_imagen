@@ -19,6 +19,7 @@ import {
 } from "../convex/catalogue/model"
 import type { Id } from "../convex/_generated/dataModel"
 import type { TagLanguage } from "../convex/catalogue/tags"
+import { productCsv } from "../convex/catalogue/csv"
 import raw from "../convex/catalogue/fixtures/kuscheltierland.json"
 import "../app/styles.css"
 
@@ -197,6 +198,17 @@ const listeners = new Set<() => void>()
 function query(name: string, a: Record<string, unknown>) {
   if (name === "catalogues:list") return JSON.stringify([{ id, ...catalogue }])
   if (name === "catalogues:get") return JSON.stringify(catalogue)
+  if (name === "catalogues:exportCsvPage") {
+    if (a.version !== catalogue.version || a.generation !== catalogue.generation)
+      throw new Error("Le catalogue a changé pendant l’export CSV. Relancez l’export.")
+    const start = Number(a.cursor ?? 0)
+    const page = rows.slice(start, start + 20)
+    const products = page.flatMap((p) => {
+      const csv = productCsv(effective(data(p), structure, p.override), p.jsonSource)
+      return csv ? [csv] : []
+    })
+    return { products, scanned: page.length, skipped: page.length - products.length, isDone: start + page.length >= rows.length, continueCursor: String(start + page.length) }
+  }
   if (name === "catalogues:destinationShops")
     return JSON.stringify([
       {
@@ -257,6 +269,9 @@ function query(name: string, a: Record<string, unknown>) {
   throw new Error(`Unsupported fixture query: ${name}`)
 }
 const client = {
+  async query(ref: Parameters<typeof getFunctionName>[0], a: Record<string, unknown>) {
+    return query(getFunctionName(ref), a)
+  },
   watchQuery(
     ref: Parameters<typeof getFunctionName>[0],
     a: Record<string, unknown>,

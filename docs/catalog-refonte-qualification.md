@@ -91,6 +91,15 @@ Les dix anciennes tables ont été vérifiées vides après retrait. Les deux no
 
 Deux réponses MCP perdues ont conduit à vérifier l’état et continuer avec la CLI. Les compteurs d’appels ne sont donc pas présentés comme un inventaire exhaustif avant suppression ; la preuve finale est le contrôle du vide. L’audit de 21 pages récentes des fonctions planifiées n’a trouvé aucun ancien job en attente à annuler ; il n’est pas exhaustif de l’historique système. Les anciennes opérations étaient inactives à l’inventaire, leurs points d’entrée et crons ont été retirés. L’historique système Convex partagé n’a pas été purgé.
 
+## Export CSV Shopify — 21 octobre 2026
+
+- **576 tests réussis, 74 fichiers**, dont 15 nouveaux cas CSV : les 61 en-têtes du modèle fourni, variantes/images supplémentaires, lecture indépendante avec ExcelJS, HTML/accents/guillemets/retours à la ligne, codes-barres, grammes entiers, exclusions, ownership, authentification, confirmation partielle, version/génération, pagination, annulation et découpage par octets UTF-8 sans séparer un produit.
+- `npm run typecheck`, `npx tsc --noEmit -p convex/tsconfig.json`, `npm run check:convex-contract` et `npm run build` réussis. `npm run lint` : zéro erreur, 67 avertissements préexistants hors des fichiers modifiés. Le build conserve son avertissement sur la taille de certains chunks.
+- `npx convex dev --once` : fonctions prêtes sur **dev curious-greyhound-437**. Aucune migration de schéma ni écriture en production.
+- Navigateur isolé avec les vrais composants : confirmation d’export partiel, génération de trois produits et une fiche ignorée, lien de téléchargement CSV effectif. Le fichier téléchargé a été relu avec Python `csv` : 61 colonnes, trois produits, handles présents, statut `draft`, 2 604 octets. Après reprise simulée de la fiche en échec, un nouvel export complet donne quatre produits et zéro fiche ignorée sans confirmation partielle. Aucun message console de niveau erreur observé.
+
+Cette preuve navigateur utilise le client Convex en mémoire du banc UI. Elle ne constitue pas un parcours authentifié sur le déploiement réel ni une validation de l’importeur Shopify ; aucun import Shopify réel n’a été lancé. Le découpage volumineux et les changements concurrents sont qualifiés par tests, pas par une exportation réseau de plusieurs milliers de produits.
+
 ## Limites restant à qualifier
 
 Évolution du 16 octobre 2026 : le lecteur de navigation est partagé avec le module SEO via un mode optionnel de `extractMenu`. Le mode catalogue garde sa garde Shopify et sa projection de collections. Les tests ciblés de navigation, observations SEO et catalogue passent (36 cas), notamment les sous-menus Shopware imbriqués et les doublons desktop/mobile. Le HTML public Small Foot fourni pour le test SEO permet de vérifier 157 nœuds hiérarchiques. Cette preuve d’extraction ne constitue pas une nouvelle collecte catalogue, un import Shopify ou un E2E catalogue authentifié ; les limites ci-dessous restent applicables.

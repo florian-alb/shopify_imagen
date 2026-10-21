@@ -19,6 +19,7 @@ import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { TagLanguageSelect } from "./TagLanguageSelect"
+import { CatalogCsvExport } from "./CatalogCsvExport"
 import { tagLanguages, normalizeTag, validCollectionTag, type TagLanguage } from "../../../../convex/catalogue/tags"
 import {
   Dialog,
@@ -186,6 +187,15 @@ function Workspace({ c }: { c: Catalogue }) {
                     ? "Régénérer le JSON"
                     : "Exporter JSON"}
             </Button>
+            <CatalogCsvExport
+              id={c._id}
+              origin={c.origin}
+              version={c.version}
+              generation={c.generation}
+              total={c.total}
+              partial={partial}
+              disabled={locked || busy || !!c.work}
+            />
             <Button
               disabled={
                 locked || c.structure.collections.some((x) => !x.validated)

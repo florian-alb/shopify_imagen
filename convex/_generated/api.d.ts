@@ -19,6 +19,7 @@ import type * as bulkTransforms_image from "../bulkTransforms/image.js";
 import type * as bulkTransforms_model from "../bulkTransforms/model.js";
 import type * as bulkTransformsNode from "../bulkTransformsNode.js";
 import type * as catalogue_ai from "../catalogue/ai.js";
+import type * as catalogue_csv from "../catalogue/csv.js";
 import type * as catalogue_extract from "../catalogue/extract.js";
 import type * as catalogue_graphql from "../catalogue/graphql.js";
 import type * as catalogue_model from "../catalogue/model.js";
@@ -141,6 +142,7 @@ declare const fullApi: ApiFromModules<{
   "bulkTransforms/model": typeof bulkTransforms_model;
   bulkTransformsNode: typeof bulkTransformsNode;
   "catalogue/ai": typeof catalogue_ai;
+  "catalogue/csv": typeof catalogue_csv;
   "catalogue/extract": typeof catalogue_extract;
   "catalogue/graphql": typeof catalogue_graphql;
   "catalogue/model": typeof catalogue_model;
