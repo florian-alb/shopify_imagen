@@ -423,6 +423,32 @@ export const addCollection = mutation({
     return null
   },
 })
+
+// Operator recovery after a collector fix, including a still-running collect.
+// A new generation fences any in-flight worker before retrying failed fiches.
+export const restartCollection = internalMutation({
+  args: { id: v.id("catalogues"), generation: v.number() },
+  returns: v.null(),
+  handler: async (ctx, { id, generation }) => {
+    const c = await ctx.db.get(id)
+    if (!c || c.generation !== generation)
+      throw new Error("Catalogue absent ou génération périmée.")
+    const work = c.work ? decode<Work>(c.work) : null
+    if (
+      c.resumeWork ||
+      (work && (work.kind !== "collect" || !["collect", "retry"].includes(work.phase))) ||
+      (!work && !["partial", "ready"].includes(c.status))
+    )
+      throw new Error("Seule une collecte de fiches peut être relancée.")
+    if (!c.failed) throw new Error("Aucune fiche en échec à relancer.")
+    await launch(ctx, c, {
+      kind: "collect",
+      phase: "retry",
+      ...(work?.sourceDelay !== undefined ? { sourceDelay: work.sourceDelay } : {}),
+    })
+    return null
+  },
+})
 export const exportJson = mutation({
   args: { id: v.id("catalogues"), allowPartial: v.boolean() },
   returns: v.null(),

@@ -1,6 +1,6 @@
 # Catalogue — contexte d’implémentation courant
 
-Mis à jour le 19 octobre 2026. Cette refonte remplace l’ancien moteur, ses tables de tâches/index et ses fichiers R2 intermédiaires. Voir [transition](catalog-workspace-migration.md) et [qualification](catalog-refonte-qualification.md). L’[ancien contexte](catalog-workspace-context-historique.md) est historique.
+Mis à jour le 20 octobre 2026. Cette refonte remplace l’ancien moteur, ses tables de tâches/index et ses fichiers R2 intermédiaires. Voir [transition](catalog-workspace-migration.md) et [qualification](catalog-refonte-qualification.md). L’[ancien contexte](catalog-workspace-context-historique.md) est historique.
 
 ## Frontières
 
@@ -35,6 +35,10 @@ Les tags IA restent non validés. Après validation explicite, les collections s
 
 Le réseau HTTPS valide DNS/IP et redirections, bloque les adresses privées, borne réponse et timeout. Un bail sérialise les actions par domaine. Les lectures JSON/HTML d’une fiche sont parallèles (deux requêtes), sous un budget maximal de quatre ; backoff et Retry-After sont persistés. Un 403 bloque explicitement. Le découpage technique reste invisible dans les unités métier collection.
 
+La validation HTML accepte un titre `h1` non vide ou, pour les thèmes qui l’omettent, des métadonnées Open Graph de type `product` dont le titre correspond au JSON source et dont l’URL (`og:url`, sinon canonical) correspond à la fiche demandée, origine comprise. Un titre de document seul ne suffit pas. Les rubriques complémentaires continuent d’être extraites ; leur absence reste un avertissement.
+
+Après correction du lecteur, l’opération interne `catalogues.restartCollection({ id, generation })` permet une reprise opérateur des échecs, même pendant la collecte. Elle refuse une génération périmée, les étapes de découverte et les snapshots d’export/import actifs ou bloqués. La nouvelle génération invalide les anciens workers ; la phase de retry conserve les fiches réussies, JSON intacts, corrections et temporisation réseau. Cette écriture exige l’autorisation correspondant au déploiement visé.
+
 ## Cohérence
 
 Toute écriture d’un worker vérifie catalogue + génération + jeton de bail. Les rejeux de découverte, de rang et de rapprochement des alias ne doublonnent pas les fiches. Les corrections utilisateur vérifient une version attendue ; les tags manuels remplacent les tags hérités dans le résolveur `effective`, commun à la lecture, l’export et Shopify.
@@ -57,4 +61,4 @@ Le bulk est réconcilié par son token de mutation puis par identités source ; 
 
 `npm test`, `npm run typecheck`, `npx tsc --noEmit -p convex/tsconfig.json`, `npm run check:convex-contract`, `npm run build`. Le banc UI isolé se lance avec `npx vite --config scripts/vite.catalogue-ui.config.ts`, puis `/scripts/catalogue_ui_check.html` sur le port 3002. Il utilise les vrais composants avec un client en mémoire ; il ne constitue pas un E2E authentifié.
 
-Cible autorisée dans cette session : **dev curious-greyhound-437 seulement**. Production youthful-bandicoot-479 et import Shopify réel requièrent une autorisation nouvelle et précise.
+Déploiement de validation : **dev curious-greyhound-437**. Les écritures sur la production youthful-bandicoot-479 et les imports Shopify réels requièrent une autorisation nouvelle et précise pour l’opération visée.
