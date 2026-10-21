@@ -230,6 +230,29 @@ export function extractProduct(
   if (!p) errors.push("Données JSON indisponibles.")
   if (!html) errors.push("Page HTML indisponible.")
   const $ = load(html ?? "")
+  const heading = $("h1").first().text().trim()
+  const normalizeTitle = (value: string) =>
+    value.normalize("NFC").replace(/\s+/g, " ").trim().toLowerCase()
+  const metadataTitle = $('meta[property="og:title"]').attr("content") ?? ""
+  const metadataUrl =
+    $('meta[property="og:url"]').attr("content") ??
+    $('link[rel="canonical"]').attr("href")
+  let matchingProductMetadata = false
+  // Some Shopify themes omit h1. Accept product metadata only when both its
+  // title and URL identify the requested JSON product, never a generic page.
+  if (
+    p && metadataUrl &&
+    $('meta[property="og:type"]').attr("content")?.toLowerCase() === "product" &&
+    normalizeTitle(metadataTitle) === normalizeTitle(p.title)
+  ) {
+    try {
+      const actual = new URL(metadataUrl, link.url)
+      const expected = new URL(link.url)
+      matchingProductMetadata = actual.origin === expected.origin &&
+        actual.pathname.replace(/\/+$/, "") === expected.pathname.replace(/\/+$/, "")
+    } catch { /* Invalid metadata cannot identify a product page. */ }
+  }
+  const htmlComplete = Boolean(html && (heading || matchingProductMetadata))
   const sections: CatalogProduct["sections"] = []
   const seen = new Set<string>()
   const containers = $(
@@ -267,8 +290,8 @@ export function extractProduct(
     }
   })
   const warnings: string[] = []
-  if (html && !$("h1").length)
-    errors.push("Page HTML sans titre produit : thème à vérifier.")
+  if (html && !htmlComplete)
+    errors.push("Page HTML produit non reconnue : thème à vérifier.")
   if (html && !sections.length)
     warnings.push(
       "Aucune rubrique complémentaire reconnue ; vérifier la fiche source.",
@@ -284,7 +307,7 @@ export function extractProduct(
     sourceId: p ? String(p.id) : null,
     handle: p?.handle ?? link.handle,
     url: link.url,
-    title: p?.title ?? $("h1").first().text().trim() ?? link.handle,
+    title: p?.title ?? (heading || link.handle),
     description: cleanHtml(p?.body_html ?? ""),
     vendor: p?.vendor ?? "",
     productType: p?.product_type ?? "",
@@ -329,7 +352,7 @@ export function extractProduct(
     },
     collections: link.collections,
     jsonStatus: p ? "complete" : "failed",
-    htmlStatus: html && $("h1").length ? "complete" : "failed",
+    htmlStatus: htmlComplete ? "complete" : "failed",
     errors,
     warnings,
     fetchedAt: Date.now(),

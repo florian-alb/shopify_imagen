@@ -55,6 +55,17 @@ Cette qualification ne prouve pas un parcours navigateur authentifié, la qualit
 
 Le sélecteur de langue est désormais le composant UI partagé `LanguageSelect`, réutilisé pour le catalogue, le SEO et les politiques. Les libellés, drapeaux et l’ordre sont centralisés ; les langues prises en charge restent propres à chaque module. Contrôle sur les bancs catalogue/SEO : drapeaux et coche visibles, choix conservé, sélection au clavier par libellé, console sans erreur ni avertissement. [Capture du catalogue simulé](../output/shared-language-select/catalogue.png). Suite complète de 546 tests, contrôles de typage/lint/build et contrat frontend réussis ; cette modification est uniquement frontend.
 
+## Collecte des thèmes sans h1 — 20 octobre 2026
+
+Diagnostic en lecture seule sur **production `youthful-bandicoot-479`**, catalogue `le-mocassin-chic.com` de 595 fiches. Les douze échecs échantillonnés possèdent leur JSON complet et signalent tous « Page HTML sans titre produit : thème à vérifier. ». La lecture publique d’une fiche confirme l’absence de `h1`, malgré des métadonnées produit valides. Cela ne constitue pas un inventaire exhaustif des erreurs du catalogue.
+
+Le lecteur accepte désormais les métadonnées Open Graph `product` lorsque leur titre correspond au JSON source et que leur URL correspond à la fiche demandée, origine comprise. Les pages génériques, mauvais titres, autres produits/domaines, URL invalides et titres seuls restent refusés. Une opération interne de reprise incrémente la génération avant de relancer les échecs ; elle refuse les générations périmées et les travaux de découverte/export/import, y compris bloqués.
+
+- **561 tests réussis, 72 fichiers**, dont la collecte/reprise sans `h1`, la conservation du JSON et des réussites, les écritures d’un ancien worker refusées et les snapshots d’import/export protégés. Réseau, IA, R2 et Shopify restent simulés dans la suite.
+- JSON et HTML publics réels de `mocassin-daim-homme-marron`, analysés localement avec le lecteur corrigé : identité `10395579973978`, JSON/HTML complets, **11 variantes, 8 images, 3 rubriques complémentaires**, aucune erreur ni avertissement. Cette preuve porte sur une fiche, pas sur les 595.
+- Typage app/Convex, contrat de **114 références frontend**, lint ciblé, build et contrôle du diff réussis. Avertissement existant de taille des chunks.
+- Backend final accepté par `npx convex dev --once --typecheck enable` sur **dev `curious-greyhound-437`**. Aucune migration de schéma, nouvelle collecte métier dev, écriture de production ou import Shopify réel pendant cette qualification. Le déploiement production et la reprise du catalogue restent à autoriser et à vérifier. Aucun parcours navigateur authentifié revendiqué.
+
 ## Export réel Convex → R2
 
 Une fixture synthétique dédiée à l’export a été créée sur le dev avec une fiche et un complément HTML. La mutation publique d’export a été appelée avec l’identité CLI de son propriétaire. Une vérification serveur a téléchargé le fichier final et listé le préfixe :

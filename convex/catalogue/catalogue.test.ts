@@ -256,6 +256,62 @@ test("HTML failure stays visible; bounded attempts preserve successes and retry 
   const page = await t.query(internal.catalogues.page, { id, selected: true });
   expect(page.page.find((x) => x.handle === "d")?.collections).toEqual([]);
 });
+test("collection and retry accept product pages without h1 and preserve the successful JSON", async () => {
+  const { t, id, user, drain, validate, read } = await setup();
+  source.pages.set(`${origin}/products/d`, "<html><body>Unavailable</body></html>");
+  await drain();
+  await validate();
+  expect((await drain()).failed).toBe(1);
+  source.pages.set(
+    `${origin}/products/d`,
+    `<html lang="fr"><head><meta property="og:type" content="product"><meta property="og:title" content="Title d"><meta property="og:url" content="${origin}/products/d"></head><body><div>Title d</div></body></html>`,
+  );
+  await user.mutation(api.catalogues.retry, { id });
+  const running = (await read())!;
+  await t.mutation(internal.catalogues.claim, {
+    id, generation: running.generation, token: "old-worker",
+  });
+  await t.mutation(internal.catalogues.restartCollection, {
+    id, generation: running.generation,
+  });
+  const before = await t.query(internal.catalogues.page, { id, selected: true });
+  const failed = before.page.find((p) => p.handle === "d")!;
+  await expect(t.mutation(internal.catalogues.result, {
+    id, generation: running.generation, token: "old-worker",
+    productId: failed._id, state: "failed", attempts: 3,
+  })).rejects.toThrow("périmée");
+  await expect(t.mutation(internal.catalogues.restartCollection, {
+    id, generation: running.generation,
+  })).rejects.toThrow("périmée");
+  await drain();
+  expect((await read())?.complete).toBe(4);
+  expect((await read())?.failed).toBe(0);
+  expect(source.calls.filter((url) => url === `${origin}/products/d.json`)).toHaveLength(1);
+  expect(source.calls.filter((url) => url === `${origin}/products/a`)).toHaveLength(1);
+  const page = await t.query(internal.catalogues.page, { id, selected: true });
+  const product = page.page.find((p) => p.handle === "d")!;
+  expect(product.error).toBeUndefined();
+  expect(JSON.parse(product.data!).htmlStatus).toBe("complete");
+});
+test.each(["import", "export", "discover"] as const)(
+  "operator collection recovery refuses an active or blocked %s snapshot",
+  async (kind) => {
+    const f = await setup();
+    await f.drain();
+    await f.validate();
+    await f.t.run(async (ctx) => {
+      await ctx.db.patch(f.id, {
+        work: encode({ kind, phase: kind }), status: "blocked", failed: 1,
+      });
+    });
+    const c = (await f.read())!;
+    await expect(f.t.mutation(internal.catalogues.restartCollection, {
+      id: f.id, generation: c.generation,
+    })).rejects.toThrow("Seule une collecte");
+    expect((await f.read())?.work).toBe(c.work);
+    expect((await f.read())?.generation).toBe(c.generation);
+  },
+);
 test("manual collection addition grows Top N without duplicates or refetching successes", async () => {
   const { t, id, user, drain, validate } = await setup("TOP_N", 1);
   await drain();
