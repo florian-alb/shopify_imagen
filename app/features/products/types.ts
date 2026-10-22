@@ -1,4 +1,4 @@
-import type { ProductSearch } from "@/lib/productFilters";
+import type { ProductWorkspaceSearch } from "./lib/productWorkspaceSearch";
 import type {
   GenerationStatus,
   ProductGenerationState,
@@ -61,7 +61,7 @@ export type ProductDetail = {
 
 export type ProductDetailPageProps = {
   productId: string;
-  search: ProductSearch;
+  search: ProductWorkspaceSearch;
 };
 
 export type ProductNavigation = {

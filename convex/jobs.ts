@@ -320,6 +320,7 @@ export const preview = query({
   args: {
     productIds: v.array(v.id("products")),
     visualGroupIds: v.optional(v.array(v.id("visualGroups"))),
+    textOnlyGroupIds: v.optional(v.array(v.id("visualGroups"))),
     selectedImageTypes: v.array(v.string()),
     variantSelection: v.optional(variantSelectionValidator),
   },
@@ -368,6 +369,7 @@ export const create = mutation({
   args: {
     productIds: v.array(v.id("products")),
     visualGroupIds: v.optional(v.array(v.id("visualGroups"))),
+    textOnlyGroupIds: v.optional(v.array(v.id("visualGroups"))),
     variantSelection: v.optional(variantSelectionValidator),
     selectedImageTypes: v.array(v.string()),
     forceRegenerate: v.boolean(),
@@ -421,6 +423,7 @@ export const create = mutation({
       scope,
       selectedImageTypes: args.selectedImageTypes,
       visualGroupIds: args.visualGroupIds,
+      textOnlyGroupIds: args.textOnlyGroupIds,
       variantSelection: args.variantSelection,
       regenerationInstructions: args.regenerationInstructions,
     });
@@ -472,6 +475,7 @@ export const create = mutation({
         visualGroupId: task.visualGroupId,
         visualGroupKey: task.visualGroupKey,
         visualGroupLabel: task.visualGroupLabel,
+        usesGroupReferences: task.usesGroupReferences,
         imageType: task.imageType,
         generationTarget: task.generationTarget,
         promptBranch: task.promptBranch,
@@ -1206,6 +1210,7 @@ export const completeImage = internalMutation({
         imageModel: image.imageModel,
         generationTarget: image.generationTarget,
         promptBranch: image.promptBranch,
+        usesGroupReferences: image.usesGroupReferences,
         promptUsed: image.promptUsed,
         finalPromptUsed: image.finalPromptUsed ?? image.promptUsed,
         promptKind: image.promptKind,
@@ -1657,6 +1662,7 @@ export const insertRetouchedImage = internalMutation({
         : {}),
       generationTarget: source.generationTarget,
       promptBranch: source.promptBranch,
+      usesGroupReferences: source.usesGroupReferences,
       promptUsed: source.promptUsed,
       finalPromptUsed: source.finalPromptUsed ?? source.promptUsed,
       ...(source.promptKind ? { promptKind: source.promptKind } : {}),
@@ -1830,6 +1836,7 @@ export const regenerateImage = mutation({
             groupId: image.visualGroupId ?? null,
             key: image.visualGroupKey ?? null,
             label: image.visualGroupLabel ?? null,
+            usesGroupReferences: image.usesGroupReferences,
             optionValues: image.generationTarget.selectedOptions,
             referenceUrls:
               image.sourceImageUrls ??
@@ -1904,6 +1911,7 @@ export const regenerateImage = mutation({
       visualGroupId: task.visualGroupId,
       visualGroupKey: task.visualGroupKey,
       visualGroupLabel: task.visualGroupLabel,
+      usesGroupReferences: task.usesGroupReferences,
       imageProvider: effectiveImageProvider,
       imageModel: effectiveImageModel,
       promptUsed: task.promptUsed,

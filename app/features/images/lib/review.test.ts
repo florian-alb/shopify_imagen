@@ -67,7 +67,7 @@ describe("generated image review helpers", () => {
     expect(isImagePushing(image)).toBe(true);
     expect(isPushReady(image)).toBe(false);
     expect(canReviewImage(image)).toBe(false);
-    expect(generatedImageStateLabel(image)).toBe("Pushing");
+    expect(generatedImageStateLabel(image)).toBe("Publication en cours");
     expect(generatedImageStateTone(image)).toBe("warning");
     expect(isImagePushing({ ...image, status: "uploaded" })).toBe(true);
   });
@@ -81,36 +81,36 @@ describe("generated image review helpers", () => {
     expect(hasImagePushError(image)).toBe(true);
     expect(isImagePushing(image)).toBe(false);
     expect(isPushReady(image)).toBe(true);
-    expect(generatedImageStateLabel(image)).toBe("Push failed");
+    expect(generatedImageStateLabel(image)).toBe("Publication en échec");
     expect(generatedImageStateTone(image)).toBe("danger");
-    expect(generatedImageStateLabel({ ...image, status: "uploaded" })).toBe("Pushed · error");
-    expect(generatedImageStateLabel({ ...image, pushError: undefined, status: "uploaded" })).toBe("Pushed");
+    expect(generatedImageStateLabel({ ...image, status: "uploaded" })).toBe("Publiée · erreur");
+    expect(generatedImageStateLabel({ ...image, pushError: undefined, status: "uploaded" })).toBe("Publiée");
   });
 });
 
 describe("generated image state helpers", () => {
   it("returns the same labels and tones used by route badges", () => {
-    expect(generatedImageStateLabel(generatedImage())).toBe("To review");
+    expect(generatedImageStateLabel(generatedImage())).toBe("À vérifier");
     expect(generatedImageStateTone(generatedImage())).toBe("warning");
 
     expect(
       generatedImageStateLabel(
         generatedImage({ reviewStatus: "approved" }),
       ),
-    ).toBe("Approved");
+    ).toBe("Approuvée");
     expect(
       generatedImageStateTone(generatedImage({ reviewStatus: "approved" })),
     ).toBe("success");
 
     expect(
       generatedImageStateLabel(generatedImage({ reviewStatus: "rejected" })),
-    ).toBe("Rejected");
+    ).toBe("Rejetée");
     expect(
       generatedImageStateTone(generatedImage({ reviewStatus: "rejected" })),
     ).toBe("danger");
 
     expect(generatedImageStateLabel(generatedImage({ status: "uploaded" }))).toBe(
-      "Pushed",
+      "Publiée",
     );
     expect(generatedImageStateTone(generatedImage({ status: "uploaded" }))).toBe(
       "success",
@@ -123,7 +123,7 @@ describe("generated image state helpers", () => {
           activeRetryImageId: "retry-image-id" as never,
         }),
       ),
-    ).toBe("Regenerating");
+    ).toBe("Régénération");
     expect(
       generatedImageStateTone(
         generatedImage({
@@ -134,7 +134,7 @@ describe("generated image state helpers", () => {
     ).toBe("warning");
 
     expect(generatedImageStateLabel(generatedImage({ status: "failed" }))).toBe(
-      "Error",
+      "Échec",
     );
     expect(generatedImageStateTone(generatedImage({ status: "failed" }))).toBe(
       "danger",
@@ -142,7 +142,7 @@ describe("generated image state helpers", () => {
   });
   it("keeps non-reviewable generation states explicit", () => {
     expect(generatedImageStateLabel(generatedImage({ status: "canceled" }))).toBe(
-      "Canceled",
+      "Annulée",
     );
     expect(generatedImageStateTone(generatedImage({ status: "canceled" }))).toBe(
       "danger",
@@ -151,7 +151,7 @@ describe("generated image state helpers", () => {
       generatedImageStateLabel(
         generatedImage({ status: "queued", storageUrl: undefined }),
       ),
-    ).toBe("queued");
+    ).toBe("En attente");
     expect(
       generatedImageStateTone(
         generatedImage({ status: "queued", storageUrl: undefined }),
@@ -169,7 +169,7 @@ describe("reviewAggregateBadge", () => {
         approved: 1,
         rejected: 0,
       }),
-    ).toEqual({ tone: "warning", label: "2 to review" });
+    ).toEqual({ tone: "warning", label: "2 à vérifier" });
 
     expect(
       reviewAggregateBadge({
@@ -178,7 +178,7 @@ describe("reviewAggregateBadge", () => {
         approved: 2,
         rejected: 0,
       }),
-    ).toEqual({ tone: "success", label: "Approved" });
+    ).toEqual({ tone: "success", label: "Approuvées" });
 
     expect(
       reviewAggregateBadge({
@@ -187,7 +187,7 @@ describe("reviewAggregateBadge", () => {
         approved: 1,
         rejected: 1,
       }),
-    ).toEqual({ tone: "warning", label: "Partial" });
+    ).toEqual({ tone: "warning", label: "Partiellement approuvées" });
 
     expect(
       reviewAggregateBadge({
@@ -196,7 +196,7 @@ describe("reviewAggregateBadge", () => {
         approved: 0,
         rejected: 2,
       }),
-    ).toEqual({ tone: "danger", label: "Rejected" });
+    ).toEqual({ tone: "danger", label: "Rejetées" });
 
     expect(
       reviewAggregateBadge(

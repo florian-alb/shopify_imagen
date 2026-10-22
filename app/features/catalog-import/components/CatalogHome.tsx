@@ -40,11 +40,11 @@ export function CatalogHome() {
     [error, setError] = useState("");
   return (
     <main className={pageContentClass}>
-      <PageHeader title="Import de catalogue">
+      <PageHeader eyebrow="Catalogue" title="Imports">
         Récupérez le menu, les collections et les produits d’une boutique.
       </PageHeader>
       <form
-        className="max-w-2xl space-y-6 py-4"
+        className="studio-panel max-w-3xl space-y-6 p-5 sm:p-8"
         onSubmit={async (e) => {
           e.preventDefault();
           setBusy(true);
@@ -140,7 +140,7 @@ export function CatalogHome() {
           <ArrowRight className="size-4" />
         </Button>
       </form>
-      <section className="mt-10 border-t pt-6">
+      <section className="mt-10 max-w-5xl">
         <h2 className="mb-4 text-lg font-semibold">Catalogues précédents</h2>
         {raw === undefined ? (
           <Skeleton className="h-24 w-full" />
@@ -149,13 +149,13 @@ export function CatalogHome() {
             Vos catalogues apparaîtront ici après une première analyse.
           </p>
         ) : (
-          <div className="divide-y">
+          <div className="studio-panel divide-y overflow-hidden">
             {rows.map((c) => (
               <Link
                 key={c.id}
                 to="/catalog-import/$exportId"
                 params={{ exportId: c.id }}
-                className="flex flex-wrap items-center justify-between gap-3 rounded-md px-3 py-4 hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
+                className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
               >
                 <div>
                   <p className="font-medium">{new URL(c.origin).hostname}</p>

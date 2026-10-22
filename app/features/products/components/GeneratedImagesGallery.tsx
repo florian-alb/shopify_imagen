@@ -1,4 +1,5 @@
 import { CheckCheck } from "lucide-react";
+import { Link } from "@tanstack/react-router";
 
 import type { LightboxImage } from "@/components/common/Lightbox";
 import { BusyIcon, StateBadge } from "@/components/page";
@@ -9,14 +10,15 @@ import {
   PendingGeneratedImageTile,
 } from "@/features/images/components/GeneratedImageTile";
 import type { Doc, Id } from "@/lib/convex";
+import { generatedImageStateLabel } from "@/features/images/lib/state";
 
 export function GeneratedImagesGallery({
   title = "Images générées",
   generatedGalleryImages,
   generatingGalleryImages,
-  approvedCount,
+  unavailableGalleryImages = [],
+  emptyText = "Aucune image générée.",
   pendingCount,
-  rejectedCount,
   reviewingImageId,
   reviewingAll,
   onReview,
@@ -28,9 +30,9 @@ export function GeneratedImagesGallery({
   title?: string;
   generatedGalleryImages: Doc<"generatedImages">[];
   generatingGalleryImages: Doc<"generatedImages">[];
-  approvedCount: number;
+  unavailableGalleryImages?: Doc<"generatedImages">[];
+  emptyText?: string;
   pendingCount: number;
-  rejectedCount: number;
   reviewingImageId: Id<"generatedImages"> | null;
   reviewingAll: boolean;
   onReview: (
@@ -43,7 +45,7 @@ export function GeneratedImagesGallery({
   onZoom: (images: LightboxImage[], index: number) => void;
 }) {
   const itemCount =
-    generatedGalleryImages.length + generatingGalleryImages.length;
+    generatedGalleryImages.length + generatingGalleryImages.length + unavailableGalleryImages.length;
   const lightboxImages = generatedGalleryImages
     .filter((image) => image.storageUrl)
     .map((image) => ({
@@ -55,31 +57,27 @@ export function GeneratedImagesGallery({
 
   return (
     <Card className="min-h-72 rounded-lg">
-      <CardHeader className="flex flex-row items-center justify-between gap-3">
+      <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
         <CardTitle className="text-lg">{title}</CardTitle>
         <div className="flex shrink-0 items-center gap-2">
           {pendingCount ? (
             <Button
               type="button"
               size="sm"
+              aria-label={`Approuver les ${pendingCount} en attente de cette vue`}
               disabled={reviewingAll || Boolean(reviewingImageId)}
               onClick={onApproveAll}
             >
               <BusyIcon busy={reviewingAll} />
               {!reviewingAll ? <CheckCheck data-icon="inline-start" /> : null}
-              Tout approuver
+              <span>Approuver les {pendingCount} en attente<span className="hidden sm:inline"> de cette vue</span></span>
             </Button>
           ) : null}
           <StateBadge>{itemCount}</StateBadge>
         </div>
       </CardHeader>
       <CardContent>
-        <p className="mb-3 text-xs text-muted-foreground">
-          {approvedCount} approuvée{approvedCount === 1 ? "" : "s"} ·{" "}
-          {pendingCount} à valider · {rejectedCount} rejetée
-          {rejectedCount === 1 ? "" : "s"}
-        </p>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 2xl:grid-cols-3">
           {itemCount ? (
             <>
               {generatedGalleryImages.map((image) => {
@@ -111,13 +109,17 @@ export function GeneratedImagesGallery({
                   caption={[image.visualGroupLabel, image.imageType]
                     .filter(Boolean)
                     .join(" · ")}
-                  statusLabel="Generation en cours"
+                  statusLabel={generatedImageStateLabel(image)}
                 />
               ))}
+              {unavailableGalleryImages.map(image => <div key={image._id} className="space-y-2">
+                <GeneratedImageTile image={image} onDelete={() => onDelete(image)} />
+                {image.jobId && <Button variant="outline" size="sm" asChild><Link to="/jobs/$jobId" params={{ jobId: image.jobId }}>Voir le traitement{image.status === "failed" ? " en échec" : ""}</Link></Button>}
+              </div>)}
             </>
           ) : (
-            <p className="col-span-2 text-sm text-muted-foreground">
-              Aucune image générée.
+            <p className="col-span-full py-10 text-center text-sm text-muted-foreground" role="status">
+              {emptyText}
             </p>
           )}
         </div>

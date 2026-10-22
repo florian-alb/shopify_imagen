@@ -36,8 +36,8 @@ export function JobProductReviewGrid({
   if (!productRows.length) {
     return (
       <EmptyState
-        title="No images in this view"
-        body="Choose another review filter to see the rest of this batch."
+        title="Aucune image dans cette vue"
+        body="Choisissez un autre filtre pour retrouver les autres images de ce lot."
       />
     );
   }

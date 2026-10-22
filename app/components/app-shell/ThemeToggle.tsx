@@ -23,15 +23,26 @@ export function ThemeToggle() {
     applyTheme(theme);
   }, [theme]);
 
+  useEffect(() => {
+    const syncTheme = () => setTheme(getInitialTheme());
+    window.addEventListener("image-studio-theme-change", syncTheme);
+    window.addEventListener("storage", syncTheme);
+    return () => {
+      window.removeEventListener("image-studio-theme-change", syncTheme);
+      window.removeEventListener("storage", syncTheme);
+    };
+  }, []);
+
   function toggleTheme() {
     const nextTheme = theme === "dark" ? "light" : "dark";
     setTheme(nextTheme);
     applyTheme(nextTheme);
     window.localStorage.setItem(themeStorageKey, nextTheme);
+    window.dispatchEvent(new Event("image-studio-theme-change"));
   }
 
   const label =
-    theme === "dark" ? "Passer au theme clair" : "Passer au theme sombre";
+    theme === "dark" ? "Passer au thème clair" : "Passer au thème sombre";
 
   return (
     <Button

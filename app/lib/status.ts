@@ -5,83 +5,87 @@ export type ProductPublishState = "not_ready" | "ready_to_push" | "partially_pus
 export type ProductPrimaryAction = "generate" | "wait" | "review" | "push" | "fix_errors" | "done";
 
 export const generationStatusLabels: Record<GenerationStatus, string> = {
-  not_started: "Not started",
-  generating: "Generating",
-  partial: "Partial",
-  ready: "Ready",
-  pushed: "Pushed",
-  canceled: "Canceled",
-  failed: "Failed"
+  not_started: "À générer",
+  generating: "En cours",
+  partial: "Partiel",
+  ready: "Prêt",
+  pushed: "Publié",
+  canceled: "Annulé",
+  failed: "Échec"
 };
 
 export const productGenerationStateLabels: Record<ProductGenerationState, string> = {
-  not_started: "Not started",
-  generating: "Generating",
-  complete: "Generated",
-  incomplete: "Incomplete",
-  failed: "Failed",
-  canceled: "Canceled"
+  not_started: "À générer",
+  generating: "En cours",
+  complete: "Généré",
+  incomplete: "Incomplet",
+  failed: "Échec",
+  canceled: "Annulé"
 };
 
 export const productReviewStateLabels: Record<ProductReviewState, string> = {
-  none: "No review",
-  needs_review: "To review",
-  partially_approved: "Partially approved",
-  approved: "Approved",
-  rejected: "Rejected"
+  none: "Sans vérification",
+  needs_review: "À vérifier",
+  partially_approved: "Partiellement approuvé",
+  approved: "Approuvé",
+  rejected: "Refusé"
 };
 
 export const productPublishStateLabels: Record<ProductPublishState, string> = {
-  not_ready: "Not ready",
-  ready_to_push: "Ready to push",
-  partially_pushed: "Partially pushed",
-  pushed: "Pushed"
+  not_ready: "Non prêt",
+  ready_to_push: "Prêt à publier",
+  partially_pushed: "Partiellement publié",
+  pushed: "Publié"
 };
 
 export const productPrimaryActionLabels: Record<ProductPrimaryAction, string> = {
-  generate: "Needs generation",
-  wait: "Generating",
-  review: "Needs review",
-  push: "Ready to push",
-  fix_errors: "Errors",
-  done: "Done"
+  generate: "À générer",
+  wait: "En cours",
+  review: "À vérifier",
+  push: "Prêt à publier",
+  fix_errors: "À reprendre",
+  done: "Publié"
 };
 
 export function statusTone(status: GenerationStatus): "default" | "success" | "warning" | "danger" {
   if (status === "ready" || status === "pushed") return "success";
   if (status === "generating" || status === "partial") return "warning";
-  if (status === "failed" || status === "canceled") return "danger";
+  if (status === "failed") return "danger";
   return "default";
 }
 
-export function generationStateTone(status: ProductGenerationState): "neutral" | "success" | "warning" | "danger" {
+export function generationStateTone(status: ProductGenerationState): "neutral" | "success" | "warning" | "danger" | "info" {
   if (status === "complete") return "success";
-  if (status === "generating" || status === "incomplete") return "warning";
-  if (status === "failed" || status === "canceled") return "danger";
+  if (status === "generating") return "info";
+  if (status === "incomplete") return "warning";
+  if (status === "failed") return "danger";
   return "neutral";
 }
 
-export function reviewStateTone(status: ProductReviewState): "neutral" | "success" | "warning" | "danger" {
+export function reviewStateTone(status: ProductReviewState): "neutral" | "success" | "warning" | "danger" | "info" {
   if (status === "approved") return "success";
   if (status === "needs_review" || status === "partially_approved") return "warning";
   if (status === "rejected") return "danger";
   return "neutral";
 }
 
-export function publishStateTone(status: ProductPublishState): "neutral" | "success" | "warning" | "danger" {
+export function publishStateTone(status: ProductPublishState): "neutral" | "success" | "warning" | "danger" | "info" {
   if (status === "pushed") return "success";
-  if (status === "ready_to_push" || status === "partially_pushed") return "warning";
+  if (status === "ready_to_push") return "info";
+  if (status === "partially_pushed") return "warning";
   return "neutral";
 }
 
-export function primaryActionTone(status: ProductPrimaryAction): "neutral" | "success" | "warning" | "danger" {
+export function primaryActionTone(status: ProductPrimaryAction): "neutral" | "success" | "warning" | "danger" | "info" {
   if (status === "done") return "success";
-  if (status === "review" || status === "push" || status === "wait") return "warning";
+  if (status === "wait" || status === "push") return "info";
+  if (status === "review") return "warning";
   if (status === "fix_errors") return "danger";
   return "neutral";
 }
 
 export function shopifyStatusLabel(status?: string | null) {
-  if (!status) return "Unknown Shopify status";
-  return status.charAt(0) + status.slice(1).toLowerCase();
+  if (!status) return "Statut Shopify inconnu";
+  const labels: Record<string, string> = { ACTIVE: "Actif", DRAFT: "Brouillon", ARCHIVED: "Archivé" };
+  return labels[status.toUpperCase()] ?? status.charAt(0) + status.slice(1).toLowerCase();
 }

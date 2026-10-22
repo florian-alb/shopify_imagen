@@ -29,12 +29,12 @@ export function ProductImageHistory({
   return (
     <Card className="mb-4 rounded-lg">
       <CardHeader className="flex flex-row items-center justify-between gap-3">
-        <CardTitle className="text-lg">Historique prompts et images</CardTitle>
+        <CardTitle className="text-lg">Historique des prompts et images</CardTitle>
         {hasProductJobs ? (
           <Button variant="outline" size="sm" asChild>
             <Link to="/jobs" search={{ productId }}>
               <ListChecks data-icon="inline-start" />
-              Jobs
+              Générations
               <ChevronRight data-icon="inline-end" />
             </Link>
           </Button>
@@ -53,7 +53,7 @@ export function ProductImageHistory({
           </Accordion>
         ) : (
           <p className="text-sm text-muted-foreground">
-            Aucun historique de generation.
+            Aucun historique de génération.
           </p>
         )}
       </CardContent>
@@ -86,8 +86,8 @@ function HistoryItem({
           image.promptBranch === "otherwise" ? (
             <Badge variant="outline">
               {image.promptBranch === "if_true"
-                ? "Condition true"
-                : "Condition false"}
+                ? "Condition vraie"
+                : "Condition fausse"}
             </Badge>
           ) : null}
         </span>
@@ -120,7 +120,7 @@ function HistoryItem({
               onClick={onDelete}
             >
               <Trash2 data-icon="inline-start" />
-              Delete everywhere
+              Supprimer partout
             </Button>
           </div>
         </div>

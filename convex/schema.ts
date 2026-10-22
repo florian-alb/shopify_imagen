@@ -812,6 +812,7 @@ export default defineSchema({
     visualGroupId: v.optional(v.union(v.id("visualGroups"), v.null())),
     visualGroupKey: v.optional(v.union(v.string(), v.null())),
     visualGroupLabel: v.optional(v.union(v.string(), v.null())),
+    usesGroupReferences: v.optional(v.boolean()),
     imageType: v.string(),
     generationTarget: v.optional(generationTargetValidator),
     promptBranch: v.optional(promptBranchValidator),

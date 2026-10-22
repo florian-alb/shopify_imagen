@@ -18,11 +18,11 @@ export function PromptSettingsPage() {
 
   return (
     <main className={pageContentClass}>
-      <PageHeader title="Prompts">
-        Editeur des prompts utilises par les generations image.
+      <PageHeader eyebrow="Configuration" title="Modèles d’images">
+        Instructions, références et réglages de vos générations d’images.
       </PageHeader>
 
-      <Card className="mb-4 rounded-lg">
+      <Card className="mb-6">
         <CardHeader>
           <CardTitle>Variables disponibles</CardTitle>
         </CardHeader>
@@ -57,12 +57,12 @@ export function PromptSettingsPage() {
         <EmptyState
           loading
           title="Chargement des prompts"
-          body="Lecture des templates depuis Convex."
+          body="Chargement de vos modèles d’images."
         />
       ) : orderedPrompts.length === 0 && !templates.newPromptDraft ? (
         <EmptyState
           title="Aucun prompt"
-          body="Creez un template pour demarrer les generations."
+          body="Créez un modèle pour commencer à générer des images."
           children={
             <Button size="sm" onClick={templates.startCreate}>
               <Plus data-icon="inline-start" />

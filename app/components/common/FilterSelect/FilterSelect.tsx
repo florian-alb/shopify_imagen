@@ -26,7 +26,7 @@ export function FilterSelect({
       value={value || "all"}
       onValueChange={(next) => onChange(next === "all" ? clearValue : next)}
     >
-      <SelectTrigger className="h-9 w-full">
+      <SelectTrigger className="h-9 w-full" aria-label={placeholder}>
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent>

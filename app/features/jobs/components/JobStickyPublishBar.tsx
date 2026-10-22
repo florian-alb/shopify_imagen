@@ -35,36 +35,37 @@ export function JobStickyPublishBar({
     <div className="sticky-actions">
       <Card
         size="sm"
-        className="flex-row items-center justify-between gap-3 rounded-lg p-3 shadow-2xl"
+        className="flex-col items-stretch justify-between gap-3 rounded-lg p-3 sm:flex-row sm:items-center"
       >
         <div className="min-w-0">
-          <p className="text-sm font-medium">
-            {approvedCount} approuvees · {pendingCount} a verifier ·{" "}
-            {rejectedCount} rejetees
+          <p className="hidden text-sm font-medium sm:block">
+            {approvedCount} approuvées · {pendingCount} à vérifier ·{" "}
+            {rejectedCount} rejetées dans ce lot
           </p>
-          <p className="truncate text-xs text-muted-foreground">
+          <p className="text-xs text-muted-foreground">
             {publishRun?.status === "running"
               ? `Publication en arrière-plan · ${publishRun.processedProducts} / ${publishRun.totalProducts} produits`
               : pushableCount
-              ? `${pushableCount} image${pushableCount === 1 ? "" : "s"} prete${
+              ? `${pushableCount} image${pushableCount === 1 ? "" : "s"} prête${
                   pushableCount === 1 ? "" : "s"
-                } a publier`
-              : "Aucune nouvelle image a publier"}
+                } à publier dans le lot, quel que soit le filtre`
+              : "Aucune nouvelle image à publier"}
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 max-sm:[&>button]:min-h-11 max-sm:[&>button]:flex-1">
           <Button
             variant="secondary"
+            aria-label={`Approuver ${visibleReviewableCount} images dans cette vue`}
             disabled={!visibleReviewableCount || reviewing}
             onClick={onApproveVisible}
           >
             <Check data-icon="inline-start" />
-            Approver {visibleReviewableCount || ""}
+            Approuver {visibleReviewableCount || ""}<span className="hidden sm:inline"> dans cette vue</span>
           </Button>
-          <Button disabled={publishing || !pushableCount} onClick={onPublish}>
+          <Button aria-label={`Publier ${pushableCount} images du lot`} disabled={publishing || !pushableCount} onClick={onPublish}>
             <BusyIcon busy={publishing && publishRun !== undefined} />
             {!publishing ? <Send data-icon="inline-start" /> : null}
-            {publishing && publishRun !== undefined ? "Publication…" : `Publier ${pushableCount || ""}`}
+            {publishing && publishRun !== undefined ? "Publication…" : <>Publier {pushableCount || ""}<span className="hidden sm:inline"> du lot</span></>}
           </Button>
         </div>
       </Card>

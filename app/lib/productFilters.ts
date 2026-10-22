@@ -9,7 +9,7 @@ import {
   type ProductPrimaryAction,
   type ProductPublishState,
   type ProductReviewState,
-} from "@/lib/status";
+} from "./status";
 
 export type ProductSearch = {
   q?: string;

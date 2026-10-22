@@ -8,11 +8,13 @@ export function useVariantGenerationSelection({
   productIds,
   selectedImageTypes,
   visualGroupIds,
+  textOnlyGroupIds,
 }: {
   open: boolean;
   productIds: Id<"products">[];
   selectedImageTypes: string[];
   visualGroupIds?: Id<"visualGroups">[];
+  textOnlyGroupIds?: Id<"visualGroups">[];
 }) {
   const [variantSelection, setVariantSelection] =
     useState<VariantSelection>("first");
@@ -24,6 +26,7 @@ export function useVariantGenerationSelection({
           selectedImageTypes,
           variantSelection,
           ...(visualGroupIds ? { visualGroupIds } : {}),
+          ...(textOnlyGroupIds?.length ? { textOnlyGroupIds } : {}),
         }
       : "skip",
   );

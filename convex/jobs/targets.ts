@@ -20,6 +20,7 @@ export type ImageTarget = {
   label: string | null;
   optionValues: SelectedOption[];
   referenceUrls: string[];
+  usesGroupReferences?: boolean;
   generationTarget: GenerationTarget;
 };
 
@@ -103,8 +104,10 @@ export function selectImageTargets(args: {
       key: group?.key ?? null,
       label: group?.label ?? null,
       optionValues: group?.optionValues ?? [],
-      referenceUrls:
-        group?.referenceUrls ?? referenceImageUrls(product, variant?.id),
+      referenceUrls: group?.referenceUrls.length
+        ? group.referenceUrls
+        : referenceImageUrls(product, group ? undefined : variant?.id),
+      usesGroupReferences: Boolean(group?.referenceUrls.length),
       generationTarget: {
         key:
           kind === "group"

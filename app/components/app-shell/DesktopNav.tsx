@@ -5,6 +5,7 @@ import {
   SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
+  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
@@ -23,15 +24,15 @@ export function DesktopNav() {
       collapsible="icon"
       className="border-r border-sidebar-border bg-sidebar text-sidebar-foreground"
     >
-      <SidebarHeader className="gap-5 px-4 pb-5 pt-6 group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:px-2">
+      <SidebarHeader className="gap-5 px-4 pb-3 pt-6 group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:px-2">
         <div className="flex items-start justify-between gap-2 group-data-[collapsible=icon]:justify-center">
           <Link
             to="/products"
-            className="flex min-w-0 items-center gap-3 group-data-[collapsible=icon]:hidden"
+            className="flex min-w-0 items-center gap-2 group-data-[collapsible=icon]:hidden"
           >
-            <AppLogo />
+            <AppLogo size="sm" />
             <span className="min-w-0">
-              <span className="mt-1 block whitespace-nowrap text-xl font-semibold">
+              <span className="mt-0.5 block whitespace-nowrap text-base font-semibold tracking-tight">
                 Image Studio
               </span>
             </span>
@@ -46,6 +47,7 @@ export function DesktopNav() {
       <SidebarContent className="px-3 group-data-[collapsible=icon]:px-0">
         {navGroups.map((group) => (
           <SidebarGroup key={group.label}>
+            <SidebarGroupLabel className="h-7 px-2 text-[0.7rem] font-medium tracking-wide text-muted-foreground">{group.label}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu className="gap-1">
                 {group.items.map((item) => {
@@ -55,10 +57,11 @@ export function DesktopNav() {
                       <SidebarMenuButton
                         asChild
                         tooltip={item.label}
-                        className="h-10 gap-3 rounded-lg text-muted-foreground transition data-[active=true]:bg-primary/15 data-[active=true]:text-primary hover:bg-sidebar-accent"
+                        className="h-9 gap-3 rounded-lg text-[0.8125rem] text-muted-foreground transition-colors data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium data-[active=true]:text-foreground data-[active=true]:shadow-xs data-[active=true]:[&>svg]:text-primary hover:bg-sidebar-accent"
                       >
                         <Link
                           to={item.to}
+                          activeOptions={{ exact: item.to === "/settings" }}
                           activeProps={{ "data-active": true }}
                         >
                           <Icon />

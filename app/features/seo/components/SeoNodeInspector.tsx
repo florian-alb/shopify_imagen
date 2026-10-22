@@ -17,7 +17,7 @@ export function SeoNodeInspector({ node, document, keywords, onChange, onMerge }
   const kinds = collectionMenu ? pageKinds.filter(k => k === "collection" || k === "group") : pageKinds.filter(k => k !== "group")
   const measured = collectionMenu ? attached.filter(a => a.relevance === "relevant") : attached
   const destinations = document.nodes.filter(n => n.id !== node.id && (!collectionMenu || group || n.kind === "collection"))
-  return <section className="flex flex-col gap-5 border-t pt-5 xl:border-l xl:border-t-0 xl:pl-5 xl:pt-0" aria-label="Détail de la page">
+  return <section className="studio-inspector flex min-w-0 flex-col gap-5 xl:sticky xl:top-20 xl:max-h-[calc(100dvh-6rem)] xl:overflow-y-auto" aria-label="Détail de la page">
     <div><h2 className="font-semibold">{collectionMenu ? "Détail de l’entrée de menu" : "Détail de la page"}</h2><p className="mt-1 text-xs text-muted-foreground">{originLabels[node.origin]}</p></div>
     <FieldGroup>
       <Field><FieldLabel htmlFor="seo-node-title">{collectionMenu ? "Nom dans le menu" : "Nom de la page"}</FieldLabel><Input id="seo-node-title" value={node.title} onChange={e => onChange({ title: e.target.value })} maxLength={200} /></Field>

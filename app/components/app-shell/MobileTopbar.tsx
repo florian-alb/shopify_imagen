@@ -18,7 +18,7 @@ export function MobileTopbar() {
   const [open, setOpen] = useState(false);
 
   return (
-    <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b bg-background/90 px-3 backdrop-blur md:hidden">
+    <header className="studio-toolbar sticky top-0 z-30 flex h-14 items-center justify-between px-4 md:hidden">
       <Link to="/products" className="flex items-center gap-2 font-medium">
         <AppLogo size="sm" />
         <span>Image Studio</span>
@@ -40,7 +40,7 @@ export function MobileTopbar() {
             className="w-[19rem] border-sidebar-border bg-sidebar p-0"
           >
             <SheetTitle className="sr-only">Navigation</SheetTitle>
-            <div className="flex h-full flex-col gap-5 p-4">
+            <div className="flex h-full flex-col gap-5 overflow-y-auto p-4">
               <div className="flex items-center gap-3">
                 <AppLogo />
                 <div>
@@ -63,10 +63,10 @@ export function MobileTopbar() {
                           <Button
                             key={item.to}
                             variant="ghost"
-                            className="justify-start gap-3"
+                            className="h-10 justify-start gap-3 aria-[current=page]:bg-sidebar-accent aria-[current=page]:text-primary"
                             asChild
                           >
-                            <Link to={item.to} onClick={() => setOpen(false)}>
+                            <Link to={item.to} activeOptions={{ exact: item.to === "/settings" }} onClick={() => setOpen(false)}>
                               <Icon className="size-4" />
                               {item.label}
                             </Link>

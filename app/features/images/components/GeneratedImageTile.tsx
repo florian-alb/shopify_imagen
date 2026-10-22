@@ -9,6 +9,7 @@ import {
   X,
 } from "lucide-react";
 
+import { generatedImageStateLabel } from "../lib/state";
 import { ImageStateBadge } from "@/components/common/ImageStateBadge";
 import { StateBadge } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
@@ -54,7 +55,7 @@ export function GeneratedImageTile({
   const retryActive = Boolean(image.activeRetryImageId);
   const pushing = isImagePushing(image);
   const busy = retrying || regenerating || retryActive || pushing;
-  const displayStatus = retryActive ? "regenerating" : image.status;
+  const displayStatus = generatedImageStateLabel(image);
   const retryError =
     !retryActive && image.retryError && image.retryError !== image.error
       ? image.retryError
@@ -105,7 +106,7 @@ export function GeneratedImageTile({
         <div className="pointer-events-none absolute inset-0 grid place-items-center bg-background/60 backdrop-blur-[1px]">
           <div className="inline-flex items-center gap-2 rounded-full border bg-background/90 px-2.5 py-1 text-xs text-muted-foreground shadow-sm">
             <Loader2 className="size-3.5 animate-spin" />
-            Regenerating
+            Régénération
           </div>
         </div>
       ) : null}
@@ -126,7 +127,7 @@ export function GeneratedImageTile({
         <Button
           variant="destructive"
           size="icon-sm"
-          aria-label={`Delete ${imageLabel}`}
+          aria-label={`Supprimer ${imageLabel}`}
           disabled={pushing}
           onClick={onDelete}
           className="absolute top-1.5 right-1.5 bg-background/80 opacity-0 backdrop-blur-sm transition group-hover:opacity-100 focus-visible:opacity-100"
@@ -156,25 +157,25 @@ export function GeneratedImageTile({
         ) : null}
         {retryError ? (
           <p className="line-clamp-2 text-xs text-destructive">
-            Retry failed: {retryError}
+            Reprise en échec : {retryError}
           </p>
         ) : null}
         {pushing ? (
           <p className="flex items-center gap-1.5 text-xs text-muted-foreground" role="status">
             <Loader2 className="size-3 animate-spin" />
-            Publishing to Shopify
+            Publication sur Shopify
           </p>
         ) : null}
         {image.pushError && !pushing ? (
           <p className="line-clamp-3 text-xs text-destructive" title={image.pushError}>
-            Shopify push: {image.pushError}
+            Publication Shopify : {image.pushError}
           </p>
         ) : null}
         {image.status === "failed" && onRetry ? (
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
-                aria-label={`Retry ${imageLabel}`}
+                aria-label={`Relancer ${imageLabel}`}
                 variant="outline"
                 size="icon-sm"
                 disabled={busy}
@@ -183,7 +184,7 @@ export function GeneratedImageTile({
                 {busy ? <Loader2 className="animate-spin" /> : <RefreshCw />}
               </Button>
             </TooltipTrigger>
-            <TooltipContent>retry</TooltipContent>
+            <TooltipContent>Relancer</TooltipContent>
           </Tooltip>
         ) : null}
         {inlineActionCount ? (
@@ -196,8 +197,8 @@ export function GeneratedImageTile({
             {showReviewActions && onReview ? (
               <>
                 <Button
-                  aria-label={`Approve ${imageLabel}`}
-                  title="Approve"
+                  aria-label={`Approuver ${imageLabel}`}
+                  title="Approuver"
                   variant={
                     getReviewStatus(image) === "approved"
                       ? "default"
@@ -210,8 +211,8 @@ export function GeneratedImageTile({
                   <Check />
                 </Button>
                 <Button
-                  aria-label={`Reject ${imageLabel}`}
-                  title="Reject"
+                  aria-label={`Rejeter ${imageLabel}`}
+                  title="Rejeter"
                   variant={
                     getReviewStatus(image) === "rejected"
                       ? "destructive"
@@ -227,8 +228,8 @@ export function GeneratedImageTile({
             ) : null}
             {showRegenerateAction && onRegenerate ? (
               <Button
-                aria-label={`Regenerate ${imageLabel}`}
-                title="Regenerate"
+                aria-label={`Régénérer ${imageLabel}`}
+                title="Régénérer"
                 variant="outline"
                 size="icon-sm"
                 disabled={regenerating || pushing}
@@ -255,8 +256,8 @@ export function GeneratedImageTile({
             ) : null}
             {showInlineDeleteAction && onDelete ? (
               <Button
-                aria-label={`Delete ${imageLabel}`}
-                title="Delete"
+                aria-label={`Supprimer ${imageLabel}`}
+                title="Supprimer"
                 variant="destructive"
                 size="icon-sm"
                 disabled={pushing}

@@ -1,201 +1,72 @@
 import { Link } from "@tanstack/react-router";
-import {
-  ArrowLeft,
-  ExternalLink,
-  ListChecks,
-  RefreshCw,
-  Send,
-  WandSparkles,
-} from "lucide-react";
-
+import { ArrowLeft, ExternalLink, ListChecks, MoreHorizontal, RefreshCw, Send, WandSparkles, CheckCheck } from "lucide-react";
 import { BusyIcon, StateBadge } from "@/components/page";
-import { Badge } from "@/components/ui/badge";
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbList,
-  BreadcrumbPage,
-} from "@/components/ui/breadcrumb";
 import { Button } from "@/components/ui/button";
-import type { ProductSearch } from "@/lib/productFilters";
-import {
-  generationStateTone,
-  primaryActionTone,
-  productGenerationStateLabels,
-  productPrimaryActionLabels,
-  productPublishStateLabels,
-  productReviewStateLabels,
-  publishStateTone,
-  reviewStateTone,
-  shopifyStatusLabel,
-  type ProductGenerationState,
-  type ProductPrimaryAction,
-  type ProductPublishState,
-  type ProductReviewState,
-} from "@/lib/status";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { validateProductSearch } from "@/lib/productFilters";
+import { primaryActionTone, productPrimaryActionLabels, type ProductPrimaryAction } from "@/lib/status";
 import type { Doc } from "@/lib/convex";
-
-import { ProductNavigationButton } from "./ProductNavigationButton";
+import type { ProductWorkspaceSearch } from "../lib/productWorkspaceSearch";
 import type { ProductNavigation } from "../types";
+import type { Ref } from "react";
+import { ProductNavigationButton } from "./ProductNavigationButton";
 
-export function ProductHeader({
-  productId,
-  product,
-  search,
-  productNavigation,
-  primaryAction,
-  generationState,
-  reviewState,
-  publishState,
-  hasProductJobs,
-  shopifyAdminUrl,
-  readyImagesCount,
-  visualProductCount = 0,
-  generateLabel = "Générer",
-  publishLabel = "Publier",
-  syncing,
-  onSync,
-  onGenerate,
-  onPublish,
-}: {
+export function ProductHeader({ productId, product, search, productNavigation, primaryAction,
+  hasProductJobs, shopifyAdminUrl, readyImagesCount, publishedImagesCount, pendingCount, scopeLabel, destination, titleRef,
+  syncing, actionsDisabled, onSync, onGenerate, onPublish, onReview }: {
   productId: string;
   product: Doc<"products">;
-  search: ProductSearch;
+  search: ProductWorkspaceSearch;
   productNavigation: ProductNavigation | undefined;
   primaryAction: ProductPrimaryAction;
-  generationState: ProductGenerationState;
-  reviewState: ProductReviewState;
-  publishState: ProductPublishState;
   hasProductJobs: boolean;
   shopifyAdminUrl: string | null;
   readyImagesCount: number;
-  visualProductCount?: number;
-  generateLabel?: string;
-  publishLabel?: string;
+  publishedImagesCount: number;
+  titleRef: Ref<HTMLHeadingElement>;
+  pendingCount: number;
+  scopeLabel: string;
+  destination: string;
   syncing: boolean;
+  actionsDisabled: boolean;
   onSync: () => void;
   onGenerate: () => void;
   onPublish: () => void;
+  onReview: () => void;
 }) {
-  return (
-    <header className="mb-4 flex flex-col gap-4 border-b border-border pb-4 xl:flex-row xl:items-end xl:justify-between">
-      <div className="min-w-0">
-        <div className="mb-2 flex flex-wrap items-center gap-2">
-          <Breadcrumb>
-            <BreadcrumbList>
-              <BreadcrumbItem>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  asChild
-                  className="-ml-2 text-muted-foreground"
-                >
-                  <Link to="/products" search={search}>
-                    <ArrowLeft data-icon="inline-start" />
-                    Produits
-                  </Link>
-                </Button>
-              </BreadcrumbItem>
-              <BreadcrumbItem className="sr-only">
-                <BreadcrumbPage>{product.title}</BreadcrumbPage>
-              </BreadcrumbItem>
-            </BreadcrumbList>
-          </Breadcrumb>
-          {visualProductCount ? (
-            <>
-              <Badge variant="secondary">Produit mère</Badge>
-              <Badge variant="outline">
-                {visualProductCount} déclinaison
-                {visualProductCount === 1 ? "" : "s"}
-              </Badge>
-            </>
-          ) : (
-            <>
-              <StateBadge state={primaryActionTone(primaryAction)}>
-                {productPrimaryActionLabels[primaryAction]}
-              </StateBadge>
-              <StateBadge state={generationStateTone(generationState)}>
-                {productGenerationStateLabels[generationState]}
-              </StateBadge>
-              <StateBadge state={reviewStateTone(reviewState)}>
-                {productReviewStateLabels[reviewState]}
-              </StateBadge>
-              <StateBadge state={publishStateTone(publishState)}>
-                {productPublishStateLabels[publishState]}
-              </StateBadge>
-            </>
-          )}
-          <Badge variant="outline">
-            {product.productType || "Sans categorie"}
-          </Badge>
-          {product.shopifyStatus ? (
-            <Badge variant="outline">
-              {shopifyStatusLabel(product.shopifyStatus)}
-            </Badge>
-          ) : null}
-          {product.vendor ? (
-            <Badge variant="outline">{product.vendor}</Badge>
-          ) : null}
-        </div>
-        <h1 className="truncate text-2xl font-semibold sm:text-3xl">
-          {product.title}
-        </h1>
+  return <header className="mb-4 space-y-3">
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <Button variant="ghost" size="sm" asChild className="-ml-2 text-muted-foreground">
+        <Link to="/products" search={validateProductSearch(search)}><ArrowLeft />Retour aux résultats</Link>
+      </Button>
+      <div className="flex items-center gap-2">
+        <ProductNavigationButton direction="previous" product={productNavigation?.previous} search={search} />
+        <span className="text-xs tabular-nums text-muted-foreground">{productNavigation?.position ? `${productNavigation.position} / ${productNavigation.total}` : `${productNavigation?.total ?? 0} produits`}</span>
+        <ProductNavigationButton direction="next" product={productNavigation?.next} search={search} />
+      </div>
+    </div>
+    <div className="flex flex-wrap items-start justify-between gap-4 border-b pb-4">
+      <div className="min-w-0 flex-1 basis-72">
+        <p className="mb-2 text-xs text-muted-foreground">{destination} · {product.productType || "Sans catégorie"}</p>
+        <h1 ref={titleRef} tabIndex={-1} className="break-words text-2xl font-semibold tracking-tight outline-none sm:text-3xl">{product.title}</h1>
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <ProductNavigationButton
-            direction="previous"
-            product={productNavigation?.previous}
-            search={search}
-          />
-          <span className="text-xs text-muted-foreground">
-            {productNavigation?.position
-              ? `${productNavigation.position} / ${productNavigation.total}`
-              : `${productNavigation?.total ?? 0} products`}
-          </span>
-          <ProductNavigationButton
-            direction="next"
-            product={productNavigation?.next}
-            search={search}
-          />
+          <StateBadge state={primaryActionTone(primaryAction)}>{productPrimaryActionLabels[primaryAction]}</StateBadge>
+          <span className="text-xs text-muted-foreground">{scopeLabel}</span>
         </div>
       </div>
-      <div className="flex w-full flex-wrap items-center gap-2 xl:w-auto xl:justify-end">
-        {hasProductJobs ? (
-          <Button size="lg" variant="outline" asChild>
-            <Link to="/jobs" search={{ productId }}>
-              <ListChecks data-icon="inline-start" />
-              Jobs
-            </Link>
-          </Button>
-        ) : null}
-        <Button
-          size="lg"
-          variant="outline"
-          onClick={() => void onSync()}
-          disabled={syncing}
-        >
-          <BusyIcon busy={syncing} />
-          {!syncing ? <RefreshCw data-icon="inline-start" /> : null}
-          Sync
-        </Button>
-        {shopifyAdminUrl ? (
-          <Button size="lg" variant="outline" asChild>
-            <a href={shopifyAdminUrl} target="_blank" rel="noreferrer">
-              <ExternalLink data-icon="inline-start" />
-              Shopify
-            </a>
-          </Button>
-        ) : null}
-        <Button size="lg" onClick={onGenerate}>
-          <WandSparkles data-icon="inline-start" />
-          {generateLabel}
-        </Button>
-        {readyImagesCount ? (
-          <Button size="lg" disabled={!readyImagesCount} onClick={onPublish}>
-            <Send data-icon="inline-start" />
-            {publishLabel}
-          </Button>
-        ) : null}
+      <div className="flex w-full flex-wrap items-center gap-2 max-sm:[&>button]:min-h-11 max-sm:[&>button]:px-3 max-sm:[&>button:not(:last-child)_svg]:hidden lg:w-auto">
+        {pendingCount > 0 && <Button onClick={onReview} disabled={actionsDisabled}><CheckCheck />Vérifier {pendingCount}</Button>}
+        <Button variant={pendingCount || readyImagesCount ? "outline" : "default"} onClick={onGenerate} disabled={actionsDisabled}><WandSparkles />Générer</Button>
+        {(readyImagesCount > 0 || publishedImagesCount > 0) && <Button variant={pendingCount || !readyImagesCount ? "outline" : "default"} onClick={onPublish} disabled={actionsDisabled}><Send />{readyImagesCount ? `Publier ${readyImagesCount}` : "Republier"}</Button>}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild><Button variant="outline" size="icon" aria-label="Autres actions du produit"><MoreHorizontal /></Button></DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuItem disabled={syncing} onSelect={onSync}><BusyIcon busy={syncing} />{!syncing && <RefreshCw />}Synchroniser le produit</DropdownMenuItem>
+            {hasProductJobs && <DropdownMenuItem asChild><Link to="/jobs" search={{ productId }}><ListChecks />Voir les générations</Link></DropdownMenuItem>}
+            {shopifyAdminUrl && <DropdownMenuItem asChild><a href={shopifyAdminUrl} target="_blank" rel="noreferrer"><ExternalLink />Ouvrir dans Shopify</a></DropdownMenuItem>}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
-    </header>
-  );
+    </div>
+  </header>;
 }

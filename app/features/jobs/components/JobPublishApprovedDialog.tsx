@@ -22,6 +22,7 @@ export function JobPublishApprovedDialog({
   selectedPushableImages,
   selectedPushProductCount,
   targetProduct,
+  destination,
   onOpenChange,
   onPush,
   onReplaceExistingChange,
@@ -33,71 +34,63 @@ export function JobPublishApprovedDialog({
   selectedPushableImages: Doc<"generatedImages">[];
   selectedPushProductCount: number;
   targetProduct: Doc<"products"> | null;
+  destination: string;
   onOpenChange: (open: boolean) => void;
   onPush: () => void;
   onReplaceExistingChange: (checked: boolean) => void;
 }) {
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent className="sm:max-w-lg">
+      <AlertDialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
         <AlertDialogHeader>
           <AlertDialogTitle>
             {targetProduct
-              ? "Push this product's approved images?"
-              : "Push approved images to Shopify?"}
+              ? "Publier les images de ce produit ?"
+              : "Publier les images approuvées du lot ?"}
           </AlertDialogTitle>
           <AlertDialogDescription>
-            {targetProduct ? (
-              <>
-                This will upload {selectedPushableImages.length} approved image
-                {selectedPushableImages.length === 1 ? "" : "s"} for{" "}
-                {targetProduct.title}. Rejected, unreviewed, and
-                already-published images will stay untouched.
-              </>
-            ) : (
-              <>
-                This will upload {selectedPushableImages.length} approved image
-                {selectedPushableImages.length === 1 ? "" : "s"} across{" "}
-                {selectedPushProductCount} product
-                {selectedPushProductCount === 1 ? "" : "s"}. Rejected,
-                unreviewed, and already-published images will stay untouched.
-              </>
-            )}
+            {selectedPushableImages.length} image{selectedPushableImages.length === 1 ? "" : "s"}{" "}
+            approuvée{selectedPushableImages.length === 1 ? "" : "s"} pour{" "}
+            {targetProduct
+              ? targetProduct.title
+              : `${selectedPushProductCount} produit${selectedPushProductCount === 1 ? "" : "s"}`}
+            . Les images non vérifiées, rejetées ou déjà publiées ne sont pas incluses.
           </AlertDialogDescription>
         </AlertDialogHeader>
+        <div className="space-y-1 rounded-lg bg-muted p-3 text-sm">
+          <p>
+            <span className="text-muted-foreground">Destination : </span>
+            <strong>{destination}</strong>
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {targetProduct
+              ? "Ce produit uniquement."
+              : "Toutes les images admissibles du lot, quel que soit le filtre de vérification affiché."}
+          </p>
+        </div>
         <Label className="flex items-start gap-3 rounded-lg border p-3">
           <Checkbox
             className="mt-0.5"
             checked={replaceExisting}
             disabled={publishDisabled}
-            onCheckedChange={(checked) =>
-              onReplaceExistingChange(checked === true)
-            }
+            onCheckedChange={(checked) => onReplaceExistingChange(checked === true)}
           />
           <span>
-            <strong className="block text-sm">
-              Replace current Shopify galleries
-            </strong>
+            <strong className="block text-sm">Remplacer les galeries Shopify</strong>
             <span className="mt-1 block text-xs text-muted-foreground">
-              Existing Shopify media will be deleted after each successful upload.
+              Les anciens médias Shopify seront supprimés après chaque envoi réussi.
             </span>
           </span>
         </Label>
-
         <p className="text-xs text-muted-foreground">
-          The push runs in the background. You can leave this page or close your
-          browser and check progress on this job later.
+          La publication continue en arrière-plan. Retrouvez sa progression sur ce lot, même après
+          avoir quitté la page.
         </p>
-
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={starting}>Cancel</AlertDialogCancel>
-          <Button
-            disabled={publishDisabled || !selectedPushableImages.length}
-            onClick={onPush}
-          >
+          <AlertDialogCancel disabled={starting}>Annuler</AlertDialogCancel>
+          <Button disabled={publishDisabled || !selectedPushableImages.length} onClick={onPush}>
             <BusyIcon busy={starting} />
-            {!starting ? <Send data-icon="inline-start" /> : null}
-            Push {selectedPushableImages.length} image
+            {!starting && <Send />}Publier {selectedPushableImages.length} image
             {selectedPushableImages.length === 1 ? "" : "s"}
           </Button>
         </AlertDialogFooter>

@@ -2,7 +2,7 @@
 import { convexTest } from "convex-test";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { v } from "convex/values";
-import { api } from "../../_generated/api";
+import { api, internal } from "../../_generated/api";
 import { internalAction } from "../../_generated/server";
 import schema from "../../schema";
 
@@ -83,6 +83,76 @@ async function fixture() {
     alternativeContent: "Unsized {{VARIANT_TITLE}}",
   });
   return { t, client, promptId, ...ids };
+}
+
+async function sizeGroupFixture(separated = false) {
+  const base = await fixture();
+  const { t, productId, shopId } = base;
+  const groups = await t.run(async (ctx) => {
+    const product = (await ctx.db.get(productId))!;
+    const configId = await ctx.db.insert("visualGroupConfigs", {
+      shopId,
+      productId,
+      optionNames: ["Taille"],
+      publishMode: "variant_media",
+      analysisStatus: "not_started",
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    const familyId = separated
+      ? await ctx.db.insert("visualProductFamilies", {
+          shopId,
+          sourceProductId: productId,
+          sourceShopifyProductId: product.shopifyProductId,
+          configId,
+          createdAt: 1,
+          updatedAt: 1,
+        })
+      : null;
+    const groups = [];
+    for (const [position, variant] of product.variants.slice(0, 2).entries()) {
+      const optionValues = variant.selectedOptions.filter(
+        (option: { name: string }) => option.name === "Taille",
+      );
+      const label = optionValues[0].value;
+      const groupId = await ctx.db.insert("visualGroups", {
+        shopId,
+        configId,
+        productId,
+        key: `Taille=${label}`,
+        label,
+        optionValues,
+        position,
+        createdAt: 1,
+        updatedAt: 1,
+      });
+      await ctx.db.insert("visualGroupVariants", {
+        shopId,
+        configId,
+        productId,
+        groupId,
+        shopifyVariantId: variant.id,
+        title: variant.title,
+        selectedOptions: variant.selectedOptions,
+        createdAt: 1,
+        updatedAt: 1,
+      });
+      if (familyId) {
+        await ctx.db.insert("visualProductFamilyMembers", {
+          shopId,
+          familyId,
+          groupId,
+          shopifyProductId: `sibling-${position}`,
+          title: `Peluche ${label}`,
+          createdAt: 1,
+          updatedAt: 1,
+        });
+      }
+      groups.push(groupId);
+    }
+    return { configId, groupIds: groups };
+  });
+  return { ...base, ...groups };
 }
 
 describe("variant generation workflow", () => {
@@ -441,6 +511,191 @@ describe("variant generation workflow", () => {
       "Rouge / 20 cm",
     );
     expect(historicalRetry?.sourceImageUrls).toEqual(images[0].sourceImageUrls);
+    await t.finishAllScheduledFunctions(() => vi.runAllTimers());
+  });
+
+  test.each([false, true])(
+    "size groups without dedicated references use variant text (separated: %s)",
+    async (separated) => {
+      const { t, client, productId, groupIds } =
+        await sizeGroupFixture(separated);
+      const args = {
+        productIds: [productId],
+        selectedImageTypes: ["Hero"],
+        visualGroupIds: groupIds,
+        variantSelection: "all" as const,
+      };
+      const preview = await client.query(api.jobs.preview, args);
+      expect(preview).toEqual({
+        totalImages: 2,
+        separatedProductCount: separated ? 1 : 0,
+        error: null,
+      });
+      expect(
+        (
+          await client.query(api.jobs.preview, {
+            ...args,
+            variantSelection: "first",
+          })
+        ).totalImages,
+      ).toBe(separated ? 2 : 1);
+      const jobId = await client.mutation(api.jobs.create, {
+        ...args,
+        forceRegenerate: true,
+      });
+      const images = await t.run((ctx) =>
+        ctx.db
+          .query("generatedImages")
+          .withIndex("by_job", (q) => q.eq("jobId", jobId))
+          .take(10),
+      );
+      expect(images).toHaveLength(preview.totalImages);
+      expect(images.map((image) => image.visualGroupId)).toEqual(groupIds);
+      expect(images.map((image) => image.promptBranch)).toEqual([
+        "if_true",
+        "if_true",
+      ]);
+      for (const [index, image] of images.entries()) {
+        expect(image.usesGroupReferences).toBe(false);
+        expect(image.sourceImageUrls).toEqual([
+          "https://example.com/product.jpg",
+        ]);
+        expect(image.promptUsed).toContain(index === 0 ? "20 cm" : "40 cm");
+        expect(image.promptUsed).toContain("general product context only");
+        expect(image.promptUsed).not.toContain(
+          "from the confirmed reference images",
+        );
+      }
+      await t.run((ctx) =>
+        ctx.db.patch(images[1]._id, { status: "generated" }),
+      );
+      await client.mutation(api.jobs.regenerateImage, {
+        imageId: images[1]._id,
+      });
+      const retry = await t.run(async (ctx) => {
+        const source = (await ctx.db.get(images[1]._id))!;
+        return ctx.db.get(source.activeRetryImageId!);
+      });
+      expect(retry).toMatchObject({
+        usesGroupReferences: false,
+        promptBranch: "if_true",
+      });
+      expect(retry?.promptUsed).toContain("40 cm");
+      expect(retry?.promptUsed).toContain("general product context only");
+      expect(retry?.sourceImageUrls).toEqual(images[1].sourceImageUrls);
+      await t.mutation(internal.jobs.completeImage, {
+        imageId: retry!._id,
+        generatedImageUrl: "https://example.com/retry.jpg",
+        storageUrl: "https://example.com/retry.jpg",
+      });
+      const retouchedId = await client.mutation(
+        internal.jobs.insertRetouchedImage,
+        {
+          sourceImageId: images[1]._id,
+          storageUrl: "https://example.com/retouched.jpg",
+        },
+      );
+      expect(await t.run((ctx) => ctx.db.get(retouchedId))).toMatchObject({
+        usesGroupReferences: false,
+        generationTarget: images[1].generationTarget,
+      });
+      await client.mutation(api.jobs.regenerateImage, { imageId: retouchedId });
+      const retouchedRetry = await t.run(async (ctx) => {
+        const source = (await ctx.db.get(retouchedId))!;
+        return ctx.db.get(source.activeRetryImageId!);
+      });
+      expect(retouchedRetry?.promptUsed).toContain(
+        "general product context only",
+      );
+      await t.finishAllScheduledFunctions(() => vi.runAllTimers());
+    },
+  );
+
+  test("group references require confirmation unless variant text is explicitly chosen", async () => {
+    const { t, client, productId, shopId, configId, groupIds } =
+      await sizeGroupFixture();
+    const referenceId = await t.run((ctx) =>
+      ctx.db.insert("visualGroupReferences", {
+        shopId,
+        configId,
+        productId,
+        groupId: groupIds[0],
+        sourceUrl: "https://example.com/pending.jpg",
+        referenceUrl: "https://example.com/pending.jpg",
+        assignmentSource: "ai",
+        confidence: 0.6,
+        confirmed: false,
+        position: 0,
+        createdAt: 1,
+        updatedAt: 1,
+      }),
+    );
+    const args = {
+      productIds: [productId],
+      selectedImageTypes: ["Hero"],
+      visualGroupIds: [groupIds[0]],
+      variantSelection: "all" as const,
+    };
+    expect((await client.query(api.jobs.preview, args)).error).toContain(
+      "Confirmez une référence",
+    );
+    await expect(
+      client.mutation(api.jobs.create, {
+        ...args,
+        forceRegenerate: true,
+      }),
+    ).rejects.toThrow("Confirmez une référence");
+
+    for (const confirmed of [false, true]) {
+      await t.run((ctx) => ctx.db.patch(referenceId, { confirmed }));
+      const textArgs = { ...args, textOnlyGroupIds: [groupIds[0]] };
+      expect(await client.query(api.jobs.preview, textArgs)).toMatchObject({
+        totalImages: 1,
+        error: null,
+      });
+      const jobId = await client.mutation(api.jobs.create, {
+        ...textArgs,
+        forceRegenerate: true,
+      });
+      const image = await t.run((ctx) =>
+        ctx.db
+          .query("generatedImages")
+          .withIndex("by_job", (q) => q.eq("jobId", jobId))
+          .unique(),
+      );
+      expect(image).toMatchObject({
+        usesGroupReferences: false,
+        sourceImageUrl: "https://example.com/product.jpg",
+      });
+    }
+
+    const confirmedJobId = await client.mutation(api.jobs.create, {
+      ...args,
+      forceRegenerate: true,
+    });
+    const confirmedImage = await t.run((ctx) =>
+      ctx.db
+        .query("generatedImages")
+        .withIndex("by_job", (q) => q.eq("jobId", confirmedJobId))
+        .unique(),
+    );
+    expect(confirmedImage).toMatchObject({
+      usesGroupReferences: true,
+      sourceImageUrl: "https://example.com/pending.jpg",
+    });
+    expect(confirmedImage?.promptUsed).toContain(
+      "from the confirmed reference images",
+    );
+    const invalidArgs = { ...args, textOnlyGroupIds: [groupIds[1]] };
+    expect((await client.query(api.jobs.preview, invalidArgs)).error).toContain(
+      "groupe sélectionné",
+    );
+    await expect(
+      client.mutation(api.jobs.create, {
+        ...invalidArgs,
+        forceRegenerate: true,
+      }),
+    ).rejects.toThrow("groupe sélectionné");
     await t.finishAllScheduledFunctions(() => vi.runAllTimers());
   });
 

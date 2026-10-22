@@ -23,25 +23,26 @@ import {
 } from "@/components/ui/select";
 import type { GenerationStatus } from "@/lib/status";
 
-const readableBadgeBase = "h-6 border px-2.5 text-xs font-medium";
+const readableBadgeBase = "h-6 border-transparent px-2 text-xs font-medium";
 
-export const pageContentClass = "w-full px-4 py-4 md:px-5";
+export const pageContentClass = "studio-page";
+
+const toneClasses = {
+  neutral: "bg-muted text-muted-foreground",
+  success: "bg-success-subtle text-success",
+  warning: "bg-warning-subtle text-warning",
+  danger: "bg-danger-subtle text-destructive",
+  info: "bg-info-subtle text-info",
+};
 
 const statusClasses: Record<GenerationStatus, string> = {
-  not_started:
-    "border-stone-300 bg-stone-100 text-stone-800 dark:border-stone-600/60 dark:bg-stone-800 dark:text-stone-200",
-  generating:
-    "border-amber-300 bg-amber-100 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-200",
-  partial:
-    "border-amber-300 bg-amber-100 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-200",
-  ready:
-    "border-emerald-300 bg-emerald-100 text-emerald-950 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-200",
-  pushed:
-    "border-emerald-300 bg-emerald-100 text-emerald-950 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-200",
-  canceled:
-    "border-red-300 bg-red-100 text-red-950 dark:border-red-500/30 dark:bg-red-500/15 dark:text-red-200",
-  failed:
-    "border-red-300 bg-red-100 text-red-950 dark:border-red-500/30 dark:bg-red-500/15 dark:text-red-200",
+  not_started: toneClasses.neutral,
+  generating: toneClasses.info,
+  partial: toneClasses.warning,
+  ready: toneClasses.success,
+  pushed: toneClasses.success,
+  canceled: toneClasses.neutral,
+  failed: toneClasses.danger,
 };
 
 export function PageHeader({
@@ -56,12 +57,12 @@ export function PageHeader({
   children?: ReactNode;
 }) {
   return (
-    <header className="mb-4 flex flex-col gap-3 border-border pb-4 lg:flex-row lg:items-end lg:justify-between">
+    <header className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
       <div className="min-w-0">
         {eyebrow ? (
-          <p className="mb-1 text-sm text-muted-foreground">{eyebrow}</p>
+          <p className="mb-2 text-xs font-medium text-muted-foreground">{eyebrow}</p>
         ) : null}
-        <h1 className="truncate text-2xl font-semibold leading-tight sm:text-3xl">
+        <h1 className="break-words text-2xl font-semibold leading-tight tracking-tight sm:text-3xl">
           {title}
         </h1>
         {children ? (
@@ -99,16 +100,9 @@ export function StateBadge({
   state = "neutral",
 }: {
   children: ReactNode;
-  state?: "neutral" | "success" | "warning" | "danger";
+  state?: "neutral" | "success" | "warning" | "danger" | "info";
 }) {
-  const className =
-    state === "success"
-      ? "border-emerald-300 bg-emerald-100 text-emerald-950 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-200"
-      : state === "warning"
-        ? "border-amber-300 bg-amber-100 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-200"
-        : state === "danger"
-          ? "border-red-300 bg-red-100 text-red-950 dark:border-red-500/30 dark:bg-red-500/15 dark:text-red-200"
-          : "border-stone-300 bg-stone-100 text-stone-800 dark:border-stone-600/60 dark:bg-stone-800 dark:text-stone-200";
+  const className = toneClasses[state];
   return (
     <Badge variant="outline" className={`${readableBadgeBase} ${className}`}>
       {children}
@@ -211,7 +205,7 @@ export function NumberedPaginator({
   };
 
   return (
-    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-2">
+    <div className="mt-5 flex flex-wrap items-center justify-between gap-3 px-1 py-2">
       {onPageSizeChange ? (
         <Field orientation="horizontal" className="w-fit">
           <FieldLabel

@@ -1,91 +1,48 @@
 import { useAction } from "convex/react";
 import { toast } from "sonner";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { errorMessage } from "@/lib/errors";
 import { api, type Doc, type Id } from "@/lib/convex";
+import { initialPublicationSelection, selectedPublicationImages } from "../lib/productImageViews";
 
-export function useProductImagePublish({
-  product,
-  readyImages,
-}: {
-  product: Doc<"products"> | null | undefined;
+export function useProductImagePublish({ product, readyImages, groupId, onPublished }: {
+  product: Doc<"products">;
   readyImages: Doc<"generatedImages">[];
+  groupId: Id<"visualGroups"> | null;
+  onPublished: () => void;
 }) {
   const pushImages = useAction(api.shopify.pushProductImages);
-  const [open, setOpen] = useState(false);
-  const [selectedPushIds, setSelectedPushIds] = useState<
-    Set<Id<"generatedImages">>
-  >(new Set());
+  const [selectedPushIds, setSelectedPushIds] = useState<Set<Id<"generatedImages">>>(
+    () => initialPublicationSelection(readyImages, groupId),
+  );
   const [replaceExisting, setReplaceExisting] = useState(false);
   const [replaceVariantMedia, setReplaceVariantMedia] = useState(true);
-  const [focusedGroupId, setFocusedGroupId] =
-    useState<Id<"visualGroups"> | null>(null);
   const [busy, setBusy] = useState(false);
-
-  function openWithImages(
-    images: Doc<"generatedImages">[],
-    focusGroupId: Id<"visualGroups"> | null,
-  ) {
-    setSelectedPushIds(new Set(images.map((image) => image._id)));
-    setFocusedGroupId(focusGroupId);
-    setReplaceExisting(false);
-    setReplaceVariantMedia(true);
-    setOpen(true);
-  }
-
-  function openPush() {
-    openWithImages(readyImages, null);
-  }
-
-  function openPushForGroup(groupId: Id<"visualGroups">) {
-    openWithImages(
-      readyImages.filter((image) => image.visualGroupId === groupId),
-      groupId,
-    );
-  }
+  const pending = useRef(false);
 
   async function push() {
-    if (!product || !selectedPushIds.size) return;
-    const count = selectedPushIds.size;
+    const images = selectedPublicationImages(readyImages, selectedPushIds, groupId);
+    if (!images.length || pending.current) return;
+    pending.current = true;
     setBusy(true);
     try {
       await pushImages({
         productId: product._id,
-        imageIds: readyImages
-          .filter((image) => selectedPushIds.has(image._id))
-          .map((image) => image._id),
+        imageIds: images.map(image => image._id),
         replaceExisting,
         replaceVariantMedia,
       });
-      setOpen(false);
-      toast.success(
-        `${count} image${count === 1 ? "" : "s"} publiée${
-          count === 1 ? "" : "s"
-        } dans Shopify`,
-      );
+      onPublished();
+      toast.success(`${images.length} image${images.length === 1 ? "" : "s"} publiée${images.length === 1 ? "" : "s"} dans Shopify`);
     } catch (pushError) {
-      toast.error("Push failed", {
-        description: errorMessage(pushError),
-      });
+      toast.error("Publication impossible", { description: errorMessage(pushError) });
     } finally {
+      pending.current = false;
       setBusy(false);
     }
   }
 
-  return {
-    open,
-    setOpen,
-    selectedPushIds,
-    setSelectedPushIds,
-    replaceExisting,
-    setReplaceExisting,
-    replaceVariantMedia,
-    setReplaceVariantMedia,
-    focusedGroupId,
-    busy,
-    openPush,
-    openPushForGroup,
-    push,
-  };
+  return { selectedPushIds, setSelectedPushIds, replaceExisting, setReplaceExisting,
+    replaceVariantMedia, setReplaceVariantMedia, busy, push };
 }

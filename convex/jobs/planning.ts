@@ -28,6 +28,7 @@ export type PlannedImageTask = {
   visualGroupId: Id<"visualGroups"> | null;
   visualGroupKey: string | null;
   visualGroupLabel: string | null;
+  usesGroupReferences: boolean;
   imageType: string;
   promptUsed: string;
   generationTarget: GenerationTarget;
@@ -144,6 +145,8 @@ export function buildImageTasks(args: {
           visualGroupId: target.groupId,
           visualGroupKey: target.key,
           visualGroupLabel: target.label,
+          usesGroupReferences:
+            target.usesGroupReferences ?? Boolean(target.groupId),
           imageType,
           promptUsed,
           generationTarget: target.generationTarget,
@@ -179,6 +182,12 @@ function appendTargetContract(prompt: string, target: ImageTarget) {
   const values = target.optionValues
     .map((option) => `${option.name}: ${option.value}`)
     .join(", ");
+  if (target.usesGroupReferences === false) {
+    return `${prompt}
+
+VISUAL VARIANT CONTRACT:
+Generate only the "${target.label}" product variant (${values}). Use the variant title and selected option values to determine its size, dimensions, color, and other specified attributes. Any supplied product images provide general product context only; they are not confirmed references for this variant. Adapt the product to the requested attributes even when the base product image depicts another size or variant. Preserve product details that the variant text does not change.`;
+  }
   return `${prompt}
 
 VISUAL VARIANT CONTRACT:

@@ -5,9 +5,12 @@ import { Button } from "@/components/ui/button";
 import { reviewAggregateBadge } from "@/features/images/lib/review";
 import type { Doc } from "@/lib/convex";
 import { executionModeLabel } from "../lib/jobDetailViewModel";
+import { validateJobSearch, type JobSearch } from "../lib/jobSearch";
+import { jobStatusLabels } from "../lib/jobListViews";
 import { JobHistoryMenu } from "./JobHistoryMenu";
 
 export function JobDetailHeader({
+  search,
   canCancelJob,
   canForcePoll,
   cancelling,
@@ -23,6 +26,7 @@ export function JobDetailHeader({
   onArchive,
   onDelete,
 }: {
+  search: JobSearch;
   canCancelJob: boolean;
   canForcePoll: boolean;
   cancelling: boolean;
@@ -46,14 +50,14 @@ export function JobDetailHeader({
         className="-ml-2 mb-3 text-muted-foreground"
         asChild
       >
-        <Link to="/jobs" search={{ archived: job.archivedAt != null ? true : undefined }}>
+        <Link to="/jobs" search={{ ...validateJobSearch(search), archived: search.archived ?? (job.archivedAt != null ? true : undefined) }}>
           <ArrowLeft data-icon="inline-start" />
-          Generations
+          Retour aux générations
         </Link>
       </Button>
       <PageHeader
-        eyebrow={job.mode === "bulk" ? "Operation bulk" : "Operation produit"}
-        title={`Job ${job._id.slice(-6)}`}
+        eyebrow={job.mode === "bulk" ? "Génération groupée" : "Génération d’un produit"}
+        title={`Lot ${job._id.slice(-6)}`}
         action={
           <div className="flex flex-wrap items-center gap-2">
             <StateBadge state="neutral">
@@ -62,7 +66,7 @@ export function JobDetailHeader({
             <StateBadge>
               {job.imageProvider === "gemini" ? "Nano Banana Pro" : "OpenAI"}
             </StateBadge>
-            <StateBadge state={jobState}>{job.status}</StateBadge>
+            <StateBadge state={jobState}>{jobStatusLabels[job.status]}</StateBadge>
             {job.archivedAt != null ? <StateBadge state="neutral">Archivé</StateBadge> : null}
             {job.batchStatus ? <StateBadge>{job.batchStatus}</StateBadge> : null}
             <StateBadge state={reviewBadge.tone}>{reviewBadge.label}</StateBadge>
@@ -79,7 +83,7 @@ export function JobDetailHeader({
                 ) : (
                   <Zap data-icon="inline-start" />
                 )}
-                Poll
+                Actualiser le traitement
               </Button>
             ) : null}
             <JobHistoryMenu job={job} busy={historyBusy || retrying || cancelling}
@@ -97,7 +101,7 @@ export function JobDetailHeader({
                 ) : (
                   <X data-icon="inline-start" />
                 )}
-                Annuler
+                Annuler la génération
               </Button>
             ) : null}
 

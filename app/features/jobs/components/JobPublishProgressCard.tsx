@@ -22,31 +22,31 @@ export function JobPublishProgressCard({ run }: { run: JobImagePublishRun | null
               {running ? <BusyIcon busy /> : hasErrors ? (
                 <AlertCircle className="size-4 text-destructive" />
               ) : <CheckCircle2 className="size-4 text-emerald-600" />}
-              {running ? "Publishing to Shopify in the background" : hasErrors
-                ? "Shopify push finished with errors"
-                : "Shopify push completed"}
+              {running ? "Publication Shopify en arrière-plan" : hasErrors
+                ? "Publication terminée avec des erreurs"
+                : "Publication Shopify terminée"}
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
               {running
-                ? "You can leave this page or close your browser. Progress is saved here."
-                : `${run.pushedImages} of ${run.totalImages} images pushed to Shopify.`}
+                ? "Vous pouvez quitter cette page. La progression reste enregistrée ici."
+                : `${run.pushedImages} images sur ${run.totalImages} publiées sur Shopify.`}
             </p>
           </div>
           <span className="flex items-center gap-2 text-xs text-muted-foreground">
             <Send className="size-3.5" />
-            {run.processedProducts} / {run.totalProducts} products processed
+            {run.processedProducts} / {run.totalProducts} produits traités
           </span>
         </div>
-        <Progress value={progress} aria-label="Shopify publication progress" />
+        <Progress value={progress} aria-label="Progression de la publication Shopify" />
         {run.failedProducts > 0 ? (
           <p className="text-xs text-destructive" role="status">
-            {run.failedProducts} product{run.failedProducts === 1 ? "" : "s"} failed.
-            {running ? " The remaining products will continue." : " Remaining approved images can be pushed again."}
+            {run.failedProducts} produit{run.failedProducts === 1 ? "" : "s"} en échec.
+            {running ? " Le traitement des autres produits continue." : " Les images approuvées restantes peuvent être publiées à nouveau."}
           </p>
         ) : null}
         {run.errors.length ? (
           <details className="text-xs">
-            <summary className="cursor-pointer font-medium">View publication errors</summary>
+            <summary className="cursor-pointer font-medium">Voir les erreurs de publication</summary>
             <ul className="mt-2 space-y-2 text-muted-foreground">
               {run.errors.map((failure, index) => (
                 <li key={index}>

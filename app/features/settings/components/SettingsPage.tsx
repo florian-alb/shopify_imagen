@@ -1,21 +1,11 @@
-import {
-  Layers3,
-  RefreshCw,
-  SlidersHorizontal,
-  Sparkles,
-  Store,
-} from "lucide-react";
+import { Layers3, SlidersHorizontal, Sparkles, Store } from "lucide-react";
 import { useEffect } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
-import {
-  BusyIcon,
-  PageHeader,
-  StateBadge,
-  pageContentClass,
-} from "@/components/page";
-import { Button } from "@/components/ui/button";
+import { PageHeader, pageContentClass } from "@/components/page";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSettingsPage } from "../hooks/useSettingsPage";
+import type { SettingsSearch } from "../lib/settingsSearch";
 import type { SettingsTab } from "../types";
 import { ActiveShopBanner } from "./ActiveShopBanner";
 import { AdvancedSettingsTab } from "./AdvancedSettingsTab";
@@ -23,23 +13,26 @@ import { GenerationSettingsTab } from "./GenerationSettingsTab";
 import { ModelSettingsTab } from "./ModelSettingsTab";
 import { ShopSettingsTab } from "./ShopSettingsTab";
 
-export function SettingsPage() {
+export function SettingsPage({ search = {} }: { search?: SettingsSearch }) {
   const page = useSettingsPage();
+  const navigate = useNavigate();
+  const tab = search.tab ?? "boutique";
+  function setTab(next: SettingsTab) {
+    void navigate({ to: "/settings", search: { tab: next }, replace: true, resetScroll: false });
+  }
 
   useEffect(() => {
     const url = new URL(window.location.href);
-    const shopifyOAuthStatus = url.searchParams.get("shopify_oauth");
-    if (shopifyOAuthStatus === "success") {
+    const status = url.searchParams.get("shopify_oauth");
+    if (status === "success")
       toast.success("Accès Shopify mis à jour", {
         description: "La boutique peut maintenant publier les images.",
       });
-    } else if (shopifyOAuthStatus === "error") {
+    else if (status === "error")
       toast.error("Autorisation Shopify non finalisée", {
-        description:
-          "Vérifie l’URL de callback autorisée dans Shopify, puis réessaie.",
+        description: "Vérifiez l’URL de callback autorisée dans Shopify, puis réessayez.",
       });
-    }
-    if (shopifyOAuthStatus === "success" || shopifyOAuthStatus === "error") {
+    if (status === "success" || status === "error") {
       url.searchParams.delete("shopify_oauth");
       window.history.replaceState(window.history.state, "", url);
     }
@@ -47,83 +40,59 @@ export function SettingsPage() {
 
   return (
     <main className={pageContentClass}>
-      <PageHeader
-        title="Parametres"
-        action={
-          <>
-            <StateBadge state={page.provider === "gemini" ? "success" : "neutral"}>
-              {page.provider === "gemini" ? "Gemini" : "OpenAI"}
-            </StateBadge>
-            <StateBadge
-              state={page.executionMode === "batch" ? "success" : "neutral"}
-            >
-              {page.executionMode === "batch" ? "Batch" : "Temps reel"}
-            </StateBadge>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => void page.runSync()}
-              disabled={page.syncing || page.shops === undefined || !page.activeShop}
-            >
-              <BusyIcon busy={page.syncing} />
-              {!page.syncing ? <RefreshCw data-icon="inline-start" /> : null}
-              Synchroniser
-            </Button>
-          </>
-        }
-      >
-        {page.headerSubtitle}
+      <PageHeader title="Réglages" eyebrow="Votre espace de travail">
+        Gérez vos boutiques et les paramètres de vos prochaines générations.
       </PageHeader>
-
-      <ActiveShopBanner
-        shop={page.activeShop}
-        loading={page.shops === undefined}
-        onChange={() => page.setTab("boutique")}
-      />
-
-      <Tabs
-        value={page.tab}
-        onValueChange={(value) => page.setTab(value as SettingsTab)}
-      >
-        <div className="mb-4 overflow-x-auto pb-1">
-          <TabsList className="w-max border border-border bg-card">
-            <TabsTrigger value="boutique">
-              <Store className="size-4" />
-              Boutique
+      <Tabs value={tab} onValueChange={(value) => setTab(value as SettingsTab)} className="gap-5">
+        <div className="overflow-x-auto pb-1">
+          <TabsList aria-label="Rubriques des réglages" className="h-11 w-max">
+            <TabsTrigger value="boutique" className="px-2 text-xs sm:px-3 sm:text-sm">
+              <Store className="hidden sm:block" />
+              Boutiques
             </TabsTrigger>
-            <TabsTrigger value="generation">
-              <Sparkles className="size-4" />
-              Generation
+            <TabsTrigger value="generation" className="px-2 text-xs sm:px-3 sm:text-sm">
+              <Sparkles className="hidden sm:block" />
+              Génération
             </TabsTrigger>
-            <TabsTrigger value="modeles">
-              <Layers3 className="size-4" />
-              Modeles
+            <TabsTrigger value="modeles" className="px-2 text-xs sm:px-3 sm:text-sm">
+              <Layers3 className="hidden sm:block" />
+              Modèles IA
             </TabsTrigger>
-            <TabsTrigger value="avance">
-              <SlidersHorizontal className="size-4" />
-              Avance
+            <TabsTrigger value="avance" className="px-2 text-xs sm:px-3 sm:text-sm">
+              <SlidersHorizontal className="hidden sm:block" />
+              Avancé
             </TabsTrigger>
           </TabsList>
         </div>
-
-        <TabsContent value="boutique">
+        {tab !== "boutique" && (
+          <ActiveShopBanner
+            shop={page.activeShop}
+            loading={page.shops === undefined}
+            onChange={() => setTab("boutique")}
+          />
+        )}
+        <TabsContent
+          value="boutique"
+          forceMount
+          hidden={tab !== "boutique"}
+          className="data-[state=inactive]:hidden"
+        >
           <ShopSettingsTab
-            appOrigin={page.appOrigin}
-            currentHandle={page.currentHandle}
-            normalizedDomain={page.normalizedDomain}
-            onboardingStep={page.onboardingStep}
+            connection={page.connection}
             saving={page.saving}
-            shopForm={page.shopForm}
             shops={page.shops}
-            onFieldChange={page.updateShopFormField}
-            onResetForm={page.resetShopForm}
-            onStepChange={page.setOnboardingStep}
-            onSubmit={page.submitShop}
+            activeShop={page.activeShop}
+            syncing={page.syncing}
+            onSync={() => void page.runSync()}
             onUseShop={page.useShop}
           />
         </TabsContent>
-
-        <TabsContent value="generation">
+        <TabsContent
+          value="generation"
+          forceMount
+          hidden={tab !== "generation"}
+          className="data-[state=inactive]:hidden"
+        >
           <GenerationSettingsTab
             executionMode={page.executionMode}
             provider={page.provider}
@@ -131,8 +100,12 @@ export function SettingsPage() {
             onSwitchSetting={page.switchSetting}
           />
         </TabsContent>
-
-        <TabsContent value="modeles">
+        <TabsContent
+          value="modeles"
+          forceMount
+          hidden={tab !== "modeles"}
+          className="data-[state=inactive]:hidden"
+        >
           <ModelSettingsTab
             drafts={page.drafts}
             provider={page.provider}
@@ -142,8 +115,12 @@ export function SettingsPage() {
             onSave={page.save}
           />
         </TabsContent>
-
-        <TabsContent value="avance">
+        <TabsContent
+          value="avance"
+          forceMount
+          hidden={tab !== "avance"}
+          className="data-[state=inactive]:hidden"
+        >
           <AdvancedSettingsTab
             drafts={page.drafts}
             provider={page.provider}

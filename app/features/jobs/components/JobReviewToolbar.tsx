@@ -1,3 +1,4 @@
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import type { Doc } from "@/lib/convex";
 import {
@@ -28,16 +29,21 @@ export function JobReviewToolbar({
       <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <p className="mb-1 text-xs text-muted-foreground">
-            {executionModeLabel(executionMode)} review
+            {executionModeLabel(executionMode)} · Vérification
           </p>
-          <h2 className="text-xl font-semibold">Review des images</h2>
+          <h2 className="text-xl font-semibold">Vérifier les images</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Approuvez les images publier. Les rejets restent disponibles comme
-            reference.
+            Approuvez les images à publier. Les images rejetées restent disponibles comme références.
           </p>
         </div>
       </div>
-      <div className="flex flex-wrap gap-2">
+      <div className="sm:hidden">
+        <Select value={filter} onValueChange={value => onFilterChange(value as ReviewFilter)}>
+          <SelectTrigger className="h-11 w-full" aria-label="Filtrer les images du lot"><SelectValue /></SelectTrigger>
+          <SelectContent>{reviewFilters.map(item => <SelectItem key={item.value} value={item.value}>{item.label} · {item.value === "all" ? images.length : counts[item.value]}</SelectItem>)}</SelectContent>
+        </Select>
+      </div>
+      <div className="hidden flex-wrap gap-2 sm:flex">
         {reviewFilters.map((item) => {
           const count =
             item.value === "all"
@@ -56,6 +62,7 @@ export function JobReviewToolbar({
 
           return (
             <Button
+              aria-pressed={filter === item.value}
               key={item.value}
               variant={filter === item.value ? "default" : "outline"}
               size="sm"

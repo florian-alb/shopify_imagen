@@ -9,6 +9,7 @@ import { api, type Doc, type Id } from "@/lib/convex";
 import type { VisualGroupsData } from "../types";
 import { useVariantGenerationSelection } from "./useVariantGenerationSelection";
 import { useImageTypeSelection } from "./useImageTypeSelection";
+import { canGenerateVisualGroup } from "../lib/visualGroupGeneration";
 
 export function useProductImageGeneration({
   product,
@@ -24,15 +25,22 @@ export function useProductImageGeneration({
   const [selectedGroupIds, setSelectedGroupIds] = useState<
     Set<Id<"visualGroups">>
   >(new Set());
+  const [textOnlyGroupIds, setTextOnlyGroupIds] = useState<
+    Set<Id<"visualGroups">>
+  >(new Set());
   const [focusedGroupId, setFocusedGroupId] =
     useState<Id<"visualGroups"> | null>(null);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const imageTypeSelection = useImageTypeSelection(availableTypes);
+  const selectedTextOnlyGroupIds = Array.from(textOnlyGroupIds).filter(
+    (groupId) => selectedGroupIds.has(groupId),
+  );
   const variants = useVariantGenerationSelection({
     open,
     productIds: product ? [product._id] : [],
     selectedImageTypes: Array.from(imageTypeSelection.selectedTypes),
+    textOnlyGroupIds: selectedTextOnlyGroupIds,
     ...(visualGroupsData?.config
       ? { visualGroupIds: Array.from(selectedGroupIds) }
       : {}),
@@ -49,6 +57,7 @@ export function useProductImageGeneration({
     imageTypeSelection.resetSelection();
     variants.resetVariantSelection();
     setSelectedGroupIds(new Set(groupIds));
+    setTextOnlyGroupIds(new Set());
     setFocusedGroupId(focusGroupId);
     setOpen(true);
   }
@@ -58,7 +67,7 @@ export function useProductImageGeneration({
       (visualGroupsData?.groups ?? [])
         .filter(
           (group) =>
-            group.ready &&
+            canGenerateVisualGroup(group) &&
             (!visualGroupsData?.family ||
               visualGroupsData.family.members.some(
                 (member) => member.groupId === group._id,
@@ -73,11 +82,17 @@ export function useProductImageGeneration({
     const group = visualGroupsData?.groups.find(
       (candidate) => candidate._id === groupId,
     );
-    if (!group?.ready) {
-      toast.info("Confirmez d’abord l’image de référence");
-      return;
-    }
+    if (!group) return;
     openWithGroups([groupId], groupId);
+  }
+
+  function toggleGroupReferences(groupId: Id<"visualGroups">) {
+    setTextOnlyGroupIds((current) => {
+      const next = new Set(current);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return next;
+    });
   }
 
   function toggleGroup(groupId: Id<"visualGroups">) {
@@ -98,6 +113,9 @@ export function useProductImageGeneration({
         productIds: [product._id],
         selectedImageTypes: Array.from(imageTypeSelection.selectedTypes),
         variantSelection: variants.variantSelection,
+        ...(selectedTextOnlyGroupIds.length
+          ? { textOnlyGroupIds: selectedTextOnlyGroupIds }
+          : {}),
         ...(visualGroupsData?.config
           ? { visualGroupIds: Array.from(selectedGroupIds) }
           : {}),
@@ -125,6 +143,7 @@ export function useProductImageGeneration({
     variants,
     selectedTypes: imageTypeSelection.selectedTypes,
     selectedGroupIds,
+    textOnlyGroupIds,
     focusedGroupId,
     open,
     setOpen,
@@ -133,6 +152,7 @@ export function useProductImageGeneration({
     openGenerateForGroup,
     toggleType: imageTypeSelection.toggleType,
     toggleGroup,
+    toggleGroupReferences,
     generate,
   };
 }

@@ -1,17 +1,8 @@
 import { Check, ShieldCheck, Store } from "lucide-react";
-import { BusyIcon } from "@/components/page";
+import { BusyIcon, EmptyState } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { useIsMobile } from "@/hooks/use-mobile";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { type Id } from "@/lib/convex";
+import type { Id } from "@/lib/convex";
 import { DEFAULT_PRODUCT_QUERY } from "../settingsData";
 import { shopDisplayName } from "../lib/settingsHelpers";
 import type { ShopRow } from "../types";
@@ -27,104 +18,82 @@ export function ShopTable({
   onCheckAuthorization: (shop: ShopRow) => void;
   onUseShop: (shopId: Id<"shops">) => void;
 }) {
-  const isMobile = useIsMobile();
-
+  if (shops === undefined)
+    return (
+      <EmptyState
+        loading
+        title="Chargement des boutiques"
+        body="Lecture des connexions disponibles."
+      />
+    );
+  if (!shops.length)
+    return (
+      <EmptyState
+        title="Connectez votre première boutique"
+        body="Ajoutez son domaine et les clés de son application Shopify pour commencer."
+      />
+    );
   return (
-    <div className="overflow-hidden rounded-lg border border-border">
-      <Table className="[&_td]:h-16 [&_th]:text-[0.72rem] [&_th]:font-medium [&_th]:text-muted-foreground">
-        <TableHeader>
-          <TableRow className="hover:bg-transparent">
-            <TableHead>Boutique</TableHead>
-            <TableHead>Domaine</TableHead>
-            <TableHead>Source</TableHead>
-            <TableHead>Etat</TableHead>
-            <TableHead className="text-right">Actions</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {shops === undefined ? (
-            <TableRow>
-              <TableCell colSpan={5} className="text-muted-foreground">
-                Chargement des boutiques...
-              </TableCell>
-            </TableRow>
-          ) : shops.length ? (
-            shops.map((shop) => (
-              <TableRow key={shop._id ?? shop.domain}>
-                <TableCell className="min-w-52">
-                  <div className="flex items-center gap-2">
-                    <span className="grid size-8 place-items-center rounded-lg bg-muted text-muted-foreground ring-1 ring-border">
-                      <Store className="size-4" />
-                    </span>
-                    <div className="min-w-0">
-                      <p className="truncate font-medium">
-                        {shopDisplayName(shop)}
-                      </p>
-                      <p className="truncate text-xs text-muted-foreground">
-                        {shop.productQuery || DEFAULT_PRODUCT_QUERY}
-                      </p>
-                    </div>
-                  </div>
-                </TableCell>
-                <TableCell className="min-w-56 font-mono text-xs">
-                  {shop.domain}
-                </TableCell>
-                <TableCell>
-                  <Badge variant="outline">
-                    {shop.source === "environment" ? "Env" : "Connectee"}
-                  </Badge>
-                </TableCell>
-                <TableCell>
-                  <div className="flex flex-wrap gap-2">
-                    {shop.isActive ? <Badge>Active</Badge> : null}
-                    <Badge variant="outline">
-                      {shop.hasClientCredentials
-                        ? "Cles presentes"
-                        : "Cles absentes"}
-                    </Badge>
-                  </div>
-                </TableCell>
-                <TableCell className="text-right">
-                  <div className="flex justify-end gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size={isMobile ? "icon" : "sm"}
-                      aria-label={`Vérifier l'accès Shopify de ${shopDisplayName(shop)}`}
-                      title="Accès Shopify"
-                      onClick={() => onCheckAuthorization(shop)}
-                    >
-                      <ShieldCheck />
-                      {!isMobile ? "Accès Shopify" : null}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size={isMobile ? "icon" : "sm"}
-                      aria-label={`Utiliser ${shopDisplayName(shop)}`}
-                      title="Utiliser cette boutique"
-                      disabled={
-                        !shop._id || shop.isActive || saving === shop._id
-                      }
-                      onClick={() => shop._id && onUseShop(shop._id)}
-                    >
-                      <BusyIcon busy={saving === shop._id} />
-                      {saving !== shop._id ? <Check /> : null}
-                      {!isMobile ? "Utiliser" : null}
-                    </Button>
-                  </div>
-                </TableCell>
-              </TableRow>
-            ))
-          ) : (
-            <TableRow>
-              <TableCell colSpan={5} className="text-muted-foreground">
-                Aucune boutique connectee.
-              </TableCell>
-            </TableRow>
-          )}
-        </TableBody>
-      </Table>
-    </div>
+    <ul className="overflow-hidden rounded-xl border bg-card" aria-label="Boutiques enregistrées">
+      {shops.map((shop) => (
+        <li
+          key={shop._id ?? shop.domain}
+          className="grid min-w-0 gap-4 border-b p-5 last:border-0 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center"
+        >
+          <div className="flex min-w-0 items-start gap-3">
+            <span
+              className={`grid size-10 shrink-0 place-items-center rounded-xl ${shop.isActive ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}
+            >
+              <Store className="size-5" />
+            </span>
+            <div className="min-w-0 space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="break-words font-semibold">{shopDisplayName(shop)}</h3>
+                {shop.isActive && <Badge>Boutique active</Badge>}
+              </div>
+              <p className="break-all text-sm text-muted-foreground">{shop.domain}</p>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                <span>{shop.hasClientCredentials ? "Clés enregistrées" : "Clés absentes"}</span>
+                <span>
+                  {shop.source === "environment"
+                    ? "Configuration serveur"
+                    : "Ajoutée dans l’application"}
+                </span>
+              </div>
+              <details className="text-xs text-muted-foreground">
+                <summary className="cursor-pointer">Filtre des produits synchronisés</summary>
+                <p className="mt-2 break-all font-mono">
+                  {shop.productQuery || DEFAULT_PRODUCT_QUERY}
+                </p>
+              </details>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 max-sm:ml-0 lg:justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              className="min-h-11"
+              aria-label={`Vérifier l’accès Shopify de ${shopDisplayName(shop)}`}
+              onClick={() => onCheckAuthorization(shop)}
+              disabled={saving !== null}
+            >
+              <ShieldCheck />
+              Vérifier l’accès
+            </Button>
+            <Button
+              type="button"
+              variant={shop.isActive ? "ghost" : "outline"}
+              className="min-h-11"
+              disabled={!shop._id || shop.isActive || saving !== null}
+              onClick={() => shop._id && onUseShop(shop._id)}
+            >
+              <BusyIcon busy={saving === shop._id} />
+              {saving !== shop._id && <Check />}
+              {shop.isActive ? "Active" : "Utiliser"}
+            </Button>
+          </div>
+        </li>
+      ))}
+    </ul>
   );
 }

@@ -22,9 +22,9 @@ export function JobProgressCard({
     <Card className="mb-5 rounded-lg">
       <CardContent className="pt-1">
         <div className="mb-3 flex flex-wrap justify-between gap-2 text-sm">
-          <span>{progress}% termine</span>
+          <span>{progress}% traités</span>
           <span className="text-muted-foreground">
-            {job.completedTasks} succes / {job.failedTasks} echecs /{" "}
+            {job.completedTasks} réussies / {job.failedTasks} en échec /{" "}
             {job.totalTasks} total · {formatUsd(jobCost)} ·{" "}
             {executionModeRateLabel(job.executionMode)}
           </span>

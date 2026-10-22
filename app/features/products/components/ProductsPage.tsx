@@ -1,4 +1,4 @@
-import { ImageIcon, RefreshCw, WandSparkles } from "lucide-react";
+import { RefreshCw, WandSparkles, X } from "lucide-react";
 import { useQuery } from "convex/react";
 
 import {
@@ -39,6 +39,7 @@ function ProductsPageForShop({ search }: { search: ProductSearch }) {
     bulkTransform,
     chooserOpen,
     creatingJob,
+    clearSelection,
     facets,
     filteredProductsCount,
     imageTypes,
@@ -85,17 +86,6 @@ function ProductsPageForShop({ search }: { search: ProductSearch }) {
               {!syncing ? <RefreshCw data-icon="inline-start" /> : null}
               Synchroniser
             </Button>
-            <BulkActionsMenu
-              disabled={
-                !selected.size || bulkTransform.busy || bulkReorder.busy
-              }
-              onReorder={bulkReorder.openNew}
-              onFlip={bulkTransform.openNew}
-            />
-            <Button size="sm" disabled={!selected.size} onClick={openChooser}>
-              <WandSparkles data-icon="inline-start" />
-              Générer
-            </Button>
           </>
         }
       ></PageHeader>
@@ -111,15 +101,16 @@ function ProductsPageForShop({ search }: { search: ProductSearch }) {
         <EmptyState
           loading
           title="Chargement des produits"
-          body="Lecture du catalogue synchronisé depuis Convex."
+          body="Votre catalogue sera disponible dans un instant."
         />
       ) : products.length === 0 ? (
         <EmptyState
-          title="Aucun produit"
-          body="Synchronisez Shopify pour importer les produits actifs."
+          title={totalProducts ? "Aucun résultat" : "Aucun produit"}
+          body={totalProducts ? "Modifiez vos filtres pour retrouver vos produits." : "Synchronisez Shopify pour importer les produits actifs."}
         />
       ) : (
         <ProductsTable
+          key={JSON.stringify(search)}
           products={products}
           search={search}
           selected={selected}
@@ -145,7 +136,7 @@ function ProductsPageForShop({ search }: { search: ProductSearch }) {
         <div className="sticky-actions">
           <Card
             size="sm"
-            className="flex-row items-center justify-between gap-3 rounded-lg p-3 shadow-2xl"
+            className="flex-row flex-wrap items-center justify-between gap-3 rounded-xl p-3 sm:px-4"
           >
             <div>
               <p className="text-sm font-medium">
@@ -153,18 +144,21 @@ function ProductsPageForShop({ search }: { search: ProductSearch }) {
                 sélectionné{selected.size === 1 ? "" : "s"}
               </p>
               <p className="text-xs text-muted-foreground">
-                Lancez une génération ou une opération bulk sur la sélection.
+                Sélection conservée entre les pages.
               </p>
             </div>
             <div className="flex flex-wrap justify-end gap-2">
+              <Button variant="ghost" size="icon-sm" onClick={clearSelection} aria-label="Effacer la sélection">
+                <X />
+              </Button>
               <BulkActionsMenu
                 disabled={bulkTransform.busy || bulkReorder.busy}
                 onReorder={bulkReorder.openNew}
                 onFlip={bulkTransform.openNew}
               />
               <Button size="sm" onClick={openChooser}>
-                <ImageIcon data-icon="inline-start" />
-                Types
+                <WandSparkles data-icon="inline-start" />
+                Générer des visuels
               </Button>
             </div>
           </Card>
@@ -179,13 +173,13 @@ function ProductsPageForShop({ search }: { search: ProductSearch }) {
           selectedTypes={imageTypeSelection.selectedTypes}
           variants={variants}
           busy={creatingJob}
-          title="Types d'images"
+          title="Générer des visuels"
           description={`${selected.size} produit${
             selected.size === 1 ? "" : "s"
           } sélectionné${
             selected.size === 1 ? "" : "s"
           }. Chaque type utilise son prompt actif.`}
-          submitLabel="Lancer le job"
+          submitLabel="Lancer la génération"
           onToggleType={imageTypeSelection.toggleType}
           onGenerate={() => void generate()}
         />
