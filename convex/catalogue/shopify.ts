@@ -7,6 +7,7 @@ import type { Doc, Id } from "../_generated/dataModel"
 import { shopifyGraphql } from "../shopify/client"
 import { shopifyCredentialsForShop } from "../shopScope"
 import { allImportElements } from "./importSelection"
+import { parseCollectionTags } from "./tags"
 import {
   decode,
   encode,
@@ -169,8 +170,9 @@ export async function importStep(
       w.collection = 0
       return next()
     }
-    const handle = `${col.key.slice(0, 120)}-${digest(encode([c.origin, col.key, [col.tag], "all"])).slice(0, 8)}`
-    const marker = `${identity(c.origin, col.key)}:${digest(encode([[col.tag], "all"]))}`
+    const collectionTags = parseCollectionTags(col.tag).sort()
+    const handle = `${col.key.slice(0, 120)}-${digest(encode([c.origin, col.key, collectionTags, "all"])).slice(0, 8)}`
+    const marker = `${identity(c.origin, col.key)}:${digest(encode([collectionTags, "all"]))}`
     const found = await request<{
       collections: {
         nodes: Array<Mapping & { metafield: { value: string } | null }>
@@ -203,7 +205,7 @@ export async function importStep(
           ...(col.image ? { image: { src: col.image } } : {}),
           ruleSet: {
             appliedDisjunctively: false,
-            rules: [{ column: "TAG", relation: "EQUALS", condition: col.tag }],
+            rules: collectionTags.map((condition) => ({ column: "TAG", relation: "EQUALS", condition })),
           },
           metafields: [
             {
@@ -505,7 +507,7 @@ export async function importStep(
           continue
         }
         const expected = (selection.collections ? s.collections : [])
-          .filter((x) => data.tags.includes(x.tag))
+          .filter((x) => parseCollectionTags(x.tag).every((tag) => data.tags.includes(tag)))
           .map((x) => w.mappings?.[x.key]?.id)
         const waiting =
           value.media.nodes.some((m) =>

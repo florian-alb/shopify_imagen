@@ -20,9 +20,10 @@ import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { TagLanguageSelect } from "./TagLanguageSelect"
 import { CatalogCsvExport } from "./CatalogCsvExport"
+import { CatalogTags } from "./CatalogTags"
 import { ImportConfirmation } from "./ImportConfirmation"
 import type { ImportSelection } from "../../../../convex/catalogue/importSelection"
-import { tagLanguages, normalizeTag, validCollectionTag, type TagLanguage } from "../../../../convex/catalogue/tags"
+import type { TagLanguage } from "../../../../convex/catalogue/tags"
 import {
   Dialog,
   DialogContent,
@@ -312,7 +313,7 @@ function Workspace({ c }: { c: Catalogue }) {
               Retour aux collections
             </Button>
           )}
-          <Tags
+          <CatalogTags
             c={c}
             run={run}
             busy={busy || tagsLocked}
@@ -463,170 +464,6 @@ function Workspace({ c }: { c: Catalogue }) {
         </DialogContent>
       </Dialog>
     </main>
-  )
-}
-function Tags({
-  c,
-  run,
-  busy,
-  done,
-  changeLanguage,
-}: {
-  c: Catalogue
-  run: (fn: () => Promise<unknown>) => Promise<void>
-  busy: boolean
-  done: () => void
-  changeLanguage: (language: TagLanguage) => Promise<void>
-}) {
-  const [edits, setEdits] = useState<Record<string, string>>({}),
-    [search, setSearch] = useState(""),
-    [saved, setSaved] = useState(false)
-  const editVersion = useRef<number | null>(null)
-  const save = useMutation(api.catalogues.saveTags),
-    suggest = useAction(api.catalogueActions.suggestTags)
-  const draft = c.structure.collections.map((col) =>
-    Object.prototype.hasOwnProperty.call(edits, col.key)
-      ? { ...col, tag: edits[col.key], validated: false }
-      : col,
-  )
-  const counts = new Map<string, number>()
-  for (const col of draft) {
-    const tag = normalizeTag(col.tag)
-    counts.set(tag, (counts.get(tag) ?? 0) + 1)
-  }
-  const invalidTag = (tag: string) =>
-    !validCollectionTag(tag) || (counts.get(normalizeTag(tag)) ?? 0) > 1
-  const invalid = draft.some((col) => invalidTag(col.tag)),
-    working = c.status === "working",
-    needsCollection = c.status === "tags",
-    language = tagLanguages.find((x) => x.value === (c.tagLanguage ?? "en"))!.label
-  function edit(values: Record<string, string>) {
-    editVersion.current ??= c.tagVersion ?? 0
-    setSaved(false)
-    setEdits((previous) => ({ ...previous, ...values }))
-  }
-  async function persist(validate: boolean, collect: boolean) {
-    await save({
-      id: c._id,
-      version: c.version,
-      tagVersion: editVersion.current ?? c.tagVersion ?? 0,
-      values: draft.map(({ key, tag }) => ({ key, tag })),
-      validate,
-      collect,
-    })
-    setEdits({})
-    editVersion.current = null
-    setSaved(true)
-    if (collect) done()
-  }
-  return (
-    <section className="px-4 py-6 md:px-6">
-      <h2 className="text-lg font-semibold">Tags des collections</h2>
-      <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-        Un tag distinct par collection. Après validation, les changements se
-        répercutent sur les produits déjà découverts et les prochaines fiches.
-        Les tags manuels propres aux produits sont conservés.
-      </p>
-      <div className="mt-5 flex flex-wrap items-end gap-3">
-        <TagLanguageSelect value={c.tagLanguage ?? "en"} onChange={(value) => void changeLanguage(value)} disabled={busy} />
-        <Button
-          variant="outline"
-          disabled={busy || !draft.length}
-          onClick={() =>
-            void run(async () => {
-              const proposals = await suggest({ id: c._id, replaceExisting: true })
-              edit(Object.fromEntries(proposals.map(({ key, tag }) => [key, tag])))
-            })
-          }
-        >
-          Reproposer tous les tags par IA
-        </Button>
-      </div>
-      <p className="mt-2 text-xs text-muted-foreground">
-        Les propositions IA seront en {language.toLowerCase()}. Changer la langue conserve vos tags ;
-        reproposer remplace les valeurs affichées, à vérifier avant d’enregistrer.
-        Minuscules, accents, chiffres, espaces et tirets acceptés.
-      </p>
-      <Input
-        className="my-5 max-w-sm"
-        aria-label="Rechercher une collection"
-        placeholder="Rechercher une collection"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-      />
-      {!draft.length ? (
-        <p className="py-6 text-sm text-muted-foreground">
-          Les collections apparaîtront ici pendant la découverte. Vous pouvez déjà choisir la langue des tags.
-        </p>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead className="border-b text-muted-foreground">
-              <tr>
-                <th className="p-3">Collection</th>
-                <th className="min-w-64 p-3">Tag</th>
-                <th className="p-3">Sélection / Source</th>
-                <th className="p-3">Menu</th>
-              </tr>
-            </thead>
-            <tbody>
-              {draft
-                .filter((x) => x.title.toLowerCase().includes(search.toLowerCase()))
-                .map((col) => (
-                  <tr key={col.key} className="border-b">
-                    <td className="p-3">{col.title}</td>
-                    <td className="p-3">
-                      <Input
-                        aria-label={`Tag de ${col.title}`}
-                        aria-invalid={invalidTag(col.tag)}
-                        aria-describedby={`tag-status-${col.key}`}
-                        value={col.tag}
-                        disabled={busy}
-                        onChange={(e) => edit({ [col.key]: e.target.value })}
-                      />
-                      <span id={`tag-status-${col.key}`} className="mt-1 block text-xs">
-                        {invalidTag(col.tag)
-                          ? "À corriger — tag vide, invalide ou déjà utilisé"
-                          : col.validated ? "Validé" : "À valider"}
-                      </span>
-                    </td>
-                    <td className="p-3">
-                      {col.selectedCount} / {col.membership === "complete" ? col.count : "Non vérifié"}
-                    </td>
-                    <td className="p-3">{col.outsideMenu ? "Hors menu" : "Présente"}</td>
-                  </tr>
-                ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-      <div className="mt-5 flex flex-wrap items-center gap-3">
-        <Button variant="outline" disabled={busy || !draft.length} onClick={() => void run(() => persist(false, false))}>
-          Enregistrer le brouillon
-        </Button>
-        <Button variant={needsCollection ? "outline" : "default"} disabled={busy || invalid || !draft.length} onClick={() => void run(() => persist(true, false))}>
-          Enregistrer et appliquer aux produits
-        </Button>
-        {needsCollection && !working && (
-          <Button disabled={busy || invalid || !draft.length} onClick={() => void run(() => persist(true, true))}>
-            Valider les {draft.length} tags et collecter
-          </Button>
-        )}
-        {Object.keys(edits).length > 0 && (
-          <Button variant="ghost" disabled={busy} onClick={() => {
-            setEdits({})
-            editVersion.current = null
-            setSaved(false)
-          }}>Annuler les modifications</Button>
-        )}
-      </div>
-      {saved && <p role="status" className="mt-3 text-sm">Tags enregistrés.</p>}
-      {invalid && draft.length > 0 && (
-        <p className="mt-3 text-sm text-muted-foreground">
-          Corrigez les tags vides, invalides ou identiques avant de les appliquer.
-        </p>
-      )}
-    </section>
   )
 }
 function Products({
@@ -1228,7 +1065,7 @@ function Collections({
             <tr>
               {[
                 "Collection",
-                "Tag",
+                "Tags",
                 "Catalogue / Source",
                 "Menu",
                 "État",
