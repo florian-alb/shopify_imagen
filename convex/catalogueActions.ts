@@ -646,6 +646,30 @@ export const work = internalAction({
       w.retryAt = Date.now() + delay;
       if (e instanceof CollectionHttpError && [429, 503].includes(e.status))
         w.sourceDelay = Math.min(3000, (w.sourceDelay ?? 450) * 2);
+      const collection = w.phase === "members"
+        ? decode<Structure>(c.structure).collections[w.collection ?? 0]
+        : undefined;
+      const diagnostic = {
+        catalogueId: c._id,
+        generation: f.generation,
+        origin: c.origin,
+        kind: w.kind,
+        phase: w.phase,
+        attempt: attempts,
+        collectionKey: collection?.key,
+        url: w.url ?? (collection
+          ? `${collection.url}?sort_by=best-selling`
+          : w.phase === "sitemap" ? w.maps?.[0]
+          : w.phase === "menu" ? c.origin : undefined),
+        retryAt: transient ? w.retryAt : undefined,
+        httpStatus: e instanceof CollectionHttpError ? e.status : undefined,
+        error: message(e),
+        stack: e instanceof Error ? e.stack : undefined,
+      };
+      // Handled errors keep the worker execution successful in Convex. Emit
+      // them explicitly without logging leases, credentials or snapshot data.
+      if (transient) console.warn("catalogue.worker.retry", diagnostic);
+      else console.error("catalogue.worker.blocked", diagnostic);
       const latest = await context(ctx, c._id);
       const structure = decode<Structure>(latest.structure);
       if (

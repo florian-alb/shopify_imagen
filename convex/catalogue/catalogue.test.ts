@@ -162,6 +162,7 @@ beforeEach(() => {
   }
 });
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.clearAllTimers();
   vi.useRealTimers();
 });
@@ -204,6 +205,58 @@ async function setup(mode: "ALL" | "TOP_N" = "ALL", topN?: number, tagLanguage?:
   };
   return { t, user, id, owner, read, drain, validate };
 }
+test("discovery keeps an explicitly empty Montessori collection and completes its memberships", async () => {
+  const f = await setup();
+  source.pages.set(
+    `${origin}/collections/empty?sort_by=best-selling`,
+    readFileSync(new URL("./fixtures/montessori-empty-collection.html", import.meta.url), "utf8"),
+  );
+  const c = await f.drain();
+  expect(c.status).toBe("tags");
+  expect(c.error).toBeUndefined();
+  expect(decode<Structure>(c.structure).collections.find((col) => col.key === "empty"))
+    .toMatchObject({ membership: "complete", count: 0, selectedCount: 0 });
+  expect(c.total).toBe(4);
+  await f.validate();
+  expect((await f.drain()).complete).toBe(4);
+  await f.user.mutation(api.catalogues.exportJson, { id: f.id, allowPartial: false });
+  await f.drain();
+  const exported = JSON.parse(source.exportText);
+  expect(exported.products).toHaveLength(4);
+  expect(exported.structure.collections.find((col: { key: string }) => col.key === "empty"))
+    .toMatchObject({ membership: "complete", count: 0 });
+});
+
+test("caught worker errors log retries and final blockage with collection context", async () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  const f = await setup();
+  source.pages.set(`${origin}/collections/empty?sort_by=best-selling`, "<main>Loading products…</main>");
+  const c = await f.drain();
+  const failedUrl = `${origin}/collections/empty?sort_by=best-selling`;
+  expect(c.status).toBe("blocked");
+  expect(c.error).toContain(failedUrl);
+  expect(warn).toHaveBeenCalledTimes(2);
+  expect(error).toHaveBeenCalledTimes(1);
+  expect(warn).toHaveBeenNthCalledWith(1, "catalogue.worker.retry", expect.objectContaining({
+    catalogueId: f.id, phase: "members", attempt: 1, url: failedUrl,
+  }));
+  expect(error).toHaveBeenCalledWith("catalogue.worker.blocked", expect.objectContaining({
+    catalogueId: f.id, generation: c.generation, origin, kind: "discover",
+    phase: "members", attempt: 3, collectionKey: "empty", url: failedUrl,
+    error: c.error, stack: expect.stringContaining("La grille est vide"),
+  }));
+  source.pages.set(failedUrl, readFileSync(new URL("./fixtures/montessori-empty-collection.html", import.meta.url), "utf8"));
+  source.calls.length = 0;
+  await f.user.mutation(api.catalogues.retry, { id: f.id });
+  const resumed = await f.drain();
+  expect(resumed.status).toBe("tags");
+  expect(resumed.error).toBeUndefined();
+  expect(resumed.generation).toBeGreaterThan(c.generation);
+  expect(source.calls).toEqual([failedUrl]);
+  expect(decode<Structure>(resumed.structure).collections.every((col) => col.membership === "complete"))
+    .toBe(true);
+});
 test("CSV enforces authentication, ownership, partial acknowledgement and a stable catalogue", async () => {
   const f = await setup();
   let c = (await f.read())!;
