@@ -1,5 +1,15 @@
 # Qualification de la refonte catalogue
 
+## Tags multiples — 25 octobre 2026
+
+- `npm test` : **627 tests réussis, 81 fichiers**. Les tests couvrent la saisie séparée par virgules, Unicode NFC, limites de 60 tags / 100 caractères par tag, valeurs vides et doublons ; les mutations avec utilisateurs simulés acceptent les tags partagés, refusent les combinaisons identiques dans un autre ordre et conservent brouillons, overrides et verrous.
+- Les mêmes tags effectifs sont vérifiés dans la liste, la fiche, le CSV et le JSON. Le worker Shopify simulé construit plusieurs règles ET et des tags produit distincts, conserve l’identité lors d’un changement d’ordre et détecte une appartenance manquante quand tous les tags sont présents. Un override ne contenant qu’un des tags n’exige pas cette appartenance.
+- `npm run typecheck`, `npx tsc --noEmit -p convex/tsconfig.json`, `npm run check:convex-contract` (**114 références**), ESLint ciblé sur les fichiers modifiés et `npm run build` : réussis. La mutation `collectionCreate` est validée contre le schéma Admin GraphQL **2026-04** par l’outil Shopify.
+- `npx convex dev --once` : fonctions prêtes sur **dev `curious-greyhound-437`**. Aucun déploiement de production ni import Shopify réel.
+- Banc UI isolé : saisie de `mocassins, femme` et `mocassins, homme`, validation avec tag partagé, refus de `femme, mocassins` comme combinaison identique, enregistrement, affichage des deux listes et héritage dédupliqué sur une fiche contrôlés dans le navigateur. Ce client en mémoire ne constitue pas un E2E authentifié. Capture locale : `output/catalogue-tags-multiples.png`.
+
+Les résultats ci-dessous décrivent les qualifications antérieures et leurs limites.
+
 1er octobre 2026. Cible : **dev `curious-greyhound-437`**. Frontend local, backend Convex déployé. Aucun déploiement frontend de production ni import Shopify réel.
 
 ## Contrôles automatisés

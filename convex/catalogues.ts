@@ -17,7 +17,7 @@ import { requireUserId } from "./authz"
 import { sourceOrigin } from "./catalogue/source"
 import { productCsv } from "./catalogue/csv"
 import { allImportElements, hasImportElements } from "./catalogue/importSelection"
-import { normalizeTag, tagLanguageValidator } from "./catalogue/tags"
+import { normalizeCollectionTags, tagLanguageValidator } from "./catalogue/tags"
 import {
   decode,
   encode,
@@ -354,9 +354,9 @@ export const saveTags = mutation({
     for (const value of a.values) {
       const col = s.collections.find((x) => x.key === value.key)
       if (!col) throw new Error("Collection inconnue.")
-      if (col.tag !== normalizeTag(value.tag)) {
+      if (col.tag !== normalizeCollectionTags(value.tag)) {
         if (col.validated) col.appliedTag = col.tag
-        col.tag = normalizeTag(value.tag)
+        col.tag = normalizeCollectionTags(value.tag)
         col.validated = false
         col.edited = true
       }

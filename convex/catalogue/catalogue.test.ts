@@ -482,7 +482,8 @@ test("collection tag changes reach lists, details and exports while drafts and m
   }));
   // Apostrophes stay invalid; accented lowercase words are supported.
   expect(validCollectionTag(values[0].tag)).toBe(false);
-  values.find((x) => x.key === "cats")!.tag = "chats-été";
+  values.find((x) => x.key === "cats")!.tag = " chats-été , femme ";
+  values.find((x) => x.key === "dogs")!.tag = "chiens, femme";
   await f.user.mutation(api.catalogues.saveTags, {
     id: f.id, version: c.version, tagVersion: c.tagVersion,
     values, validate: false, collect: false,
@@ -500,12 +501,21 @@ test("collection tag changes reach lists, details and exports while drafts and m
   expect(applied.generation).toBe(c.generation);
   expect(applied.work).toBeUndefined();
   detail = decode(await f.user.query(api.catalogues.product, { id: f.id, productId: inherited._id }));
-  expect(detail.data.tags).toEqual(["chats-été", "dogs"]);
+  expect(detail.data.tags).toEqual(["chats-été", "chiens", "femme"]);
+  expect(decode<Structure>(applied.structure).collections.find((col) => col.key === "cats")?.tag).toBe("chats-été, femme");
   const manualDetail = decode<{ data: { tags: string[]; title: string } }>(await f.user.query(api.catalogues.product, { id: f.id, productId: manual._id }));
   expect(manualDetail.data).toMatchObject({ tags: ["personnel"], title: "Mon titre" });
   expect((await f.t.query(internal.catalogues.byId, { id: inherited._id }))?.jsonSource).toBe(inherited.jsonSource);
   const list = await f.user.query(api.catalogues.products, { id: f.id, search: "", state: "", collection: "", sort: "rank", paginationOpts: { cursor: null, numItems: 25 } });
   expect(list.page.map((row) => decode<{ id: string; tags: string[] }>(row)).find((row) => row.id === inherited._id)?.tags).toEqual(detail.data.tags);
+  const csv = await f.user.query(api.catalogues.exportCsvPage, { id: f.id, version: applied.version, generation: applied.generation, allowPartial: false, cursor: null });
+  expect(csv.products.join("")).toContain('"chats-été, chiens, femme"');
+  await f.user.mutation(api.catalogues.saveTags, {
+    id: f.id, version: applied.version, tagVersion: applied.tagVersion,
+    values: [{ key: "cats", tag: "nouveau, brouillon" }], validate: false, collect: false,
+  });
+  detail = decode(await f.user.query(api.catalogues.product, { id: f.id, productId: inherited._id }));
+  expect(detail.data.tags).toEqual(["chats-été", "chiens", "femme"]);
   await f.user.mutation(api.catalogues.exportJson, { id: f.id, allowPartial: false });
   await f.drain();
   const exported = JSON.parse(source.exportText);
@@ -562,6 +572,9 @@ test("tag edits enforce ownership, normalized uniqueness, and import/export snap
   await expect(other.mutation(api.catalogues.setTagLanguage, { id: f.id, language: "fr", tagVersion: c.tagVersion! })).rejects.toThrow("inaccessible");
   const values = decode<Structure>(c.structure).collections.map((col, i) => ({ key: col.key, tag: i === 0 ? "été" : i === 1 ? "e\u0301te\u0301" : col.tag }));
   await expect(f.user.mutation(api.catalogues.saveTags, { id: f.id, version: c.version, values, validate: true, collect: false })).rejects.toThrow("plusieurs");
+  const combinations = values.map((value, i) => ({ ...value, tag: i === 0 ? "mocassins, été" : i === 1 ? "e\u0301te\u0301, mocassins" : value.tag }));
+  await expect(f.user.mutation(api.catalogues.saveTags, { id: f.id, version: c.version, values: combinations, validate: true, collect: false })).rejects.toThrow("plusieurs");
+  await expect(f.user.mutation(api.catalogues.saveTags, { id: f.id, version: c.version, values: [{ key: "cats", tag: "mocassins,,femme" }], validate: true, collect: false })).rejects.toThrow("non vide");
   for (const kind of ["export", "import"] as const) {
     await f.t.run((ctx) => ctx.db.patch(f.id, { status: "blocked", work: encode({ kind, phase: "setup" }) }));
     await expect(f.user.mutation(api.catalogues.setTagLanguage, { id: f.id, language: "fr", tagVersion: c.tagVersion! })).rejects.toThrow("figés");

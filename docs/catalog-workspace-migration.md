@@ -22,6 +22,8 @@ Le choix des éléments à envoyer vers Shopify est également additif : `select
 
 ## Production et retour arrière
 
+Ajout du 25 octobre 2026 : les tags multiples utilisent les champs JSON existants `Collection.tag` et `appliedTag`, sous forme de valeurs séparées par des virgules. Aucun backfill ni changement de schéma/API n’est requis ; les anciens tags simples et leurs identités Shopify restent compatibles. Un retour au code antérieur après enregistrement de listes multiples les interpréterait comme un seul tag : réexaminer ces listes et les règles des collections cibles avant ce rollback, avec l’autorisation correspondant aux éventuelles écritures Shopify. Aucun import Shopify réel n’a été effectué pour qualifier cette évolution.
+
 La production n’a pas reçu cette refonte ni ce nettoyage. Toute transition future exige un nouvel inventaire, une décision explicite sur ses données et un déploiement adapté ; **ne pas pousser aveuglément ce retrait de schéma en production**. L’autorisation dev de cette session n’est pas réutilisable pour la production.
 
 La suppression dev demandée est irréversible via l’application et aucun dump n’a été conservé. Un retour au code historique ne rétablit pas ces données. Le code et la documentation du moteur remplacé restent dans Git et les [instructions historiques](catalog-workspace-migration-historique.md) ; leurs scripts ne sont plus présents dans la refonte.

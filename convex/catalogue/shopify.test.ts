@@ -9,6 +9,7 @@ import { encode, decode, type Work, type RemoteResult } from "./model"
 import { productInput } from "./shopifyModel"
 import { REQUIRED_SHOPIFY_ADMIN_SCOPES } from "../shopify/scopes"
 import type { ImportSelection } from "./importSelection"
+import { parseCollectionTags } from "./tags"
 
 const remote = vi.hoisted(() => ({
   calls: [] as Array<{ query: string; variables: Record<string, unknown> }>,
@@ -19,6 +20,7 @@ const remote = vi.hoisted(() => ({
   bulkQuery: "",
   uploads: [] as string[],
   tags: ["merchant-manual"],
+  collectionTags: ["cat"],
   failedMedia: false,
   collectionExists: false,
   membershipMissing: false,
@@ -54,7 +56,7 @@ vi.mock("../shopify/client", () => ({
       return { collections: { nodes: remote.collectionExists ? [{
         id: "gid://shopify/Collection/10",
         handle: String(variables.query).slice("handle:".length),
-        metafield: { value: `source.example:cats:${createHash("sha256").update(JSON.stringify([["cat"], "all"])).digest("hex")}` },
+        metafield: { value: `source.example:cats:${createHash("sha256").update(JSON.stringify([remote.collectionTags, "all"])).digest("hex")}` },
       }] : [] } }
     if (query.includes("CatalogImportCollection("))
       return {
@@ -97,7 +99,7 @@ vi.mock("../shopify/client", () => ({
     if (query.includes("CatalogImportBulk(")) {
       remote.bulkQuery = variables.mutation as string
       remote.exists = true
-      remote.tags.push("cat")
+      remote.tags.push(...remote.collectionTags)
       if (remote.uncertain) throw new Error("Network response lost")
       return {
         bulkOperationRunMutation: {
@@ -182,6 +184,7 @@ beforeEach(() => {
     bulkQuery: "",
     uploads: [],
     tags: ["merchant-manual"],
+    collectionTags: ["cat"],
     failedMedia: false,
     collectionExists: false,
     membershipMissing: false,
@@ -201,7 +204,8 @@ afterEach(() => {
   vi.useRealTimers()
   vi.unstubAllGlobals()
 })
-async function fixture(selection?: ImportSelection) {
+async function fixture(selection?: ImportSelection, tag = "cat") {
+  remote.collectionTags = parseCollectionTags(tag).sort()
   const t = convexTest(schema, modules)
   const seeded = await t.run(async (ctx) => {
     const owner = await ctx.db.insert("users", { approvalStatus: "approved" }),
@@ -237,7 +241,7 @@ async function fixture(selection?: ImportSelection) {
           title: "Cats",
           description: "",
           image: null,
-          tag: "cat",
+          tag,
           validated: true,
           outsideMenu: false,
           membership: "complete",
@@ -440,6 +444,52 @@ test("existing products keep merchant tags and active status without productSet"
   expect(
     remote.calls.some((x) => x.query.includes("CatalogImportDescription")),
   ).toBe(false)
+})
+test("multiple collection tags create separate AND rules and reach the product payload", async () => {
+  const f = await fixture(undefined, "mocassins, femme")
+  await f.run()
+  const created = remote.calls.find((call) => call.query.includes("CatalogImportCollection("))!
+  expect(created.variables.input).toMatchObject({
+    ruleSet: {
+      appliedDisjunctively: false,
+      rules: [
+        { column: "TAG", relation: "EQUALS", condition: "femme" },
+        { column: "TAG", relation: "EQUALS", condition: "mocassins" },
+      ],
+    },
+  })
+  expect(JSON.parse(remote.uploads[0].trim()).input.tags).toEqual(["femme", "mocassins"])
+  const p = await f.t.query(internal.catalogues.byId, { id: f.productId })
+  expect(decode<RemoteResult>(p!.remote!).status).toBe("complete")
+})
+
+test("reordering collection tags retains the same Shopify handle and marker", async () => {
+  const selection = { products: false, collections: true, menu: false }
+  const first = await fixture(selection, "mocassins, femme")
+  await first.run()
+  const created = remote.calls.find((call) => call.query.includes("CatalogImportCollection("))!.variables.input
+  remote.calls = []
+  const reordered = await fixture(selection, "femme, mocassins")
+  await reordered.run()
+  expect(remote.calls.find((call) => call.query.includes("CatalogImportCollection("))!.variables.input).toEqual(created)
+})
+
+test.each([false, true])("membership verification requires all collection tags (manual override: %s)", async (manual) => {
+  remote.exists = remote.existing = true
+  remote.membershipMissing = true
+  remote.tags.push("mocassins", ...(manual ? [] : ["femme"]))
+  // An old timestamp makes a missing membership fail without waiting for indexing.
+  vi.setSystemTime(1_000_000)
+  const f = await fixture(undefined, "mocassins, femme")
+  await f.t.run(async (ctx) => {
+    await ctx.db.patch(f.productId, {
+      ...(manual ? { override: encode({ tags: ["mocassins"] }) } : {}),
+      remote: encode({ shopId: f.shopId, status: "verifying", id: "gid://shopify/Product/1", handle: "target-product", created: false, startedAt: 1, catalogueVersion: 1 }),
+    })
+  })
+  await f.run()
+  const p = await f.t.query(internal.catalogues.byId, { id: f.productId })
+  expect(decode<RemoteResult>(p!.remote!).status).toBe(manual ? "complete" : "failed")
 })
 test("a lost bulk response is reconciled by its persisted token, never blindly resubmitted", async () => {
   remote.uncertain = true

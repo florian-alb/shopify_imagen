@@ -18,7 +18,7 @@ import {
   type CatalogProduct,
 } from "../convex/catalogue/model"
 import type { Id } from "../convex/_generated/dataModel"
-import type { TagLanguage } from "../convex/catalogue/tags"
+import { normalizeCollectionTags, type TagLanguage } from "../convex/catalogue/tags"
 import { productCsv } from "../convex/catalogue/csv"
 import { allImportElements, hasImportElements, type ImportSelection } from "../convex/catalogue/importSelection"
 import raw from "../convex/catalogue/fixtures/kuscheltierland.json"
@@ -299,7 +299,7 @@ const client = {
       for (const v of a.values as Array<{ key: string; tag: string }>) {
         const col = structure.collections.find((c) => c.key === v.key)!
         if (col.validated) col.appliedTag = col.tag
-        col.tag = v.tag
+        col.tag = normalizeCollectionTags(v.tag)
         col.validated = Boolean(a.validate)
         if (col.validated) col.appliedTag = col.tag
       }

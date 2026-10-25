@@ -25,3 +25,19 @@ export function validCollectionTag(value: string) {
   return tag.length <= 100 && tag === tag.toLowerCase() &&
     /^[\p{L}\p{N}][\p{L}\p{M}\p{N}]*(?:[ -][\p{L}\p{N}][\p{L}\p{M}\p{N}]*)*$/u.test(tag)
 }
+
+// Retain the string field so existing single-tag catalogues need no migration.
+export const parseCollectionTags = (value: string) => value.split(",").map(normalizeTag)
+export const normalizeCollectionTags = (value: string) => parseCollectionTags(value).join(", ")
+export const collectionTagKey = (value: string) => JSON.stringify(parseCollectionTags(value).sort())
+
+export function collectionTagsError(value: string): string | null {
+  const values = parseCollectionTags(value)
+  if (!value.trim()) return "Saisissez au moins un tag."
+  if (values.length > 60) return "60 tags maximum par collection."
+  if (values.some((tag) => !validCollectionTag(tag)))
+    return "Séparez les tags par des virgules ; chaque tag doit être non vide, en minuscules et limité à 100 caractères (accents, chiffres, espaces et tirets acceptés)."
+  if (new Set(values).size !== values.length)
+    return "Un même tag ne peut apparaître qu’une fois dans cette collection."
+  return null
+}

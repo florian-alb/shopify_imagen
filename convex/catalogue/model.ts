@@ -1,6 +1,6 @@
 import { getConvexSize } from "convex/values"
 import type { CatalogProduct, MenuNode, ProductOverride } from "./source"
-import { normalizeTag, validCollectionTag } from "./tags"
+import { collectionTagKey, collectionTagsError, parseCollectionTags } from "./tags"
 import type { ImportSelection } from "./importSelection"
 export type { CatalogProduct, MenuNode, ProductOverride } from "./source"
 
@@ -10,7 +10,7 @@ export type Collection = {
   title: string
   description: string
   image: string | null
-  tag: string
+  tag: string // Comma-separated tags; a single tag remains compatible.
   validated: boolean
   appliedTag?: string
   edited?: boolean
@@ -101,12 +101,12 @@ export const identity = (origin: string, id: string) =>
 export function validateTags(collections: Collection[]) {
   const seen = new Set<string>()
   for (const c of collections) {
-    const tag = normalizeTag(c.tag)
-    if (!validCollectionTag(tag))
-      throw new Error(`Tag invalide (minuscules, chiffres, espaces ou tirets, 100 caractères maximum) : ${c.title}`)
-    if (seen.has(tag))
-      throw new Error(`Tag utilisé par plusieurs collections : ${c.tag}`)
-    seen.add(tag)
+    const error = collectionTagsError(c.tag)
+    if (error) throw new Error(`Tags invalides pour ${c.title} : ${error}`)
+    const key = collectionTagKey(c.tag)
+    if (seen.has(key))
+      throw new Error(`Combinaison de tags utilisée par plusieurs collections : ${c.tag}`)
+    seen.add(key)
   }
 }
 export function effective(
@@ -116,7 +116,7 @@ export function effective(
 ) {
   const inherited = structure.collections
     .filter((c) => data.collections.includes(c.key))
-    .map((c) => c.validated ? c.tag : c.appliedTag ?? "")
+    .flatMap((c) => parseCollectionTags(c.validated ? c.tag : c.appliedTag ?? ""))
   return {
     ...data,
     title: override.title ?? data.title,
