@@ -1,5 +1,19 @@
 # Qualification de la refonte catalogue
 
+## Décomposition des tags IA — 25 octobre 2026
+
+- La génération propose le type de produit, les qualificatifs puis le genre uniquement s’il est explicite, en tags séparés et normalisés dans la langue choisie. Les concepts composés restent entiers ; les collections partagent le même vocabulaire et une sélection éditoriale peut conserver un seul tag. La réponse structurée du fournisseur est adaptée au contrat public existant `{ key, tag }` (liste séparée par virgules), sans migration ni modification du résolveur effectif ou des règles Shopify.
+- **659 tests réussis, 83 fichiers**, dont 21 nouveaux cas de génération : adaptation des tableaux, concepts composés, NFC/casse/espaces/déduplication, termes partagés, limites par tag, clés absentes/inconnues/répétées, listes invalides et réponse interrompue. `npm run typecheck`, `npx tsc --noEmit -p convex/tsconfig.json`, `npm run check:convex-contract` (**114 références**), ESLint ciblé, `npm run build` et `git diff --check` réussis. Le build conserve l’avertissement existant sur la taille de certains chunks.
+- Essai direct de **Gemini réel**, depuis le code local sur dix intitulés synthétiques : `Mocassins noirs femme` → `mocassins, noir, femme` ; `Tables basses rondes` → `table basse, rond` ; `Sacs à main bleu marine` → `sac à main, bleu marine` ; `Robes longues` → `robe, long`, sans genre ajouté ; `Nouveautés` → `nouveautés`. Les autres cas couvrent beige, daim, été et style italien. Cette vérification porte sur cet échantillon français, sans garantir toutes les langues ni tous les catalogues.
+- `npx convex dev --once --typecheck enable` : fonctions prêtes sur **dev `curious-greyhound-437`**. Banc UI en mémoire : saisie puis enregistrement d’une liste à deux tags et affichage dans deux badges distincts contrôlés ([capture](../output/catalogue-tags-generation-ia.png)). Ce contrôle d’interface n’appelle pas Gemini et ne constitue pas un parcours authentifié de génération ; aucun catalogue existant régénéré, déploiement de production ou import Shopify réel.
+
+## Épuration de l’éditeur de tags — 25 octobre 2026
+
+- Suppression des trois paragraphes de mode d’emploi et du parcours décoratif. Titre, retour aux collections, langue et reproposition regroupés dans l’en-tête. Les bilans et commandes d’export/import sont masqués pendant l’édition ; erreurs et travaux actifs restent visibles. Les boutons d’enregistrement sont conservés.
+- Les commandes groupées apparaissent après sélection. Banc UI en mémoire : sélection, exclusion/réactivation groupée, restauration des tags et disparition des commandes après désélection vérifiées. Rendu contrôlé sur ordinateur et mobile ; largeur de page et de viewport égales à 375 px sur mobile, avec défilement horizontal limité au tableau.
+- `npm run typecheck`, ESLint ciblé sur les trois composants, les cinq tests de `collection-tag-input.test.ts`, `npm run build` et `git diff --check` : réussis. Le build conserve son avertissement de taille de bundle. Captures : `output/catalogue-tags-epure.png` et `output/catalogue-tags-epure-mobile.png`.
+- Aucune modification backend ni import Shopify réel ; ce contrôle visuel ne constitue pas un E2E authentifié.
+
 ## Retrait des statuts sous les badges — 25 octobre 2026
 
 - Les libellés « Validé » et « À valider » sont retirés de l’éditeur ; seules les erreurs s’affichent sous les badges, avec une description accessible reliée à la saisie.

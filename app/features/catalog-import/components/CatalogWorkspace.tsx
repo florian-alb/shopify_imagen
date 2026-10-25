@@ -131,7 +131,8 @@ function Workspace({ c }: { c: Catalogue }) {
     ),
     outside = c.structure.collections.filter((x) => x.outsideMenu).length,
     locked = !!c.work && (c.status === "working" || c.work.kind === "import"),
-    tagsLocked = c.work?.kind === "import" || c.work?.kind === "export"
+    tagsLocked = c.work?.kind === "import" || c.work?.kind === "export",
+    editingTags = c.status === "tags" || tab === "tags"
   const changeLanguage = (language: TagLanguage) => run(() => setTagLanguage({
     id: c._id, language, tagVersion: c.tagVersion ?? 0,
   }))
@@ -168,7 +169,7 @@ function Workspace({ c }: { c: Catalogue }) {
                 : ""}
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          {!editingTags && <div className="flex flex-wrap gap-2">
             <Button
               variant="outline"
               disabled={locked || busy}
@@ -210,12 +211,9 @@ function Workspace({ c }: { c: Catalogue }) {
             >
               Préparer l’import Shopify
             </Button>
-          </div>
+          </div>}
         </header>
-        <p className="mt-4 text-xs text-muted-foreground">
-          Source → Tags → Catalogue
-        </p>
-        {c.status !== "tags" && tab !== "tags" && (
+        {!editingTags && (
           <div className="mt-4 flex flex-wrap items-end gap-3">
             <TagLanguageSelect value={c.tagLanguage ?? "en"} onChange={(language) => void changeLanguage(language)} disabled={busy || tagsLocked} />
             <Button variant="outline" disabled={tagsLocked} onClick={() => setTab("tags")}>
@@ -259,7 +257,7 @@ function Workspace({ c }: { c: Catalogue }) {
             Reprendre l’étape en échec
           </Button>
         )}
-        {!locked && c.failed > 0 && (
+        {!editingTags && !locked && c.failed > 0 && (
           <div className="mt-4">
             <Notice>
               {c.failed} fiches restent incomplètes.{" "}
@@ -283,7 +281,7 @@ function Workspace({ c }: { c: Catalogue }) {
             </Notice>
           </div>
         )}
-        {c.lastImport && (
+        {!editingTags && c.lastImport && (
           <div className="mt-4">
             <Notice>
               Import traité vers {c.lastImport.domain}.{" "}
@@ -303,25 +301,14 @@ function Workspace({ c }: { c: Catalogue }) {
           </div>
         )}
       </div>
-      {c.status === "tags" || tab === "tags" ? (
-        <div>
-          {c.status !== "tags" && (
-            <Button
-              variant="ghost"
-              className="ml-6"
-              onClick={() => setTab("collections")}
-            >
-              Retour aux collections
-            </Button>
-          )}
-          <CatalogTags
-            c={c}
-            run={run}
-            busy={busy || tagsLocked}
-            changeLanguage={changeLanguage}
-            done={() => setTab("collections")}
-          />
-        </div>
+      {editingTags ? (
+        <CatalogTags
+          c={c}
+          run={run}
+          busy={busy || tagsLocked}
+          changeLanguage={changeLanguage}
+          done={() => setTab("collections")}
+        />
       ) : (
         <>
           <nav
