@@ -109,6 +109,14 @@ const rows = [
   override: {} as { title?: string; tags?: string[]; excluded?: boolean },
   remote: null,
 }))
+// A previous import result for checking the collapsible summary without Shopify.
+if (new URL(window.location.href).searchParams.get("scenario") === "import-result") {
+  catalogue.lastImport = {
+    domain: "fixture.myshopify.com",
+    complete: 2, created: 1, existing: 1, failed: 1, skipped: 1,
+    collections: 3, menuId: "fixture-menu",
+  }
+}
 // Reproduce the sparse collection that exposed the display-page pagination bug.
 if (
   new URL(window.location.href).searchParams.get("scenario") === "pagination"

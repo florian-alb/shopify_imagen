@@ -1,6 +1,35 @@
 import { readFileSync } from "node:fs"
 import { expect, test } from "vitest"
-import { extractProduct } from "./extract"
+import { extractCollection, extractProduct } from "./extract"
+
+const emptyCollection = readFileSync(
+  new URL("./fixtures/montessori-empty-collection.html", import.meta.url),
+  "utf8",
+)
+const collectionOrigin = "https://montessorigeneration.com"
+const collectionUrl = `${collectionOrigin}/collections/montessori-toys-by-category?sort_by=best-selling`
+
+test("an explicitly empty Montessori collection needs no product grid", () => {
+  const result = extractCollection(emptyCollection, collectionUrl, collectionOrigin)
+  expect(result.products).toEqual([])
+  expect(result.nextUrl).toBeNull()
+})
+
+test("an empty collection without an explicit indication still fails with its URL", () => {
+  expect(() => extractCollection(
+    emptyCollection.replace("This collection is empty", "Loading products…"),
+    collectionUrl,
+    collectionOrigin,
+  )).toThrow(`extraction à vérifier. Page : ${collectionUrl}`)
+})
+
+test("an empty cart outside the collection does not prove an empty collection", () => {
+  expect(() => extractCollection(
+    `<aside>This collection is empty</aside>${emptyCollection.replace("This collection is empty", "Your cart is empty")}`,
+    collectionUrl,
+    collectionOrigin,
+  )).toThrow("La grille est vide")
+})
 
 const link = {
   handle: "mocassin-daim-homme-marron",

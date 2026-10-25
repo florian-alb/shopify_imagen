@@ -18,11 +18,13 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
-import { TagLanguageSelect } from "./TagLanguageSelect"
 import { CatalogCsvExport } from "./CatalogCsvExport"
 import { CatalogTags } from "./CatalogTags"
+import { CatalogCollections } from "./CatalogCollections"
+import { CatalogMenu } from "./CatalogMenu"
+import { CatalogImportResult } from "./CatalogImportResult"
+import type { Catalogue } from "../types"
 import { ImportConfirmation } from "./ImportConfirmation"
-import type { ImportSelection } from "../../../../convex/catalogue/importSelection"
 import type { TagLanguage } from "../../../../convex/catalogue/tags"
 import {
   Dialog,
@@ -34,32 +36,11 @@ import {
 import {
   decode,
   phaseLabels,
-  effectiveMenu,
-  type Structure,
-  type Work,
   type CatalogProduct,
   type ProductOverride,
   type RemoteResult,
 } from "../../../../convex/catalogue/model"
 
-type Catalogue = Omit<
-  Doc<"catalogues">,
-  "structure" | "work" | "lastImport"
-> & {
-  structure: Structure
-  work: Work | null
-  lastImport: {
-    domain: string
-    menuId?: string
-    selection?: ImportSelection
-    collections?: number
-    complete: number
-    failed: number
-    skipped: number
-    created: number
-    existing: number
-  } | null
-}
 type Row = {
   id: Id<"produits">
   title: string
@@ -129,7 +110,6 @@ function Workspace({ c }: { c: Catalogue }) {
       c.structure.warnings.length ||
       c.structure.collections.some((x) => !x.ignored && x.membership !== "complete")
     ),
-    outside = c.structure.collections.filter((x) => x.outsideMenu).length,
     locked = !!c.work && (c.status === "working" || c.work.kind === "import"),
     tagsLocked = c.work?.kind === "import" || c.work?.kind === "export",
     editingTags = c.status === "tags" || tab === "tags"
@@ -167,6 +147,7 @@ function Workspace({ c }: { c: Catalogue }) {
               {c.initialCount > 0 && c.total > c.initialCount
                 ? ` + ${c.total - c.initialCount} produits ajoutés`
                 : ""}
+              {c.sourceCount > 0 && !(c.status === "working" && ["menu", "sitemap"].includes(c.phase)) && ` · ${c.sourceCount} produits sur la source`}
             </p>
           </div>
           {!editingTags && <div className="flex flex-wrap gap-2">
@@ -209,18 +190,10 @@ function Workspace({ c }: { c: Catalogue }) {
               }
               onClick={() => setDialog("import")}
             >
-              Préparer l’import Shopify
+              Importer vers Shopify
             </Button>
           </div>}
         </header>
-        {!editingTags && (
-          <div className="mt-4 flex flex-wrap items-end gap-3">
-            <TagLanguageSelect value={c.tagLanguage ?? "en"} onChange={(language) => void changeLanguage(language)} disabled={busy || tagsLocked} />
-            <Button variant="outline" disabled={tagsLocked} onClick={() => setTab("tags")}>
-              Modifier les tags des collections
-            </Button>
-          </div>
-        )}
         {c.work && (
           <div className="mt-4">
             <Notice>
@@ -230,14 +203,13 @@ function Workspace({ c }: { c: Catalogue }) {
                 ? ` · ${c.structure.collections[c.work.collection ?? 0].title}`
                 : ""}
               <p>
-                {c.complete} fiches réussies sur{" "}
-                {c.total || "un nombre en cours de vérification"}
-                {c.failed ? ` · ${c.failed} en échec` : ""}.{" "}
+                {c.complete} / {c.total || "…"} fiches complètes
+                {c.failed ? ` · ${c.failed} en échec` : ""}
                 {c.status === "blocked"
-                  ? "Le traitement attend votre relance ; les réussites sont conservées."
+                  ? " · En attente de reprise"
                   : c.work.kind === "import"
-                    ? "Le catalogue est figé pendant l’import."
-                    : "Vous pouvez fermer cette page ; le traitement continue."}
+                    ? " · Catalogue verrouillé pendant l’import"
+                    : ""}
               </p>
             </Notice>
           </div>
@@ -254,52 +226,19 @@ function Workspace({ c }: { c: Catalogue }) {
             disabled={busy}
             onClick={() => void run(() => retry({ id: c._id }))}
           >
-            Reprendre l’étape en échec
+            Reprendre
           </Button>
         )}
-        {!editingTags && !locked && c.failed > 0 && (
-          <div className="mt-4">
-            <Notice>
-              {c.failed} fiches restent incomplètes.{" "}
-              <button
-                className="underline underline-offset-4"
-                onClick={() => {
-                  setState("failed")
-                  setTab("products")
-                }}
-              >
-                Voir les produits concernés
-              </button>
-              <Button
-                className="ml-3"
-                variant="outline"
-                disabled={busy}
-                onClick={() => void run(() => retry({ id: c._id }))}
-              >
-                Relancer les produits en échec
-              </Button>
-            </Notice>
+        {!editingTags && tab === "products" && !locked && c.failed > 0 && (
+          <div className="mt-4 flex flex-wrap items-center gap-3 text-sm" role="status">
+            <button className="rounded-sm underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-ring"
+              onClick={() => { setState("failed"); setTab("products") }}>
+              {c.failed} {c.failed === 1 ? "fiche à relancer" : "fiches à relancer"}
+            </button>
+            <Button variant="outline" size="sm" disabled={busy} onClick={() => void run(() => retry({ id: c._id }))}>Relancer</Button>
           </div>
         )}
-        {!editingTags && c.lastImport && (
-          <div className="mt-4">
-            <Notice>
-              Import traité vers {c.lastImport.domain}.{" "}
-              {c.lastImport.selection?.products !== false && (
-                <>
-                  {c.lastImport.complete} réussites ({c.lastImport.created} créations,{" "}
-                  {c.lastImport.existing} produits existants), {c.lastImport.failed}{" "}
-                  échecs, {c.lastImport.skipped} fiches non importées. Consultez le
-                  résultat de chaque fiche. Produits créés en brouillon.{" "}
-                </>
-              )}
-              {c.lastImport.collections !== undefined && c.lastImport.collections > 0 && (
-                <>{c.lastImport.collections} collections traitées. </>
-              )}
-              {c.lastImport.menuId && "Menu créé, non affecté au thème."}
-            </Notice>
-          </div>
-        )}
+        {!editingTags && c.lastImport && <CatalogImportResult result={c.lastImport} />}
       </div>
       {editingTags ? (
         <CatalogTags
@@ -330,9 +269,6 @@ function Workspace({ c }: { c: Catalogue }) {
                 className={`flex shrink-0 items-center gap-2 border-b-2 px-3 py-3 text-sm font-medium transition-colors ${tab === key ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
               >
                 {label}
-                {key === "collections" && outside > 0 && (
-                  <Badge variant="secondary">{outside} hors menu</Badge>
-                )}
               </button>
             ))}
           </nav>
@@ -347,57 +283,17 @@ function Workspace({ c }: { c: Catalogue }) {
             />
           )}
           {tab === "collections" && (
-            <div>
-              <Button
-                variant="outline"
-                className="ml-6 mt-5"
-                disabled={tagsLocked}
-                onClick={() => setTab("tags")}
-              >
-                Gérer les tags et les collections ignorées
-              </Button>
-              <Collections
-                c={c}
-                showProducts={(key) => {
-                  setCollection(key)
-                  setTab("products")
-                }}
-                run={run}
-                busy={busy}
-              />
-            </div>
+            <CatalogCollections
+              c={c}
+              editTags={() => setTab("tags")}
+              showProducts={(key) => { setCollection(key); setTab("products") }}
+              run={run}
+              busy={busy}
+            />
           )}
           {tab === "menu" && (
-            <div className="max-w-3xl space-y-8 p-6">
-              <MenuTree
-                nodes={effectiveMenu(c.structure, c.origin)}
-                showCollection={(key) => {
-                  setCollection(key)
-                  setTab("products")
-                }}
-              />
-              <section>
-                <h2 className="mb-3 font-semibold">
-                  Collections hors menu ({outside})
-                </h2>
-                <div className="flex flex-wrap gap-2">
-                  {c.structure.collections
-                    .filter((x) => x.outsideMenu)
-                    .map((x) => (
-                      <Button
-                        key={x.key}
-                        variant="outline"
-                        onClick={() => {
-                          setCollection(x.key)
-                          setTab("products")
-                        }}
-                      >
-                        {x.title}
-                      </Button>
-                    ))}
-                </div>
-              </section>
-            </div>
+            <CatalogMenu structure={c.structure} origin={c.origin}
+              showCollection={(key) => { setCollection(key); setTab("products") }} />
           )}
         </>
       )}
@@ -438,7 +334,7 @@ function Workspace({ c }: { c: Catalogue }) {
                   })
                 }
               >
-                J’accepte le caractère partiel — Générer le JSON
+                Générer le JSON partiel
               </Button>
             </>
           ) : dialog === "import" ? (
@@ -508,7 +404,7 @@ function Products({
       className={`grid min-w-0 items-start gap-5 p-4 md:p-6 xl:px-8 ${selected ? "lg:grid-cols-[minmax(0,1fr)_minmax(330px,38%)]" : "grid-cols-1"}`}
     >
       <section
-        className={`studio-panel min-w-0 p-4 md:p-5 ${selected ? "hidden lg:block" : ""}`}
+        className={`min-w-0 ${selected ? "hidden lg:block" : ""}`}
       >
         <div className="mb-5 flex flex-wrap gap-2">
           <Input
@@ -571,7 +467,7 @@ function Products({
         ) : (
           <>
             <table className="w-full text-left text-sm">
-              <thead className="border-y text-muted-foreground">
+              <thead className="border-b text-muted-foreground">
                 <tr>
                   <th className="px-2 py-3 font-normal">Rang</th>
                   <th className="px-2 py-3 font-normal">Produit</th>
@@ -604,7 +500,7 @@ function Products({
                             loading="lazy"
                           />
                         )}
-                        <span>{row.title}</span>
+                        <span className="[overflow-wrap:anywhere]">{row.title}</span>
                       </button>
                     </td>
                     <td className="hidden p-2 xl:table-cell">
@@ -652,18 +548,11 @@ function Products({
               <p className="text-sm text-muted-foreground" aria-live="polite">
                 {rows.length > 0 && (
                   <>
-                    Produits {start + 1}–{start + rows.length} ·{" "}
+                    {start + 1}–{start + rows.length} affichés ·{" "}
                   </>
                 )}
-                {collectionCount !== undefined && (
-                  <>{collectionCount} dans cette collection · </>
-                )}
-                {c.total} dans le catalogue ·{" "}
-                {c.status === "working" && ["menu", "sitemap"].includes(c.phase)
-                  ? "En cours"
-                  : c.sourceCount}{" "}
-                sur la source
-                {filling && " · Chargement des résultats…"}
+                {collectionCount !== undefined ? `${collectionCount} dans cette collection` : `${c.total} dans le catalogue`}
+                {filling && " · Chargement…"}
               </p>
               <div className="flex gap-2">
                 <Button
@@ -782,7 +671,7 @@ function Detail({ c, p }: { c: Catalogue; p: Product }) {
             target="_blank"
             rel="noreferrer"
           >
-            Voir sur la boutique source
+            Voir la source
           </a>
         </div>
       </div>
@@ -794,11 +683,9 @@ function Detail({ c, p }: { c: Catalogue; p: Product }) {
               ? "Compléments HTML manquants"
               : stateLabel(p.state)}
         </p>
-        <p className="mt-1 text-muted-foreground">
-          {p.state === "complete"
-            ? "Description et compléments récupérés"
-            : p.error || "La fiche sera disponible après la collecte."}
-        </p>
+        {p.state !== "complete" && <p className="mt-1 text-muted-foreground">
+          {p.error || "Fiche en attente de collecte."}
+        </p>}
       </div>
       <section>
         <h4 className="mb-2 font-semibold">Collections et tags</h4>
@@ -859,8 +746,8 @@ function Detail({ c, p }: { c: Catalogue; p: Product }) {
             {!d.sections.length && (
               <p className="text-muted-foreground">
                 {d.htmlStatus === "complete"
-                  ? "HTML lu ; aucune rubrique complémentaire reconnue. Vérifiez le contenu sur la source."
-                  : "Compléments indisponibles : la lecture HTML a échoué."}
+                  ? "Aucun complément trouvé."
+                  : "Lecture HTML en échec."}
               </p>
             )}
           </section>
@@ -884,8 +771,7 @@ function Detail({ c, p }: { c: Catalogue; p: Product }) {
           {c.rankedAt && (
             <p>
               Classement observé le{" "}
-              {new Date(c.rankedAt).toLocaleString("fr-FR")}. Aucun chiffre de
-              vente fourni.
+              {new Date(c.rankedAt).toLocaleString("fr-FR")}
             </p>
           )}
           {d?.warnings.map((x) => (
@@ -901,7 +787,7 @@ function Detail({ c, p }: { c: Catalogue; p: Product }) {
                 .catch(() => setError("Copie impossible."))
             }
           >
-            Copier le JSON intégral
+            Copier le JSON
           </Button>
           <pre className="max-h-72 overflow-auto rounded bg-muted p-3 text-xs">
             {p.jsonSource
@@ -1019,190 +905,5 @@ function Detail({ c, p }: { c: Catalogue; p: Product }) {
         </p>
       )}
     </div>
-  )
-}
-function Collections({
-  c,
-  showProducts,
-  run,
-  busy,
-}: {
-  c: Catalogue
-  showProducts: (key: string) => void
-  run: (fn: () => Promise<unknown>) => Promise<void>
-  busy: boolean
-}) {
-  const [filter, setFilter] = useState("all"),
-    [adding, setAdding] = useState<string | null>(null),
-    add = useMutation(api.catalogues.addCollection)
-  return (
-    <section className="studio-panel m-4 p-5 md:m-6 xl:mx-8">
-      <select
-        className={selectClass}
-        aria-label="Filtrer les collections"
-        value={filter}
-        onChange={(e) => setFilter(e.target.value)}
-      >
-        <option value="all">Toutes</option>
-        <option value="active">Actives</option>
-        <option value="ignored">Ignorées</option>
-        <option value="empty">Vides dans ce catalogue</option>
-        <option value="outside">Hors menu</option>
-        <option value="failed">À relancer</option>
-      </select>
-      <div className="mt-5 overflow-x-auto">
-        <table className="w-full text-left text-sm">
-          <thead className="border-y text-muted-foreground">
-            <tr>
-              {[
-                "Collection",
-                "Tags",
-                "Catalogue / Source",
-                "Menu",
-                "État",
-                "Action",
-              ].map((x) => (
-                <th key={x} className="p-3 font-normal">
-                  {x}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {c.structure.collections
-              .filter(
-                (x) =>
-                  filter === "all" ||
-                  (filter === "active" && !x.ignored) ||
-                  (filter === "ignored" && x.ignored) ||
-                  (filter === "empty" &&
-                    !x.selectedCount &&
-                    x.membership === "complete") ||
-                  (filter === "outside" && x.outsideMenu) ||
-                  (filter === "failed" && x.membership === "failed"),
-              )
-              .map((col) => (
-                <tr className="border-b" key={col.key}>
-                  <td className="p-3 font-medium">{col.title}</td>
-                  <td className="p-3">{col.ignored ? "Aucun tag appliqué" : col.tag || "À valider"}</td>
-                  <td className="p-3">
-                    {col.ignored ? <span>{col.selectedCount}</span> : <button
-                      className="underline underline-offset-4"
-                      onClick={() => showProducts(col.key)}
-                    >
-                      {col.selectedCount}
-                    </button>}{" "}
-                    /{" "}
-                    {col.membership === "complete" ? col.count : "Non vérifié"}
-                  </td>
-                  <td className="p-3">
-                    {col.outsideMenu ? "Hors menu" : "Présente"}
-                  </td>
-                  <td className="p-3">
-                    {col.ignored ? "Ignorée — produits conservés" : col.membership !== "complete"
-                      ? "Appartenances non vérifiées"
-                      : col.selectedCount === 0
-                        ? "Aucun produit sélectionné — collection conservée"
-                        : "Appartenances vérifiées"}
-                  </td>
-                  <td className="p-3">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={!!c.work || busy}
-                      onClick={() => setAdding(col.key)}
-                    >
-                      Ajouter les produits manquants
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-          </tbody>
-        </table>
-      </div>
-      <Dialog open={!!adding} onOpenChange={(open) => !open && setAdding(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Ajouter les produits de cette collection</DialogTitle>
-            <DialogDescription>
-              Les produits manquants s’ajouteront à la sélection initiale, sans
-              doublon.{" "}
-              {c.mode === "TOP_N"
-                ? `Le catalogue pourra dépasser ${c.topN} produits.`
-                : "Les fiches réussies seront conservées."}
-            </DialogDescription>
-          </DialogHeader>
-          <Button
-            disabled={busy}
-            onClick={() =>
-              void run(async () => {
-                await add({ id: c._id, key: adding! })
-                setAdding(null)
-              })
-            }
-          >
-            Ajouter les produits manquants
-          </Button>
-        </DialogContent>
-      </Dialog>
-    </section>
-  )
-}
-function MenuTree({
-  nodes,
-  showCollection,
-}: {
-  nodes: Structure["menu"]
-  showCollection: (key: string) => void
-}) {
-  return (
-    <ul className="space-y-2">
-      {nodes.map((n) => (
-        <li key={n.key}>
-          {n.children.length ? (
-            <details open className="rounded border p-3">
-              <summary className="cursor-pointer font-medium">
-                {n.title}
-                {!n.url && (
-                  <span className="ml-2 text-xs font-normal text-muted-foreground">
-                    Regroupement
-                  </span>
-                )}
-              </summary>
-              <div className="pl-4 pt-3">
-                {n.url && (
-                  <Button
-                    variant="link"
-                    onClick={() =>
-                      showCollection(
-                        decodeURIComponent(
-                          new URL(n.url!).pathname.split("/")[2],
-                        ),
-                      )
-                    }
-                  >
-                    Voir la collection
-                  </Button>
-                )}
-                <MenuTree nodes={n.children} showCollection={showCollection} />
-              </div>
-            </details>
-          ) : n.url ? (
-            <Button
-              variant="link"
-              onClick={() =>
-                showCollection(
-                  decodeURIComponent(new URL(n.url!).pathname.split("/")[2]),
-                )
-              }
-            >
-              {n.title}
-            </Button>
-          ) : (
-            n.title
-          )}
-        </li>
-      ))}
-    </ul>
   )
 }

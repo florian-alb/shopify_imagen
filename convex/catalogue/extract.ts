@@ -101,7 +101,8 @@ export function extractCollection(
     "#product-grid, [id*='product-grid'], .collection__products, .product-grid, [data-product-grid], .collection-products, .main-collection__products-grid",
   ).first()
   const root = main.length ? main : $("main").first()
-  if (!root.length) throw new Error("Grille de collection non reconnue.")
+  if (!root.length)
+    throw new Error(`Grille de collection non reconnue. Page : ${pageUrl}`)
   const products = new Map<string, ProductLink>()
   root.find("a[href*='/products/']").each((_, el) => {
     if (
@@ -134,12 +135,12 @@ export function extractCollection(
     })
   }
   const empty =
-    /no products|keine produkte|aucun produit|no results|keine ergebnisse/i.test(
-      root.text(),
+    /no products|keine produkte|aucun produit|no results|keine ergebnisse|\bcollection is empty\b/i.test(
+      root.text().replace(/\s+/g, " "),
     )
   if (!products.size && !empty)
     throw new Error(
-      "La grille est vide sans indication de collection vide : extraction à vérifier.",
+      `La grille est vide sans indication de collection vide : extraction à vérifier. Page : ${pageUrl}`,
     )
   return {
     products: [...products.values()],
