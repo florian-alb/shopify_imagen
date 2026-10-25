@@ -1,76 +1,88 @@
-import type { FormEvent } from "react";
-import { type Id } from "@/lib/convex";
+import { RefreshCw } from "lucide-react";
+import { BusyIcon } from "@/components/page";
+import { Button } from "@/components/ui/button";
+import type { Id } from "@/lib/convex";
 import { useShopAuthorization } from "../hooks/useShopAuthorization";
-import type { ShopForm, ShopRow } from "../types";
-import { SettingsPanel } from "./SettingsPanel";
+import type { useShopConnection } from "../hooks/useShopConnection";
+import type { ShopRow } from "../types";
 import { ShopAuthorizationDialog } from "./ShopAuthorizationDialog";
 import { ShopOnboarding } from "./ShopOnboarding";
 import { ShopTable } from "./ShopTable";
 
 export function ShopSettingsTab({
-  appOrigin,
-  currentHandle,
-  normalizedDomain,
-  onboardingStep,
+  connection,
   saving,
-  shopForm,
   shops,
-  onFieldChange,
-  onResetForm,
-  onStepChange,
-  onSubmit,
+  activeShop,
+  syncing,
+  onSync,
   onUseShop,
 }: {
-  appOrigin: string;
-  currentHandle: string;
-  normalizedDomain: string;
-  onboardingStep: number;
+  connection: ReturnType<typeof useShopConnection>;
   saving: string | null;
-  shopForm: ShopForm;
   shops: ShopRow[] | undefined;
-  onFieldChange: <K extends keyof ShopForm>(
-    key: K,
-    value: ShopForm[K],
-  ) => void;
-  onResetForm: () => void;
-  onStepChange: (step: number) => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  activeShop: ShopRow | null;
+  syncing: boolean;
+  onSync: () => void;
   onUseShop: (shopId: Id<"shops">) => void;
 }) {
-  const shopAuthorization = useShopAuthorization();
-
+  const authorization = useShopAuthorization();
+  const busy = connection.saving ? "shop-connect" : saving;
   return (
-    <SettingsPanel
-      title="Boutiques connectees"
-      description="Chaque boutique garde ses produits, prompts, jobs et reglages de generation."
-    >
+    <section className="space-y-5" aria-labelledby="shops-title">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h2 id="shops-title" className="text-xl font-semibold tracking-tight">
+            Vos boutiques
+          </h2>
+          <p className="mt-2 max-w-lg text-sm text-muted-foreground">
+            Choisissez la boutique de travail. Ses produits, générations et réglages restent
+            associés à cette boutique.
+          </p>
+        </div>
+        <ShopOnboarding
+          connection={connection}
+          shops={shops ?? []}
+          disabled={shops === undefined || saving !== null}
+        />
+      </div>
+      {connection.hasDraft && !connection.open && (
+        <p role="status" className="text-sm text-muted-foreground">
+          Un ajout est en cours. Vous pouvez le reprendre tant que cette page reste ouverte.
+          <Button variant="ghost" size="sm" onClick={connection.reset}>
+            Effacer ce brouillon
+          </Button>
+        </p>
+      )}
       <ShopTable
         shops={shops}
-        saving={saving}
-        onCheckAuthorization={shopAuthorization.open}
+        saving={busy}
+        onCheckAuthorization={authorization.open}
         onUseShop={onUseShop}
       />
-      <ShopOnboarding
-        appOrigin={appOrigin}
-        currentHandle={currentHandle}
-        form={shopForm}
-        normalizedDomain={normalizedDomain}
-        saving={saving === "shop-connect"}
-        step={onboardingStep}
-        onFieldChange={onFieldChange}
-        onResetForm={onResetForm}
-        onStepChange={onStepChange}
-        onSubmit={onSubmit}
-      />
+      {activeShop && (
+        <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-dashed p-4">
+          <div className="min-w-0">
+            <h3 className="text-sm font-medium">Synchroniser le catalogue</h3>
+            <p className="mt-1 break-all text-xs text-muted-foreground">
+              Mettre à jour les produits de {activeShop.domain} depuis Shopify.
+            </p>
+          </div>
+          <Button variant="outline" disabled={syncing || busy !== null} onClick={onSync}>
+            <BusyIcon busy={syncing} />
+            {!syncing && <RefreshCw />}Synchroniser
+          </Button>
+        </div>
+      )}
       <ShopAuthorizationDialog
-        state={shopAuthorization.state}
-        open={shopAuthorization.isOpen}
-        onOpenChange={shopAuthorization.handleOpenChange}
-        onClose={shopAuthorization.close}
-        isAuthorizing={shopAuthorization.isAuthorizing}
-        onAuthorize={() => void shopAuthorization.authorize()}
-        onVerify={shopAuthorization.verify}
+        state={authorization.state}
+        open={authorization.isOpen}
+        onOpenChange={authorization.handleOpenChange}
+        onClose={authorization.close}
+        isAuthorizing={authorization.isAuthorizing}
+        onAuthorize={() => void authorization.authorize()}
+        onVerify={authorization.verify}
       />
-    </SettingsPanel>
+    </section>
   );
 }

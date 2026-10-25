@@ -17,7 +17,7 @@ export function JobTechnicalDetails({
   return (
     <details className="mt-5 rounded-lg border bg-background p-4">
       <summary className="cursor-pointer text-sm font-medium">
-        Technical details
+        Détails techniques
       </summary>
       <JobBatchSegmentDetails segments={segments} />
       <div className="mt-4 grid gap-2">
@@ -29,7 +29,7 @@ export function JobTechnicalDetails({
             <div className="min-w-0">
               <p className="font-medium">{image.imageType}</p>
               <p className="text-xs text-muted-foreground">
-                {image.status} · Created{" "}
+                {image.status} · Créée le{" "}
                 {new Date(image.createdAt).toLocaleString()}
                 {image.costUsd != null
                   ? ` · ${formatUsd(imageDisplayCost(image, job))} (${(

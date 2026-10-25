@@ -45,7 +45,7 @@ function SegmentedControl<T extends string>({
     >
       <span
         aria-hidden="true"
-        className="pointer-events-none absolute inset-y-1 left-1 rounded-md border border-border bg-background transition-transform duration-200 ease-out motion-reduce:transition-none"
+        className="pointer-events-none absolute inset-y-1 left-1 rounded-md bg-card shadow-xs transition-transform duration-200 ease-out motion-reduce:transition-none"
         style={{
           width: `calc((100% - 0.5rem) / ${options.length})`,
           transform: `translateX(${activeIndex * 100}%)`,

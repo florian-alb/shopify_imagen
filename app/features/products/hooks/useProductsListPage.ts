@@ -226,6 +226,7 @@ export function useProductsListPage(search: ProductSearch) {
     variants,
     chooserOpen,
     creatingJob,
+    clearSelection: () => setSelected(new Set()),
     facets,
     imageTypes,
     imageTypeSelection,

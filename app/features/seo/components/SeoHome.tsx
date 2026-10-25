@@ -42,10 +42,10 @@ export function SeoHome() {
     })
   }
 
-  return <main className={`${pageContentClass} mx-auto max-w-[1440px] md:px-6 md:py-6`}>
+  return <main className={pageContentClass}>
     <PageHeader title="Arborescence SEO">Transforme tes mots-clés en collections à créer.</PageHeader>
     <div className="grid items-start gap-8 xl:grid-cols-[minmax(0,1fr)_15rem] 2xl:grid-cols-[minmax(0,1fr)_18rem]">
-      <form className="min-w-0" onSubmit={async event => {
+      <form className="studio-panel min-w-0 p-5 sm:p-6" onSubmit={async event => {
         event.preventDefault()
         if (!file || !preview || disabled) return
         if (!config.sourceCountry || config.sourceCountry !== config.targetCountry || config.sourceLanguage !== config.targetLanguage) {

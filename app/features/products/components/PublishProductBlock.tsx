@@ -69,7 +69,7 @@ export function PublishProductBlock({
         </Badge>
       </div>
 
-      <div className="grid gap-3 p-3 sm:grid-cols-[6rem_minmax(0,1fr)]">
+      <div className="grid grid-cols-[5rem_minmax(0,1fr)] items-start gap-3 p-3 sm:grid-cols-[6rem_minmax(0,1fr)]">
         {primaryImage ? (
           <Label className="group relative block cursor-pointer overflow-hidden rounded-lg border bg-muted has-[:checked]:border-primary">
             <span className="block aspect-[4/5]">
@@ -100,6 +100,7 @@ export function PublishProductBlock({
               {productGroup.requiresVariantImage
                 ? "Prompt n° 1 · Variantes"
                 : "Image principale"}
+              {primaryImage.status === "uploaded" && <span className="mt-0.5 block text-muted-foreground">Déjà publiée</span>}
             </span>
           </Label>
         ) : (

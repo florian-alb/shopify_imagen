@@ -65,15 +65,15 @@ export function getReviewAggregateState({
 
 export function reviewAggregateBadge(
   counts: ReviewAggregateCounts,
-  { emptyLabel = "No review" }: { emptyLabel?: string } = {},
+  { emptyLabel = "Aucune image à vérifier" }: { emptyLabel?: string } = {},
 ): ReviewAggregateBadge {
   const state = getReviewAggregateState(counts);
 
   if (state === "pending") {
-    return { tone: "warning", label: `${counts.pending} to review` };
+    return { tone: "warning", label: `${counts.pending} à vérifier` };
   }
-  if (state === "approved") return { tone: "success", label: "Approved" };
-  if (state === "partial") return { tone: "warning", label: "Partial" };
-  if (state === "rejected") return { tone: "danger", label: "Rejected" };
+  if (state === "approved") return { tone: "success", label: "Approuvées" };
+  if (state === "partial") return { tone: "warning", label: "Partiellement approuvées" };
+  if (state === "rejected") return { tone: "danger", label: "Rejetées" };
   return { tone: "neutral", label: emptyLabel };
 }

@@ -26,10 +26,9 @@ export function BulkActionsMenu({
           type="button"
           size="sm"
           variant="outline"
-          className="min-h-11 sm:min-h-7"
           disabled={disabled}
         >
-          Actions bulk
+          Autres actions
           <ChevronDown data-icon="inline-end" />
         </Button>
       </DropdownMenuTrigger>

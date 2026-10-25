@@ -9,19 +9,21 @@ export type GeneratedImageStateTone =
   | "danger";
 
 export function generatedImageStateLabel(image: Doc<"generatedImages">) {
-  if (image.activeRetryImageId) return "Regenerating";
-  if (isImagePushing(image)) return "Pushing";
-  if (hasImagePushError(image)) return image.status === "uploaded" ? "Pushed · error" : "Push failed";
-  if (image.status === "failed") return "Error";
-  if (image.status === "canceled") return "Canceled";
-  if (image.status === "postprocessing") return "Post-processing";
-  if (image.status === "uploaded") return "Pushed";
+  if (image.activeRetryImageId) return "Régénération";
+  if (isImagePushing(image)) return "Publication en cours";
+  if (hasImagePushError(image)) return image.status === "uploaded" ? "Publiée · erreur" : "Publication en échec";
+  if (image.status === "failed") return "Échec";
+  if (image.status === "canceled") return "Annulée";
+  if (image.status === "postprocessing") return "Finalisation";
+  if (image.status === "uploaded") return "Publiée";
+  if (image.status === "queued") return "En attente";
+  if (image.status === "generating") return "Génération en cours";
   if (!isReviewable(image)) return image.status;
 
   const reviewStatus = getReviewStatus(image);
-  if (reviewStatus === "approved") return "Approved";
-  if (reviewStatus === "rejected") return "Rejected";
-  return "To review";
+  if (reviewStatus === "approved") return "Approuvée";
+  if (reviewStatus === "rejected") return "Rejetée";
+  return "À vérifier";
 }
 
 export function generatedImageStateTone(

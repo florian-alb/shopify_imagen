@@ -17,6 +17,7 @@ import { PublishImagesOptions } from "./PublishImagesOptions";
 import type { VisualGroupsData } from "../types";
 import { buildPublishProductGroups } from "../lib/publishProductGroups";
 import { PublishProductBlock } from "./PublishProductBlock";
+import { publicationImagesInScope, selectedPublicationImages } from "../lib/productImageViews";
 
 export function PublishImagesDialog({
   open,
@@ -32,6 +33,8 @@ export function PublishImagesDialog({
   visualGroupsData,
   primaryVariantImageType,
   focusedGroupId,
+  destination,
+  productTitle,
   busy,
   onPush,
 }: {
@@ -48,15 +51,22 @@ export function PublishImagesDialog({
   visualGroupsData: VisualGroupsData | null | undefined;
   primaryVariantImageType: string | null;
   focusedGroupId?: Id<"visualGroups"> | null;
+  destination: string;
+  productTitle: string;
   busy: boolean;
   onPush: () => void;
 }) {
+  const scopedImages = publicationImagesInScope(readyImages, focusedGroupId);
+  const selectedCount = selectedPublicationImages(scopedImages, selectedPushIds).length;
   const productGroups = buildPublishProductGroups(
-    readyImages,
+    scopedImages,
     visualGroupsData,
     focusedGroupId,
   );
-  const focusedProductGroup = focusedGroupId ? productGroups[0] : null;
+  const focusedGroupLabel = focusedGroupId
+    ? visualGroupsData?.groups.find(group => group._id === focusedGroupId)?.label
+      ?? productGroups[0]?.label
+    : null;
   const hasVariantTargets = productGroups.some(
     (group) => group.requiresVariantImage,
   );
@@ -97,17 +107,19 @@ export function PublishImagesDialog({
       <AlertDialogContent className="h-[min(46rem,calc(100dvh-2rem))] w-[calc(100vw-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 data-[size=default]:max-w-none data-[size=default]:sm:max-w-2xl">
         <AlertDialogHeader className="place-items-start gap-1.5 border-b p-4 text-left">
           <AlertDialogTitle>
-            {focusedProductGroup
-              ? `Publier · ${focusedProductGroup.label}`
+            {focusedGroupLabel
+              ? `Publier · ${focusedGroupLabel}`
               : "Publier les images sur Shopify ?"}
           </AlertDialogTitle>
           <AlertDialogDescription>
-            {focusedProductGroup
-              ? "Les images de cette déclinaison seront publiées et son image du prompt n° 1 sera assignée à ses variantes Shopify."
+            {focusedGroupLabel
+              ? "Choisissez les images de cette déclinaison et les options de remplacement sur Shopify."
               : hasVisualGroups
                 ? "Chaque bloc correspond à une cible de génération. L’image du prompt n° 1 sera assignée aux variantes Shopify correspondantes."
                 : "Choisissez les images approuvées à envoyer sur Shopify."}
           </AlertDialogDescription>
+          <p className="text-sm"><span className="text-muted-foreground">Destination : </span><strong>{destination}</strong></p>
+          <p className="text-xs text-muted-foreground">{productTitle} · {focusedGroupLabel ? `Déclinaison ${focusedGroupLabel} uniquement` : "Sélection parmi les images approuvées du produit"}</p>
         </AlertDialogHeader>
 
         <div className="min-h-0 overflow-y-auto overflow-x-hidden px-4 py-3">
@@ -117,8 +129,8 @@ export function PublishImagesDialog({
                 <p className="text-sm font-medium">
                   {selectedProductCount} déclinaison
                   {selectedProductCount === 1 ? "" : "s"} ·{" "}
-                  {selectedPushIds.size} image
-                  {selectedPushIds.size === 1 ? "" : "s"}
+                  {selectedCount} image
+                  {selectedCount === 1 ? "" : "s"}
                 </p>
                 <p className="text-xs text-muted-foreground">
                   {hasVariantTargets
@@ -129,22 +141,25 @@ export function PublishImagesDialog({
               <Label className="flex min-h-11 items-center gap-2 text-sm sm:min-h-8">
                 <Checkbox
                   checked={
-                    readyImages.length > 0 &&
-                    selectedPushIds.size === readyImages.length
+                    scopedImages.length > 0 && selectedCount === scopedImages.length
+                      ? true : selectedCount > 0 ? "indeterminate" : false
                   }
+                  disabled={busy || !scopedImages.length}
                   onCheckedChange={(checked) =>
                     setSelectedPushIds(
                       checked === true
-                        ? new Set(readyImages.map((image) => image._id))
+                        ? new Set(scopedImages.map((image) => image._id))
                         : new Set(),
                     )
                   }
                 />
-                Tout sélectionner
+                Tout sélectionner dans cette vue
               </Label>
             </div>
 
             <div className="grid gap-3">
+              {scopedImages.some(image => image.status === "uploaded") && <p className="text-sm text-muted-foreground">Les images déjà publiées ne sont pas cochées à l’ouverture. Sélectionnez-les explicitement pour les envoyer à nouveau.</p>}
+              {!scopedImages.length && <p role="status" className="rounded-lg bg-muted p-4 text-sm">Aucune image approuvée disponible dans ce périmètre. Fermez cette préparation pour vérifier les images ou choisir une autre déclinaison.</p>}
               {productGroups.map((productGroup) => (
                 <PublishProductBlock
                   key={productGroup.key}
@@ -188,14 +203,14 @@ export function PublishImagesDialog({
             className="min-h-11 sm:min-h-9"
             disabled={
               busy ||
-              !selectedPushIds.size ||
+              !selectedCount ||
               promptOneConfigurationMissing ||
               groupsMissingPromptOne.length > 0
             }
             onClick={onPush}
           >
             <BusyIcon busy={busy} />
-            {`Publier ${selectedPushIds.size} image${selectedPushIds.size === 1 ? "" : "s"}`}
+            {`Publier ${selectedCount} image${selectedCount === 1 ? "" : "s"}`}
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>

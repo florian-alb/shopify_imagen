@@ -1,580 +1,175 @@
-import { useQuery } from "convex/react";
-import { api } from "@/lib/convex";
-import { useState, type FormEvent, type ReactNode } from "react";
-import {
-  Check,
-  ChevronLeft,
-  ChevronRight,
-  Copy,
-  ExternalLink,
-  KeyRound,
-  Maximize2,
-} from "lucide-react";
-import { toast } from "sonner";
+import { Check, ChevronLeft, ChevronRight, Plus, Store } from "lucide-react";
 import { BusyIcon } from "@/components/page";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
+  DialogTrigger,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { APP_NAME, SHOPIFY_ONBOARDING_SCOPES } from "../settingsData";
-import type { ShopForm } from "../types";
+import type { useShopConnection } from "../hooks/useShopConnection";
+import type { ShopRow } from "../types";
+import { ShopIdentityFields, ShopCredentialsFields } from "./ShopOnboardingFields";
+import { ShopAccessGuide, ShopAppGuide } from "./ShopOnboardingGuide";
+
+const steps = [
+  {
+    title: "Votre boutique",
+    description: "Identifiez le domaine Shopify à connecter.",
+    short: "Boutique",
+  },
+  {
+    title: "L’application Shopify",
+    description: "Créez une application pour relier votre boutique à Image Studio.",
+    short: "Application",
+  },
+  {
+    title: "Configurer les accès",
+    description: "Préparez les URL et les autorisations de l’application.",
+    short: "Accès",
+  },
+  {
+    title: "Enregistrer les clés",
+    description: "Ajoutez les identifiants de votre application Shopify.",
+    short: "Clés",
+  },
+];
 
 export function ShopOnboarding({
-  appOrigin,
-  currentHandle,
-  form,
-  normalizedDomain,
-  saving,
-  step,
-  onFieldChange,
-  onResetForm,
-  onStepChange,
-  onSubmit,
+  connection: flow,
+  shops,
+  disabled,
 }: {
-  appOrigin: string;
-  currentHandle: string;
-  form: ShopForm;
-  normalizedDomain: string;
-  saving: boolean;
-  step: number;
-  onFieldChange: <K extends keyof ShopForm>(key: K, value: ShopForm[K]) => void;
-  onResetForm: () => void;
-  onStepChange: (step: number) => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  connection: ReturnType<typeof useShopConnection>;
+  shops: ShopRow[];
+  disabled: boolean;
 }) {
-  const [previewOpen, setPreviewOpen] = useState(false);
-  const appUrl = appOrigin.replace(/\/$/, "");
-  const devDashboardUrl = currentHandle
-    ? `https://admin.shopify.com/store/${currentHandle}/settings/apps/development`
-    : "https://admin.shopify.com/";
+  const current = steps[flow.step - 1];
   const canContinue =
-    step === 1
-      ? Boolean(normalizedDomain)
-      : step === 4
-        ? Boolean(form.clientId.trim() && form.clientSecret.trim())
+    flow.step === 1
+      ? Boolean(flow.normalizedDomain)
+      : flow.step === 4
+        ? Boolean(flow.form.clientId.trim() && flow.form.clientSecret.trim())
         : true;
-
-  function nextStep() {
-    if (!canContinue) return;
-    onStepChange(Math.min(step + 1, 4));
-  }
-
   return (
-    <form
-      onSubmit={onSubmit}
-      className="grid gap-4 rounded-lg border border-border bg-card p-4"
-    >
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex items-center gap-3">
-          <span className="grid size-10 place-items-center rounded-lg border border-border bg-muted text-muted-foreground">
-            <KeyRound className="size-4" />
-          </span>
-          <div>
-            <h3 className="text-base font-semibold">
-              Connecter une boutique Shopify
-            </h3>
-            <p className="text-sm text-muted-foreground">
-              Assistant compact en quatre etapes.
-            </p>
-          </div>
-        </div>
-        <OnboardingProgress step={step} />
-      </div>
-
-      <div className="grid gap-4">
-        <div className="min-w-0 rounded-lg border border-border bg-muted p-4">
-          <p className="mb-4 text-xs font-medium text-muted-foreground">
-            Etape {step} sur 4
-          </p>
-          {step === 1 ? (
-            <StepOne
-              form={form}
-              normalizedDomain={normalizedDomain}
-              onFieldChange={onFieldChange}
-            />
-          ) : step === 2 ? (
-            <StepTwo appName={APP_NAME} dashboardUrl={devDashboardUrl} />
-          ) : step === 3 ? (
-            <StepThree appUrl={appUrl} />
-          ) : (
-            <StepFour
-              form={form}
-              normalizedDomain={normalizedDomain}
-              onFieldChange={onFieldChange}
-            />
-          )}
-
-          <div className="mt-5 flex flex-wrap items-center gap-3">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() =>
-                step === 1 ? onResetForm() : onStepChange(step - 1)
-              }
-              disabled={saving}
-            >
-              {step > 1 ? <ChevronLeft data-icon="inline-start" /> : null}
-              {step === 1 ? "Annuler" : "Retour"}
-            </Button>
-            {step < 4 ? (
-              <Button type="button" onClick={nextStep} disabled={!canContinue}>
-                Continuer
-                <ChevronRight data-icon="inline-end" />
-              </Button>
-            ) : (
-              <Button type="submit" disabled={!canContinue || saving}>
-                <BusyIcon busy={saving} />
-                {!saving ? <ExternalLink data-icon="inline-start" /> : null}
-                Connecter la boutique
-              </Button>
-            )}
-            <Button
-              type="button"
-              variant="outline"
-              className="lg:hidden"
-              onClick={() => setPreviewOpen(true)}
-            >
-              <Maximize2 data-icon="inline-start" />
-              Apercu
-            </Button>
-          </div>
-        </div>
-      </div>
-      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
-        <DialogContent className="border-border bg-card sm:max-w-4xl">
-          <DialogHeader>
-            <DialogTitle>Apercu de l'etape {step}</DialogTitle>
-          </DialogHeader>
-          <div className="overflow-hidden rounded-lg bg-[#070b0d]">
-            <OnboardingVisual step={step} large />
-          </div>
-        </DialogContent>
-      </Dialog>
-    </form>
-  );
-}
-
-function OnboardingProgress({ step }: { step: number }) {
-  return (
-    <div className="flex items-center overflow-x-auto">
-      {[1, 2, 3, 4].map((item) => {
-        const complete = item < step;
-        const active = item === step;
-        return (
-          <div key={item} className="flex items-center">
-            <span
-              className={[
-                "grid size-8 place-items-center rounded-full border text-xs font-medium transition-colors",
-                complete || active
-                  ? "border-primary/50 bg-primary/15 text-primary"
-                  : "border-border bg-card text-muted-foreground",
-              ].join(" ")}
-            >
-              {complete ? <Check className="size-4" /> : item}
-            </span>
-            {item < 4 ? <span className="h-px w-8 bg-border sm:w-12" /> : null}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function StepOne({
-  form,
-  normalizedDomain,
-  onFieldChange,
-}: {
-  form: ShopForm;
-  normalizedDomain: string;
-  onFieldChange: <K extends keyof ShopForm>(key: K, value: ShopForm[K]) => void;
-}) {
-  const showSuffix = !form.domain.includes(".");
-  return (
-    <div className="grid gap-4">
-      <div>
-        <h4 className="font-medium">Domaine Shopify</h4>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Utilise le domaine principal en .myshopify.com.
-        </p>
-      </div>
-      <div className="grid gap-3 sm:grid-cols-[1fr_1fr]">
-        <div>
-          <Label htmlFor="shop-name">Nom interne</Label>
-          <Input
-            id="shop-name"
-            className="mt-2 h-10"
-            value={form.name}
-            onChange={(event) => onFieldChange("name", event.target.value)}
-            placeholder="Rideau Design"
-          />
-        </div>
-        <div>
-          <Label htmlFor="shop-domain">Domaine</Label>
-          <div className="mt-2 flex min-h-10 items-center overflow-hidden rounded-lg border border-border bg-muted focus-within:ring-2 focus-within:ring-ring/50">
-            <Input
-              id="shop-domain"
-              className="h-10 flex-1 border-0 shadow-none focus-visible:ring-0"
-              value={form.domain}
-              onChange={(event) => onFieldChange("domain", event.target.value)}
-              placeholder="q8r4mz-2x"
-              required
-            />
-            {showSuffix ? (
-              <span className="shrink-0 px-3 text-sm text-muted-foreground">
-                .myshopify.com
-              </span>
-            ) : null}
-          </div>
-        </div>
-      </div>
-      <div className="rounded-lg border border-dashed border-border bg-muted px-3 py-2 font-mono text-sm">
-        {normalizedDomain || "q8r4mz-2x.myshopify.com"}
-      </div>
-    </div>
-  );
-}
-
-function StepTwo({
-  appName,
-  dashboardUrl,
-}: {
-  appName: string;
-  dashboardUrl: string;
-}) {
-  return (
-    <div className="grid gap-4">
-      <div>
-        <h4 className="font-medium">Application Shopify personnalisée</h4>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Ouvre les apps de développement puis crée une app avec ce nom.
-        </p>
-      </div>
-      <div className="grid gap-2 text-sm text-muted-foreground">
-        <InstructionLine index={1}>
-          Ouvre les paramètres des apps de développement Shopify.
-        </InstructionLine>
-        <InstructionLine index={2}>
-          Clique sur Developper des applications.
-        </InstructionLine>
-        <InstructionLine index={3}>
-          Cree une nouvelle application personnalisee.
-        </InstructionLine>
-      </div>
-      <div className="flex flex-wrap items-center gap-3">
-        <Button type="button" variant="outline" asChild>
-          <a href={dashboardUrl} target="_blank" rel="noreferrer">
-            <ExternalLink data-icon="inline-start" />
-            Ouvrir Shopify
-          </a>
+    <Dialog open={flow.open} onOpenChange={flow.changeOpen}>
+      <DialogTrigger asChild>
+        <Button disabled={disabled}>
+          <Plus />
+          {flow.hasDraft ? "Reprendre l’ajout" : "Ajouter une boutique"}
         </Button>
-        <CopyValue label="Nom de l'application" value={appName} />
-      </div>
-    </div>
-  );
-}
-
-function StepThree({ appUrl }: { appUrl: string }) {
-  const config = useQuery(api.settings.shopifyOnboarding);
-  return (
-    <div className="grid gap-4">
-      <div>
-        <h4 className="font-medium">Version et autorisations Shopify</h4>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Shopify gère l’installation de l’application et la demande des
-          autorisations publiées.
-        </p>
-      </div>
-      <div className="grid gap-2 text-sm text-muted-foreground">
-        <InstructionLine index={1}>
-          Dans la version de l’application, renseigne l’URL de l’application,
-          les URL de redirection autorisées (Allowed redirection URLs) et les
-          scopes Admin API indiqués ci-dessous.
-        </InstructionLine>
-        <InstructionLine index={2}>
-          Publie la nouvelle version en gardant le flux d’installation géré par
-          Shopify avec{" "}
-          <code className="font-mono text-foreground">
-            use_legacy_install_flow = false
-          </code>
-          .
-        </InstructionLine>
-        <InstructionLine index={3}>
-          Après avoir enregistré les clés à l’étape suivante, utilise Accès
-          Shopify dans le tableau pour vérifier et, si nécessaire, autoriser la
-          boutique.
-        </InstructionLine>
-      </div>
-      <div className="overflow-hidden rounded-lg border border-border">
-        <CopyRow label="URL de l'application" value={appUrl} />
-        {config?.redirectUrl ? (
-          <CopyRow
-            label="URL de redirection OAuth autorisée"
-            value={config.redirectUrl}
-          />
-        ) : (
-          <p
-            role="status"
-            className="border-b border-border p-3 text-sm text-muted-foreground"
-          >
-            {config === undefined
-              ? "Chargement de l’URL de redirection…"
-              : "URL de redirection indisponible : configure SHOPIFY_OAUTH_REDIRECT_URL ou CONVEX_SITE_URL sur le backend Convex."}
-          </p>
-        )}
-        <CopyRow
-          label="Scopes Admin API à publier"
-          value={SHOPIFY_ONBOARDING_SCOPES}
-        />
-      </div>
-    </div>
-  );
-}
-
-function StepFour({
-  form,
-  normalizedDomain,
-  onFieldChange,
-}: {
-  form: ShopForm;
-  normalizedDomain: string;
-  onFieldChange: <K extends keyof ShopForm>(key: K, value: ShopForm[K]) => void;
-}) {
-  return (
-    <div className="grid gap-4">
-      <div>
-        <h4 className="font-medium">Clés et filtre catalogue</h4>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Les clés sont envoyées à Convex et ne sont pas réaffichées après
-          sauvegarde.
-        </p>
-      </div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div>
-          <Label htmlFor="shop-client-id">ID client</Label>
-          <Input
-            id="shop-client-id"
-            className="mt-2 h-10"
-            value={form.clientId}
-            onChange={(event) => onFieldChange("clientId", event.target.value)}
-            autoComplete="off"
-            required
-          />
-        </div>
-        <div>
-          <Label htmlFor="shop-client-secret">Clé secrète</Label>
-          <Input
-            id="shop-client-secret"
-            className="mt-2 h-10"
-            type="password"
-            value={form.clientSecret}
-            onChange={(event) =>
-              onFieldChange("clientSecret", event.target.value)
+      </DialogTrigger>
+      <DialogContent className="flex max-h-[calc(100dvh-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl">
+        <DialogHeader className="shrink-0 border-b px-5 py-4 pr-12 sm:px-6">
+          <DialogTitle className="flex items-center gap-2">
+            <Store className="size-4 text-muted-foreground" />
+            Connecter une boutique
+          </DialogTitle>
+          <DialogDescription>
+            Étape {flow.step} sur 4 · {current.short}
+          </DialogDescription>
+        </DialogHeader>
+        <form
+          className="flex min-h-0 flex-col overflow-hidden"
+          onSubmit={(event) => {
+            if (flow.step < 4) {
+              event.preventDefault();
+              if (canContinue) flow.setStep(flow.step + 1);
+            } else {
+              void flow.submit(event);
             }
-            autoComplete="off"
-            required
-          />
-        </div>
-      </div>
-      <div>
-        <Label htmlFor="shop-product-query">Filtre produits Shopify</Label>
-        <Input
-          id="shop-product-query"
-          className="mt-2 h-10 font-mono text-sm"
-          value={form.productQuery}
-          onChange={(event) =>
-            onFieldChange("productQuery", event.target.value)
-          }
-        />
-        <p className="mt-2 text-xs text-muted-foreground">
-          Boutique cible: {normalizedDomain || "domaine non renseigné"}
-        </p>
-      </div>
-    </div>
-  );
-}
-
-function InstructionLine({
-  index,
-  children,
-}: {
-  index: number;
-  children: ReactNode;
-}) {
-  return (
-    <div className="grid grid-cols-[1.5rem_1fr] gap-2">
-      <span className="font-medium text-foreground">{index}.</span>
-      <span>{children}</span>
-    </div>
-  );
-}
-
-function CopyValue({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex min-w-0 items-center gap-2 rounded-lg border border-border bg-muted px-3 py-2">
-      <div className="min-w-0">
-        <p className="text-xs font-medium text-muted-foreground">{label}</p>
-        <p className="truncate font-mono text-sm">{value}</p>
-      </div>
-      <CopyButton value={value} />
-    </div>
-  );
-}
-
-function CopyRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="grid grid-cols-[1fr_auto] items-start gap-3 border-b border-border p-3 last:border-b-0">
-      <div className="min-w-0">
-        <p className="text-xs font-medium text-muted-foreground">{label}</p>
-        <p className="mt-1 break-words font-mono text-sm">{value}</p>
-      </div>
-      <CopyButton value={value} />
-    </div>
-  );
-}
-
-function CopyButton({ value }: { value: string }) {
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(value);
-      toast.success("Copie");
-    } catch (error) {
-      toast.error("Copie impossible", {
-        description: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-
-  return (
-    <Button
-      type="button"
-      size="icon-sm"
-      variant="outline"
-      onClick={() => void copy()}
-      aria-label="Copier"
-    >
-      <Copy className="size-4" />
-    </Button>
-  );
-}
-
-function OnboardingVisual({
-  step,
-  large = false,
-}: {
-  step: number;
-  large?: boolean;
-}) {
-  return (
-    <div
-      className={large ? "aspect-[16/9] w-full p-5" : "absolute inset-0 p-4"}
-    >
-      <div className="grid h-full grid-cols-[72px_1fr] gap-4 rounded-lg bg-[#080d0f] text-white">
-        <aside className="rounded-l-lg bg-[#101719] p-3 text-[9px] text-white/45">
-          <div className="mb-5 h-4 w-14 rounded bg-white/10" />
-          {["Domaines", "Apps", "Version", "Cles"].map((item, index) => (
-            <div
-              key={item}
-              className={`mb-2 rounded px-2 py-1 ${
-                index === step - 1
-                  ? "bg-emerald-400/15 text-emerald-200"
-                  : "bg-muted"
-              }`}
+          }}
+        >
+          <div className="grid min-h-0 overflow-y-auto sm:grid-cols-[11rem_minmax(0,1fr)]">
+            <nav
+              aria-label="Étapes de connexion"
+              className="border-b px-5 py-3 sm:border-b-0 sm:border-r sm:bg-muted/30 sm:p-4"
             >
-              {item}
-            </div>
-          ))}
-        </aside>
-        <section className="p-4">
-          <div className="mb-4 flex items-center justify-between">
-            <div>
-              <div className="h-3 w-28 rounded bg-white/20" />
-              <div className="mt-2 h-2 w-20 rounded bg-white/10" />
-            </div>
-            <div className="h-6 w-16 rounded bg-white/10" />
+              <ol className="flex gap-2 sm:flex-col sm:gap-1">
+                {steps.map((item, index) => (
+                  <li key={item.short} className="min-w-0 flex-1">
+                    <button
+                      type="button"
+                      disabled={index + 1 > flow.step || flow.saving}
+                      onClick={() => flow.setStep(index + 1)}
+                      aria-current={flow.step === index + 1 ? "step" : undefined}
+                      aria-label={`Étape ${index + 1} : ${item.short}`}
+                      className="flex min-h-11 w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm text-muted-foreground aria-[current=step]:bg-primary/10 aria-[current=step]:text-primary disabled:opacity-50"
+                    >
+                      <span className="grid size-6 shrink-0 place-items-center rounded-full border border-current text-xs">
+                        {index + 1 < flow.step ? <Check className="size-3" /> : index + 1}
+                      </span>
+                      <span className="hidden sm:inline">{item.short}</span>
+                    </button>
+                  </li>
+                ))}
+              </ol>
+              <p className="mt-5 hidden break-words text-xs text-muted-foreground sm:block" title={flow.normalizedDomain}>
+                {flow.form.name.trim() || flow.normalizedDomain.split(".")[0] || "Votre boutique Shopify"}
+              </p>
+            </nav>
+            <fieldset disabled={flow.saving} className="min-w-0 space-y-5 p-5 sm:min-h-80 sm:p-6">
+              <div aria-live="polite">
+                <h2 key={flow.step} className="text-xl font-semibold tracking-tight">
+                  {current.title}
+                </h2>
+                <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                  {current.description}
+                </p>
+              </div>
+              {flow.step === 1 && (
+                <ShopIdentityFields
+                  form={flow.form}
+                  normalizedDomain={flow.normalizedDomain}
+                  onChange={flow.updateField}
+                />
+              )}
+              {flow.step === 2 && <ShopAppGuide onSkip={() => flow.setStep(4)} />}
+              {flow.step === 3 && <ShopAccessGuide appUrl={flow.appOrigin} />}
+              {flow.step === 4 && (
+                <ShopCredentialsFields
+                  form={flow.form}
+                  normalizedDomain={flow.normalizedDomain}
+                  onChange={flow.updateField}
+                  existingShop={shops.find((shop) => shop.domain === flow.normalizedDomain)}
+                />
+              )}
+              {flow.error && (
+                <p
+                  role="alert"
+                  className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive"
+                >
+                  {flow.error}
+                </p>
+              )}
+            </fieldset>
           </div>
-          {step === 1 ? (
-            <VisualStepDomain />
-          ) : step === 2 ? (
-            <VisualStepCreate />
-          ) : step === 3 ? (
-            <VisualStepConfig />
-          ) : (
-            <VisualStepCredentials />
-          )}
-        </section>
-      </div>
-    </div>
-  );
-}
-
-function VisualStepDomain() {
-  return (
-    <div className="grid gap-3">
-      <div className="rounded bg-muted p-3">
-        <div className="h-2 w-24 rounded bg-muted-foreground/30" />
-        <div className="mt-3 h-8 rounded bg-emerald-400/10" />
-      </div>
-      <div className="rounded bg-muted p-3">
-        <div className="h-2 w-20 rounded bg-muted-foreground/30" />
-        <div className="mt-3 h-6 rounded bg-white/10" />
-      </div>
-    </div>
-  );
-}
-
-function VisualStepCreate() {
-  return (
-    <div className="grid gap-3 sm:grid-cols-2">
-      <div className="rounded-lg border border-cyan-400/20 bg-cyan-400/10 p-3">
-        <div className="h-2 w-24 rounded bg-cyan-100/50" />
-        <div className="mt-3 h-8 rounded bg-cyan-100/10" />
-        <div className="mt-3 h-6 w-28 rounded bg-primary" />
-      </div>
-      <div className="rounded-lg border border-emerald-400/20 bg-emerald-400/10 p-3">
-        <div className="h-2 w-20 rounded bg-emerald-100/50" />
-        <div className="mt-3 h-8 rounded bg-emerald-100/10" />
-        <div className="mt-3 h-6 w-20 rounded bg-white/20" />
-      </div>
-    </div>
-  );
-}
-
-function VisualStepConfig() {
-  return (
-    <div className="grid gap-3">
-      <div className="rounded bg-emerald-400/10 p-3">
-        <div className="h-2 w-28 rounded bg-emerald-100/50" />
-        <div className="mt-3 h-7 rounded bg-white/10" />
-      </div>
-      <div className="rounded bg-muted p-3">
-        <div className="h-2 w-20 rounded bg-muted-foreground/30" />
-        <div className="mt-3 grid gap-2">
-          <div className="h-5 rounded bg-white/10" />
-          <div className="h-5 rounded bg-white/10" />
-          <div className="h-5 rounded bg-white/10" />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function VisualStepCredentials() {
-  return (
-    <div className="grid gap-3">
-      <div className="rounded bg-muted p-3">
-        <div className="h-2 w-16 rounded bg-muted-foreground/30" />
-        <div className="mt-3 h-8 rounded bg-emerald-400/10" />
-      </div>
-      <div className="rounded bg-muted p-3">
-        <div className="h-2 w-24 rounded bg-muted-foreground/30" />
-        <div className="mt-3 h-8 rounded bg-white/10" />
-      </div>
-    </div>
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t bg-muted/30 px-5 py-4 sm:px-6">
+            <Button
+              type="button"
+              variant="ghost"
+              disabled={flow.saving}
+              onClick={() => (flow.step > 1 ? flow.setStep(flow.step - 1) : flow.changeOpen(false))}
+            >
+              {flow.step > 1 ? (
+                <>
+                  <ChevronLeft />
+                  Retour
+                </>
+              ) : (
+                "Fermer"
+              )}
+            </Button>
+            <Button type="submit" className="min-h-11" disabled={!canContinue || flow.saving}>
+              <BusyIcon busy={flow.saving} />
+              {flow.step === 4 ? "Enregistrer la boutique" : "Continuer"}
+              {flow.step < 4 && <ChevronRight />}
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

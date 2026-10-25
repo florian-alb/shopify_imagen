@@ -28,15 +28,15 @@ export function DeleteImageDialog({
     <AlertDialog open={target !== null} onOpenChange={onOpenChange}>
       <AlertDialogContent className="sm:max-w-md">
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete this image everywhere?</AlertDialogTitle>
+          <AlertDialogTitle>Supprimer cette image partout ?</AlertDialogTitle>
           <AlertDialogDescription>
-            The <strong>{target?.imageType}</strong> image will be removed from
-            storage, from Shopify if it was pushed, and from this product's
-            history. This cannot be undone.
+            L’image <strong>{target?.imageType}</strong> sera supprimée du stockage,
+            de Shopify si elle a été publiée et de l’historique du produit.
+            Cette action est irréversible.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
+          <AlertDialogCancel disabled={busy}>Annuler</AlertDialogCancel>
           <Button
             variant="destructive"
             disabled={busy}
@@ -44,7 +44,7 @@ export function DeleteImageDialog({
           >
             <BusyIcon busy={busy} />
             {!busy ? <Trash2 data-icon="inline-start" /> : null}
-            Delete everywhere
+            Supprimer partout
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>

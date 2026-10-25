@@ -49,6 +49,16 @@ function image(
 }
 
 describe("createVisualProductViewModels", () => {
+  it("allows generation from variant text when no group reference exists", () => {
+    const [result] = createVisualProductViewModels({
+      parentTitle: "Peluche",
+      groups: [group({ label: "140 cm", ready: false, references: [] })],
+      members: [],
+      images: [],
+    });
+    expect(result.status).toBe("ready_to_generate");
+  });
+
   it("treats every visual group as a child product", () => {
     const [result] = createVisualProductViewModels({
       parentTitle: "Ceinture",

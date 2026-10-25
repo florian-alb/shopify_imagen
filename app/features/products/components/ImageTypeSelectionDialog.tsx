@@ -13,8 +13,10 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import type { Doc, Id } from "@/lib/convex";
+import { cn } from "@/lib/utils";
 
 import { VariantGenerationControls } from "./VariantGenerationControls";
+import { VisualGroupGenerationChoice } from "./VisualGroupGenerationChoice";
 import type { useVariantGenerationSelection } from "../hooks/useVariantGenerationSelection";
 import type { VisualGroupsData } from "../types";
 
@@ -26,8 +28,10 @@ export function ImageTypeSelectionDialog({
   variants,
   visualGroupsData,
   selectedGroupIds,
+  textOnlyGroupIds,
   focusedGroupId,
   onToggleGroup,
+  onToggleGroupReferences,
   busy,
   title,
   description,
@@ -42,8 +46,10 @@ export function ImageTypeSelectionDialog({
   variants: ReturnType<typeof useVariantGenerationSelection>;
   visualGroupsData?: VisualGroupsData | null;
   selectedGroupIds?: Set<Id<"visualGroups">>;
+  textOnlyGroupIds?: Set<Id<"visualGroups">>;
   focusedGroupId?: Id<"visualGroups"> | null;
   onToggleGroup?: (groupId: Id<"visualGroups">) => void;
+  onToggleGroupReferences?: (groupId: Id<"visualGroups">) => void;
   busy: boolean;
   title: string;
   description: string;
@@ -71,62 +77,33 @@ export function ImageTypeSelectionDialog({
             allProductsSeparated={variants.allProductsSeparated}
             separatedProductCount={variants.preview?.separatedProductCount ?? 0}
           />
-          {focusedGroup ? (
-            <div className="flex items-center gap-3 rounded-lg border bg-muted/30 p-3">
-              <span
-                className="size-5 shrink-0 rounded-full border"
-                style={{
-                  background: focusedGroup.swatchCss ?? "var(--muted)",
-                }}
-                aria-hidden="true"
-              />
-              <span className="min-w-0">
-                <span className="block text-xs text-muted-foreground">
-                  Déclinaison sélectionnée
-                </span>
-                <span className="block truncate text-sm font-medium">
-                  {focusedGroup.label}
-                </span>
-              </span>
-            </div>
-          ) : usesVisualGroups ? (
+          {usesVisualGroups ? (
             <fieldset>
               <legend className="mb-2 text-sm font-medium">
-                Groupes visuels
+                {focusedGroup ? "Déclinaison sélectionnée" : "Groupes visuels"}
               </legend>
-              <div className="grid gap-2 sm:grid-cols-2">
-                {visualGroupsData!.groups.map((group) => (
-                  <Label
-                    key={group._id}
-                    className={`flex min-h-12 items-center gap-3 rounded-lg border px-3 has-[:checked]:border-primary ${
-                      group.ready ? "" : "bg-muted/30 text-muted-foreground"
-                    }`}
-                  >
-                    <Checkbox
-                      checked={selectedGroupIds?.has(group._id) ?? false}
-                      disabled={!group.ready}
-                      onCheckedChange={() => onToggleGroup?.(group._id)}
+              <p className="mb-3 text-xs text-muted-foreground">
+                Sans référence propre au groupe, le texte de la variante définit
+                ses caractéristiques. L’image produit sert de base. Les
+                références du groupe doivent être confirmées pour être
+                utilisées.
+              </p>
+              <div
+                className={cn("grid gap-2", !focusedGroup && "sm:grid-cols-2")}
+              >
+                {(focusedGroup ? [focusedGroup] : visualGroupsData!.groups).map(
+                  (group) => (
+                    <VisualGroupGenerationChoice
+                      key={group._id}
+                      group={group}
+                      selected={selectedGroupIds?.has(group._id) ?? false}
+                      focused={Boolean(focusedGroup)}
+                      textOnly={textOnlyGroupIds?.has(group._id) ?? false}
+                      onToggleGroup={onToggleGroup}
+                      onToggleReferences={onToggleGroupReferences}
                     />
-                    <span
-                      className="size-4 shrink-0 rounded-full border"
-                      style={{
-                        background: group.swatchCss ?? "var(--muted)",
-                      }}
-                    />
-                    <span className="min-w-0">
-                      <span className="block truncate text-sm">
-                        {group.label}
-                      </span>
-                      <span className="block text-xs text-muted-foreground">
-                        {group.ready
-                          ? `${group.variants.length} variante${
-                              group.variants.length === 1 ? "" : "s"
-                            }`
-                          : "Référence à confirmer"}
-                      </span>
-                    </span>
-                  </Label>
-                ))}
+                  ),
+                )}
               </div>
             </fieldset>
           ) : null}

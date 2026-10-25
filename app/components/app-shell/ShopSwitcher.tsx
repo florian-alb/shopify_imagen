@@ -31,7 +31,7 @@ export function ShopSwitcher({
   const activeShop = shops?.find((shop) => shop.isActive) ?? shops?.[0];
 
   if (shops === undefined) {
-    return <div className="h-24 animate-pulse rounded-lg bg-muted" />;
+    return <div className="h-16 animate-pulse rounded-lg bg-muted" />;
   }
 
   if (!shops.length || !activeShop) {
@@ -71,7 +71,7 @@ export function ShopSwitcher({
     setSwitching(true);
     try {
       await setActiveShop({ shopId: value as Id<"shops"> });
-      toast.success("Boutique active changee");
+      toast.success("Boutique active changée");
     } catch (error) {
       toast.error("Impossible de changer de boutique", {
         description: error instanceof Error ? error.message : String(error),
@@ -82,91 +82,46 @@ export function ShopSwitcher({
   }
 
   return (
-    <div
-      className={
-        compact
-          ? "rounded-lg border bg-card p-3"
-          : "rounded-lg border bg-card p-3"
-      }
-    >
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-3">
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" disabled={switching}
+          className={`h-auto w-full justify-start gap-2.5 border-sidebar-border bg-card ${compact ? "p-3" : "p-2.5"}`}
+          aria-label={`Changer de boutique : ${activeLabel}`}>
           <ShopIcon loading={switching} />
-          <div className="min-w-0">
-            <p className="truncate text-sm font-medium">{activeLabel}</p>
-            <p className="truncate text-xs text-muted-foreground">
-              {activeShop.domain ||
-                activeShop.storeHandle ||
-                `${shops.length} boutiques`}
-            </p>
-          </div>
-        </div>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          className="shrink-0 text-muted-foreground"
-          asChild
-        >
-          <Link
-            to="/settings"
-            onClick={onNavigate}
-            aria-label="Parametres boutique"
-          >
-            <Settings className="size-4" />
-          </Link>
+          <span className="min-w-0 flex-1 text-left">
+            <span className="block truncate text-sm font-medium">{activeLabel}</span>
+            <span className="mt-0.5 block truncate text-xs font-normal text-muted-foreground">
+              {switching ? "Changement…" : activeShop.domain || activeShop.storeHandle}
+            </span>
+          </span>
+          <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
         </Button>
-      </div>
-
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full justify-between"
-          >
-            {switching ? "Changement..." : "Changer"}
-            <ChevronDown className="size-4" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-64">
-          <DropdownMenuLabel>Boutiques</DropdownMenuLabel>
-          <DropdownMenuSeparator />
-
-          {shops.map((shop) => (
-            <DropdownMenuItem
-              key={shop._id ?? shop.domain}
-              disabled={!shop._id || switching}
-              onSelect={() =>
-                shop._id ? void changeShop(shop._id) : undefined
-              }
-            >
-              <span className="min-w-0">
-                <span className="block truncate">{shopDisplayName(shop)}</span>
-                <span className="block truncate text-xs text-muted-foreground">
-                  {shop.domain || shop.storeHandle}
-                </span>
-              </span>
-              {shop._id === activeShop._id ? (
-                <Badge variant="outline" className="ml-auto">
-                  Active
-                </Badge>
-              ) : null}
-            </DropdownMenuItem>
-          ))}
-
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={() => void changeShop("settings")}>
-            Gerer les boutiques
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-72">
+        <DropdownMenuLabel>Boutiques</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {shops.map((shop) => (
+          <DropdownMenuItem key={shop._id ?? shop.domain} disabled={!shop._id || switching}
+            onSelect={() => shop._id ? void changeShop(shop._id) : undefined}>
+            <span className="min-w-0">
+              <span className="block truncate">{shopDisplayName(shop)}</span>
+              <span className="block truncate text-xs text-muted-foreground">{shop.domain || shop.storeHandle}</span>
+            </span>
+            {shop._id === activeShop._id && <Badge variant="secondary" className="ml-auto">Active</Badge>}
           </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
+        ))}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={() => void changeShop("settings")}>
+          <Settings className="size-4" /> Gérer les boutiques
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
 function ShopIcon({ loading = false }: { loading?: boolean }) {
   return (
-    <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-primary ring-1 ring-primary/20">
+    <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
       {loading ? (
         <Loader2 className="size-4 animate-spin" />
       ) : (

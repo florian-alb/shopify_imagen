@@ -145,8 +145,8 @@ function Workspace({ c }: { c: Catalogue }) {
     }
   }
   return (
-    <main className="min-w-0">
-      <div className="px-4 pb-4 pt-4 md:px-6">
+    <main className="mx-auto min-w-0 max-w-[1680px] pb-8">
+      <div className="px-4 pb-6 pt-6 md:px-6 md:pt-8 xl:px-8">
         <Link
           to="/catalog-import"
           className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
@@ -679,10 +679,10 @@ function Products({
   }
   return (
     <div
-      className={`grid min-w-0 ${selected ? "lg:grid-cols-[minmax(0,1fr)_minmax(330px,38%)]" : "grid-cols-1"}`}
+      className={`grid min-w-0 items-start gap-5 p-4 md:p-6 xl:px-8 ${selected ? "lg:grid-cols-[minmax(0,1fr)_minmax(330px,38%)]" : "grid-cols-1"}`}
     >
       <section
-        className={`min-w-0 p-4 md:p-6 ${selected ? "hidden lg:block" : ""}`}
+        className={`studio-panel min-w-0 p-4 md:p-5 ${selected ? "hidden lg:block" : ""}`}
       >
         <div className="mb-5 flex flex-wrap gap-2">
           <Input
@@ -794,7 +794,7 @@ function Products({
                     <td className="p-2">
                       <span className="inline-flex items-center gap-2">
                         {row.state === "complete" && (
-                          <CheckCircle2 className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                          <CheckCircle2 className="size-4 shrink-0 text-success" />
                         )}
                         {stateLabel(row.state)}
                       </span>
@@ -877,7 +877,7 @@ function Products({
               requestAnimationFrame(() => returnFocus.current?.focus())
             }
           }}
-          className="min-w-0 border-l p-4 md:p-6"
+          className="studio-inspector min-w-0 outline-none lg:sticky lg:top-20 lg:max-h-[calc(100dvh-6rem)] lg:overflow-y-auto"
           aria-label="Fiche produit"
         >
           <div className="mb-5 flex items-center justify-between">
@@ -1210,7 +1210,7 @@ function Collections({
     [adding, setAdding] = useState<string | null>(null),
     add = useMutation(api.catalogues.addCollection)
   return (
-    <section className="p-4 md:p-6">
+    <section className="studio-panel m-4 p-5 md:m-6 xl:mx-8">
       <select
         className={selectClass}
         aria-label="Filtrer les collections"

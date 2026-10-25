@@ -18,12 +18,11 @@ const emptyImages: Doc<"generatedImages">[] = [];
 const emptyProducts: Doc<"products">[] = [];
 const emptySegments: JobBatchSegment[] = [];
 
-export function useJobDetailPage(jobId: string) {
+export function useJobDetailPage(jobId: string, filter: ReviewFilter) {
   const { data, shopInfo } = useJobDetail(jobId);
   const retryJob = useMutation(api.jobs.retry);
   const pollJob = useAction(api.generation.pollJob);
   const cancelJob = useAction(api.generation.cancelJob);
-  const [filter, setFilter] = useState<ReviewFilter>("all");
   const [polling, setPolling] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [retrying, setRetrying] = useState(false);
@@ -228,7 +227,7 @@ export function useJobDetailPage(jobId: string) {
     review,
     reviewBadge,
     segments,
-    setFilter,
+    shopInfo,
     setPreviewId,
     viewModel,
     actions: {

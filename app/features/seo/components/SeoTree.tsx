@@ -9,7 +9,7 @@ export function SeoTree({ document, keywords, config, selectedId, onSelect }: {
   document: SeoDocument; keywords: Keyword[]; config: SeoConfig; selectedId: string | null; onSelect: (id: string) => void
 }) {
   const collectionMenu = document.analysisVersion === 2
-  return <div className="min-w-0 overflow-auto"><Table><TableHeader><TableRow>
+  return <div className="studio-panel min-w-0 overflow-auto"><Table><TableHeader><TableRow>
     <TableHead>{collectionMenu ? "Collection et hiérarchie du menu" : "Page et hiérarchie"}</TableHead><TableHead>Type</TableHead><TableHead>Priorité</TableHead><TableHead>Volume principal source</TableHead><TableHead>Somme déclarée</TableHead><TableHead>Validation</TableHead>
   </TableRow></TableHeader><TableBody>{orderedNodes(document.nodes).map(({ node, depth }) => {
     const metrics = metricsFor(node, keywords, document.assignments, document.analysisVersion ?? 1)
@@ -20,5 +20,5 @@ export function SeoTree({ document, keywords, config, selectedId, onSelect }: {
       <TableCell>{kindLabels[node.kind]}</TableCell><TableCell>{priority ? <Badge variant="outline">{priority}</Badge> : "—"}</TableCell>
       <TableCell>{number(metrics.primaryVolume)}</TableCell><TableCell>{number(metrics.declaredVolume)}</TableCell><TableCell>{statusLabels[node.status]}</TableCell>
     </TableRow>
-  })}</TableBody></Table><p className="mt-4 text-xs text-muted-foreground">Volumes de {config.sourceCountry}, issus uniquement de l’Excel. Les sommes sont indicatives, sans cumul des collections parentes ni estimation de visiteurs uniques.{collectionMenu && " La priorité dépend du volume principal ; l’intention et le KD restent indicatifs. Les regroupements n’ont ni volume ni priorité."}</p></div>
+  })}</TableBody></Table><p className="border-t p-4 text-xs text-muted-foreground">Volumes de {config.sourceCountry}, issus uniquement de l’Excel. Les sommes sont indicatives, sans cumul des collections parentes ni estimation de visiteurs uniques.{collectionMenu && " La priorité dépend du volume principal ; l’intention et le KD restent indicatifs. Les regroupements n’ont ni volume ni priorité."}</p></div>
 }

@@ -21,7 +21,7 @@ export function LogoutButton({ desktop = false }: { desktop?: boolean }) {
   if (desktop) {
     return (
       <SidebarMenuButton
-        tooltip="Deconnexion"
+        tooltip="Déconnexion"
         className="h-10 gap-3 rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
         disabled={signingOut}
         onClick={() => void logout()}
@@ -31,7 +31,7 @@ export function LogoutButton({ desktop = false }: { desktop?: boolean }) {
             <UserRound className="size-3.5" />
           </AvatarFallback>
         </Avatar>
-        <span>{signingOut ? "Deconnexion..." : "Compte"}</span>
+        <span>{signingOut ? "Déconnexion…" : "Se déconnecter"}</span>
         <LogOut className="ml-auto size-4" />
       </SidebarMenuButton>
     );
@@ -45,7 +45,7 @@ export function LogoutButton({ desktop = false }: { desktop?: boolean }) {
       onClick={() => void logout()}
     >
       <LogOut className="size-4" />
-      {signingOut ? "Deconnexion..." : "Se deconnecter"}
+      {signingOut ? "Déconnexion…" : "Se déconnecter"}
     </Button>
   );
 }

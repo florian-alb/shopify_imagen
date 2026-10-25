@@ -14,6 +14,7 @@ export async function prepareImageTasks(
     scope: Awaited<ReturnType<typeof getActiveShopScope>>;
     selectedImageTypes: string[];
     visualGroupIds?: Id<"visualGroups">[];
+    textOnlyGroupIds?: Id<"visualGroups">[];
     variantSelection?: VariantSelection;
     regenerationInstructions?: string;
   },
@@ -25,6 +26,7 @@ export async function prepareImageTasks(
   const visualTargets: VisualGroupTaskTarget[] = [];
   const separatedProductIds: Id<"products">[] = [];
   const requested = args.visualGroupIds ? new Set(args.visualGroupIds) : null;
+  const textOnly = new Set(args.textOnlyGroupIds);
   const found = new Set<Id<"visualGroups">>();
   for (const product of args.products) {
     const [config, family, member] = await Promise.all([
@@ -92,10 +94,14 @@ export async function prepareImageTasks(
       ]);
       if (variants.length > 500 || references.length > 500)
         throw new Error("Groupe visuel trop volumineux.");
-      const confirmed = references.filter((reference) => reference.confirmed);
-      if (!confirmed.length) {
+      const confirmed = textOnly.has(group._id)
+        ? []
+        : references.filter((reference) => reference.confirmed);
+      if (!textOnly.has(group._id) && references.length && !confirmed.length) {
         if (requested)
-          throw new Error(`Confirmez une référence pour « ${group.label} ».`);
+          throw new Error(
+            `Confirmez une référence pour « ${group.label} » ou choisissez de générer à partir du texte de la variante.`,
+          );
         continue;
       }
       visualTargets.push({
@@ -121,7 +127,7 @@ export async function prepareImageTasks(
       !visualTargets.some((target) => target.productId === product._id)
     ) {
       throw new Error(
-        `Aucun groupe sélectionné avec référence confirmée pour « ${product.title} ».`,
+        `Aucun groupe sélectionné prêt à générer pour « ${product.title} ».`,
       );
     }
   }
@@ -129,6 +135,15 @@ export async function prepareImageTasks(
     throw new Error(
       "Un groupe sélectionné est absent ou appartient à un autre produit.",
     );
+  if (
+    [...textOnly].some(
+      (groupId) => !visualTargets.some((target) => target.groupId === groupId),
+    )
+  ) {
+    throw new Error(
+      "Le mode texte doit correspondre à un groupe sélectionné du produit.",
+    );
+  }
   const result = buildImageTasks({
     ...args,
     prompts,

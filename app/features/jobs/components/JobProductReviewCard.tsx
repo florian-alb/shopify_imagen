@@ -50,22 +50,22 @@ export function JobProductReviewCard({
 
   return (
     <Card className="rounded-lg">
-      <CardHeader className="flex flex-row items-start justify-between gap-3">
+      <CardHeader className="flex flex-col items-start justify-between gap-3 xl:flex-row">
         <div className="min-w-0">
-          <CardTitle className="truncate text-base">{product.title}</CardTitle>
+          <CardTitle className="break-words text-base">{product.title}</CardTitle>
           <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <span>{product.handle}</span>
             <span>·</span>
             <span>
-              {approved} / {reviewable.length} approved
+              {approved} / {reviewable.length} approuvées dans cette vue
             </span>
           </div>
         </div>
-        <div className="flex shrink-0 flex-wrap justify-end gap-2">
+        <div className="flex max-w-full flex-wrap gap-2 xl:justify-end">
           <Button variant="outline" size="sm" asChild>
             <Link to="/products/$productId" params={{ productId: product._id }}>
               <ExternalLink data-icon="inline-start" />
-              Product
+              Fiche produit
             </Link>
           </Button>
           {shopifyAdminUrl ? (
@@ -88,7 +88,7 @@ export function JobProductReviewCard({
             }
           >
             <Check data-icon="inline-start" />
-            Approve all
+            Approuver les images visibles
           </Button>
           <Button
             variant="outline"
@@ -101,7 +101,7 @@ export function JobProductReviewCard({
             ) : (
               <Send data-icon="inline-start" />
             )}
-            Publish {publishableCount || ""}
+            Publier {publishableCount || ""} du produit
           </Button>
         </div>
       </CardHeader>

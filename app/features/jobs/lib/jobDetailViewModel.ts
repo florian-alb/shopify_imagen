@@ -17,13 +17,13 @@ export type ReviewFilter =
   | "pushed";
 
 export const reviewFilters: { value: ReviewFilter; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "pending", label: "To review" },
-  { value: "approved", label: "Approved" },
-  { value: "rejected", label: "Rejected" },
-  { value: "failed", label: "Errors" },
-  { value: "pushing", label: "Pushing" },
-  { value: "pushed", label: "Pushed" },
+  { value: "all", label: "Toutes" },
+  { value: "pending", label: "À vérifier" },
+  { value: "approved", label: "Approuvées" },
+  { value: "rejected", label: "Rejetées" },
+  { value: "failed", label: "Échecs" },
+  { value: "pushing", label: "Publication en cours" },
+  { value: "pushed", label: "Publiées" },
 ];
 
 export type JobProductRow = {
@@ -77,11 +77,11 @@ export function matchesJobReviewFilter(
 }
 
 export function executionModeLabel(mode?: "realtime" | "batch") {
-  return mode === "batch" ? "Batch" : "Real-time";
+  return mode === "batch" ? "Batch" : "Temps réel";
 }
 
 export function executionModeRateLabel(mode?: "realtime" | "batch") {
-  return mode === "batch" ? "50% rate" : "Full rate";
+  return mode === "batch" ? "Tarif batch à 50 %" : "Plein tarif";
 }
 
 export function imageDisplayCost(

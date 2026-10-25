@@ -3,6 +3,7 @@ import { shopifyMediaId } from "../../shopify/lib/media";
 import type { Doc } from "../../../lib/convex";
 import type { ShopifyGalleryImage, VisualGroupWithRows } from "../types";
 import { orderVisualReferences } from "./visualReferenceOrder";
+import { canGenerateVisualGroup } from "./visualGroupGeneration";
 
 export type VisualProductStatus =
   | "needs_reference"
@@ -26,7 +27,7 @@ export type VisualProductViewModel = {
 };
 
 export const visualProductStatusLabels: Record<VisualProductStatus, string> = {
-  needs_reference: "Référence requise",
+  needs_reference: "Références à confirmer",
   ready_to_generate: "Prête à générer",
   generating: "Génération en cours",
   needs_review: "À valider",
@@ -119,7 +120,7 @@ export function createVisualProductViewModels(args: {
     else if (newlyPublishableImages.length) status = "ready_to_publish";
     else if (pendingReviewImages.length) status = "needs_review";
     else if (member || uploadedImages.length) status = "published";
-    else if (group.ready) status = "ready_to_generate";
+    else if (canGenerateVisualGroup(group)) status = "ready_to_generate";
     else status = "needs_reference";
 
     return {

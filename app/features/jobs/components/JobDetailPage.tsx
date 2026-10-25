@@ -1,13 +1,12 @@
 import { useNavigate } from "@tanstack/react-router";
-import { ImageRetouchDialog } from "@/components/image-retouch-dialog";
 import { EmptyState, pageContentClass } from "@/components/page";
+import { JobDetailDialogs } from "./JobDetailDialogs";
+import type { JobDetailSearch } from "../lib/jobDetailSearch";
+import { validateJobSearch } from "../lib/jobSearch";
 import { JobDetailHeader } from "./JobDetailHeader";
-import { JobImagePreviewDialog } from "./JobImagePreviewDialog";
 import { JobProductReviewGrid } from "./JobProductReviewGrid";
 import { JobProgressCard } from "./JobProgressCard";
-import { JobPublishApprovedDialog } from "./JobPublishApprovedDialog";
 import { JobPublishProgressCard } from "./JobPublishProgressCard";
-import { JobRegenerateImageDialog } from "./JobRegenerateImageDialog";
 import { JobReviewToolbar } from "./JobReviewToolbar";
 import { JobStickyPublishBar } from "./JobStickyPublishBar";
 import { JobTechnicalDetails } from "./JobTechnicalDetails";
@@ -15,18 +14,18 @@ import { useJobDetailPage } from "../hooks/useJobDetailPage";
 import { useJobHistoryActions } from "../hooks/useJobHistoryActions";
 import { DeleteJobDialog } from "./DeleteJobDialog";
 
-export function JobDetailPage({ jobId }: { jobId: string }) {
-  const page = useJobDetailPage(jobId);
+export function JobDetailPage({ jobId, search }: { jobId: string; search: JobDetailSearch }) {
+  const page = useJobDetailPage(jobId, search.images ?? "all");
   const navigate = useNavigate();
-  const history = useJobHistoryActions({ onRemoved: () => void navigate({ to: "/jobs" }) });
+  const history = useJobHistoryActions({ onRemoved: () => void navigate({ to: "/jobs", search: validateJobSearch(search) }) });
 
   if (page.data === undefined) {
     return (
       <main className={pageContentClass}>
         <EmptyState
           loading
-          title="Loading job"
-          body="Realtime job progress is coming from Convex."
+          title="Chargement du lot"
+          body="Lecture des images et de la progression."
         />
       </main>
     );
@@ -36,8 +35,8 @@ export function JobDetailPage({ jobId }: { jobId: string }) {
     return (
       <main className={pageContentClass}>
         <EmptyState
-          title="Job not found"
-          body="It may have been deleted or belongs to another shop."
+          title="Génération introuvable"
+          body="Elle a peut-être été supprimée ou appartient à une autre boutique."
         />
       </main>
     );
@@ -46,6 +45,7 @@ export function JobDetailPage({ jobId }: { jobId: string }) {
   return (
     <main className={pageContentClass}>
       <JobDetailHeader
+        search={search}
         job={page.job}
         jobState={page.viewModel.jobState}
         reviewBadge={page.reviewBadge}
@@ -79,7 +79,7 @@ export function JobDetailPage({ jobId }: { jobId: string }) {
         visibleReviewableCount={page.viewModel.visibleReviewable.length}
         reviewing={page.review.reviewing}
         counts={page.viewModel.reviewCounts}
-        onFilterChange={page.setFilter}
+        onFilterChange={images => { void navigate({ to: "/jobs/$jobId", params: { jobId }, search: { ...search, images }, replace: true, resetScroll: false }); }}
         onApproveVisible={page.actions.reviewVisible}
       />
 
@@ -118,57 +118,8 @@ export function JobDetailPage({ jobId }: { jobId: string }) {
         reviewing={page.review.reviewing}
       />
 
-      <JobImagePreviewDialog
-        image={page.previewImage}
-        index={page.previewIndex}
-        total={page.viewModel.previewImages.length}
-        reviewing={page.review.reviewing}
-        regenerating={
-          page.previewImage?._id === page.regeneration.regeneratingId
-        }
-        onClose={() => page.setPreviewId(null)}
-        onMove={page.actions.movePreview}
-        onReview={page.actions.reviewPreview}
-        onRegenerate={page.actions.regeneratePreview}
-        onRetouch={page.actions.retouchPreview}
-      />
+      <JobDetailDialogs page={page} />
 
-      <ImageRetouchDialog
-        target={page.retouch.target}
-        saving={page.retouch.saving}
-        onOpenChange={(open) => {
-          if (!open) page.retouch.closeRetouch();
-        }}
-        onPrepareSource={(target) =>
-          page.retouch.prepareRetouchSource({ sourceImageId: target.id })
-        }
-        onSave={page.retouch.saveRetouch}
-      />
-
-      <JobRegenerateImageDialog
-        image={page.regeneration.regenerationTarget}
-        instructions={page.regeneration.regenerationInstructions}
-        regenerating={
-          page.regeneration.regenerationTarget?._id ===
-          page.regeneration.regeneratingId
-        }
-        onInstructionsChange={page.regeneration.setRegenerationInstructions}
-        onClose={page.regeneration.closeRegeneration}
-        onRegenerate={() => void page.regeneration.regenerate()}
-      />
-
-      <JobPublishApprovedDialog
-        open={page.publish.pushOpen}
-        targetProduct={page.pushTargetProduct}
-        selectedPushableImages={page.viewModel.selectedPushableImages}
-        selectedPushProductCount={page.viewModel.selectedPushProductCount}
-        replaceExisting={page.publish.replaceExisting}
-        starting={page.publish.starting}
-        publishDisabled={page.publish.publishDisabled}
-        onOpenChange={page.actions.onPublishOpenChange}
-        onReplaceExistingChange={page.publish.setReplaceExisting}
-        onPush={() => void page.actions.pushApproved()}
-      />
     </main>
   );
 }

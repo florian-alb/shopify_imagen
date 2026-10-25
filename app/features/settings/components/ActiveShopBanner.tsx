@@ -37,17 +37,17 @@ export function ActiveShopBanner({
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {shop?.isActive ? <Badge>Active</Badge> : null}
+          {shop?.isActive ? <Badge>Boutique active</Badge> : null}
           {shop?.source === "environment" ? (
-            <Badge variant="outline">Env</Badge>
+            <Badge variant="outline">Configuration serveur</Badge>
           ) : null}
           {shop ? (
             <Badge variant="outline">
-              {shop.hasClientCredentials ? "Cles presentes" : "Cles absentes"}
+              {shop.hasClientCredentials ? "Clés enregistrées" : "Clés absentes"}
             </Badge>
           ) : null}
           <Button type="button" variant="outline" size="sm" onClick={onChange}>
-            Changer
+            Changer de boutique
           </Button>
         </div>
       </div>

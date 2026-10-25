@@ -13,6 +13,8 @@ import { api } from "@/lib/convex";
 import { cn } from "@/lib/utils";
 
 type BreadcrumbRoute =
+  | "/catalog-import"
+  | "/seo"
   | "/products"
   | "/jobs"
   | "/bulk-operations"
@@ -36,8 +38,19 @@ function normalizePathname(pathname: string) {
 function routeBreadcrumbs(pathname: string): AppBreadcrumbItem[] {
   const normalizedPathname = normalizePathname(pathname);
 
+  if (normalizedPathname.startsWith("/catalog-import")) {
+    return normalizedPathname === "/catalog-import"
+      ? [{ label: "Imports", to: "/catalog-import" }]
+      : [{ label: "Imports", to: "/catalog-import" }, { label: "Catalogue" }];
+  }
+  if (normalizedPathname.startsWith("/seo")) {
+    return normalizedPathname === "/seo"
+      ? [{ label: "Arborescence SEO", to: "/seo" }]
+      : [{ label: "Arborescence SEO", to: "/seo" }, { label: "Projet" }];
+  }
+
   if (normalizedPathname === "/policy-generator") {
-    return [{ label: "Générateur de politiques", to: "/policy-generator" }];
+    return [{ label: "Documents légaux", to: "/policy-generator" }];
   }
 
   if (normalizedPathname === "/products") {
@@ -52,19 +65,19 @@ function routeBreadcrumbs(pathname: string): AppBreadcrumbItem[] {
   }
 
   if (normalizedPathname === "/jobs") {
-    return [{ label: "Generations", to: "/jobs" }];
+    return [{ label: "Générations", to: "/jobs" }];
   }
 
   if (normalizedPathname.startsWith("/jobs/")) {
     const jobId = normalizedPathname.split("/").filter(Boolean).at(-1);
     return [
-      { label: "Generations", to: "/jobs" },
+      { label: "Générations", to: "/jobs" },
       { label: jobId ? `Job ${jobId.slice(-6)}` : "Job" },
     ];
   }
 
   if (normalizedPathname === "/bulk-operations") {
-    return [{ label: "Bulk operations", to: "/bulk-operations" }];
+    return [{ label: "Opérations groupées", to: "/bulk-operations" }];
   }
 
   if (normalizedPathname === "/google-feed") {
@@ -93,13 +106,13 @@ function routeBreadcrumbs(pathname: string): AppBreadcrumbItem[] {
   }
 
   if (normalizedPathname === "/settings") {
-    return [{ label: "Parametres", to: "/settings" }];
+    return [{ label: "Réglages", to: "/settings" }];
   }
 
   if (normalizedPathname === "/settings/prompts") {
     return [
       { label: "Configuration", to: "/settings" },
-      { label: "Prompts", to: "/settings/prompts" },
+      { label: "Modèles d’images", to: "/settings/prompts" },
     ];
   }
 
