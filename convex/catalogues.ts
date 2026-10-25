@@ -22,6 +22,7 @@ import {
   decode,
   encode,
   effective,
+  includedCollectionKeys,
   emptyStructure,
   guardSize,
   validateTags,
@@ -57,7 +58,7 @@ function partial(c: Doc<"catalogues">, accepted: boolean) {
     (c.failed ||
       c.complete < c.total ||
       s.warnings.length ||
-      s.collections.some((x) => x.membership !== "complete")) &&
+      s.collections.some((x) => !x.ignored && x.membership !== "complete")) &&
     !accepted
   )
     throw new Error("Confirmez l’utilisation de ce catalogue incomplet.")
@@ -205,8 +206,8 @@ export const products = query({
             (!a.state || p.state === a.state) &&
             (!a.collection ||
               (a.collection === "__none"
-                ? !p.collections.length
-                : p.collections.includes(a.collection))),
+                ? !includedCollectionKeys(p.collections, structure).length
+                : includedCollectionKeys(p.collections, structure).includes(a.collection))),
         )
         .map((p) => {
           const data = p.data ? decode<CatalogProduct>(p.data) : null
@@ -216,7 +217,7 @@ export const products = query({
             handle: p.handle,
             title: p.title,
             rank: p.rank === Number.MAX_SAFE_INTEGER ? null : p.rank,
-            collections: p.collections,
+            collections: includedCollectionKeys(p.collections, structure),
             state: p.state,
             error: p.error,
             image: data?.images[0]?.url,
@@ -243,6 +244,7 @@ export const product = query({
       throw new Error("Produit inaccessible.")
     return encode({
       ...p,
+      collections: includedCollectionKeys(p.collections, decode<Structure>(c.structure)),
       data: p.data
         ? effective(
             { ...decode<CatalogProduct>(p.data), collections: p.collections },
@@ -338,7 +340,7 @@ export const saveTags = mutation({
     id: v.id("catalogues"),
     version: v.number(),
     tagVersion: v.optional(v.number()),
-    values: v.array(v.object({ key: v.string(), tag: v.string() })),
+    values: v.array(v.object({ key: v.string(), tag: v.string(), ignored: v.optional(v.boolean()) })),
     validate: v.boolean(),
     collect: v.boolean(),
   },
@@ -354,6 +356,10 @@ export const saveTags = mutation({
     for (const value of a.values) {
       const col = s.collections.find((x) => x.key === value.key)
       if (!col) throw new Error("Collection inconnue.")
+      if (value.ignored !== undefined && value.ignored !== Boolean(col.ignored)) {
+        col.ignored = value.ignored
+        col.edited = true
+      }
       if (col.tag !== normalizeCollectionTags(value.tag)) {
         if (col.validated) col.appliedTag = col.tag
         col.tag = normalizeCollectionTags(value.tag)
@@ -365,11 +371,12 @@ export const saveTags = mutation({
       validateTags(s.collections)
       for (const value of a.values) {
         const col = s.collections.find((x) => x.key === value.key)!
+        if (col.ignored) continue
         col.validated = true
         col.appliedTag = col.tag
       }
     }
-    if (a.collect && s.collections.some((x) => !x.validated))
+    if (a.collect && s.collections.some((x) => !x.ignored && !x.validated))
       throw new Error("Validez tous les tags avant la collecte.")
     guardSize({ ...c, structure: encode(s) })
     await ctx.db.patch(c._id, {
@@ -413,7 +420,7 @@ export const addCollection = mutation({
     unlocked(c)
     const s = decode<Structure>(c.structure),
       index = s.collections.findIndex((x) => x.key === a.key)
-    if (index < 0 || s.collections.some((x) => !x.validated))
+    if (index < 0 || s.collections.some((x) => !x.ignored && !x.validated))
       throw new Error("Validez les tags avant d’ajouter des produits.")
     await launch(ctx, c, {
       kind: "add",
@@ -543,7 +550,7 @@ export const startImport = mutation({
       throw new Error("Le catalogue a changé. Préparez à nouveau l’import.")
     const s = decode<Structure>(c.structure)
     validateTags(s.collections)
-    if (s.collections.some((x) => !x.validated))
+    if (s.collections.some((x) => !x.ignored && !x.validated))
       throw new Error("Les tags doivent être validés.")
     const shop = await ctx.db.get(a.shopId)
     if (!shop || shop.createdByUserId !== c.ownerId)
@@ -689,6 +696,7 @@ export const checkpoint = internalMutation({
     if (a.structure && work && ["discover", "collect", "add"].includes(work.kind)) {
       for (const col of s.collections) {
         const saved = savedTags.get(col.key)
+        if (saved) col.ignored = saved.ignored
         if (!saved || (a.suggestedLanguage && !saved.edited && !saved.validated)) continue
         col.tag = saved.tag
         col.validated = saved.validated
@@ -712,7 +720,7 @@ export const checkpoint = internalMutation({
           : c.failed ||
               c.complete < c.total ||
               s.warnings.length ||
-              s.collections.some((x) => x.membership !== "complete")
+              s.collections.some((x) => !x.ignored && x.membership !== "complete")
             ? "partial"
             : "ready"),
       error: a.error,

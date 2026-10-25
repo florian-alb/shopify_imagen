@@ -9,6 +9,7 @@ import {
   encode,
   guardSize,
   effective,
+  effectiveMenu,
   collectionMenu,
   type Structure,
   type Work,
@@ -522,6 +523,67 @@ test("collection tag changes reach lists, details and exports while drafts and m
   expect(exported.products.find((p: { url: string }) => p.url === inherited.url).data.tags).toEqual(detail.data.tags);
 });
 
+test("ignored collections need no tag, keep their products, and can be reactivated individually or in bulk", async () => {
+  const f = await setup();
+  const initial = await f.drain();
+  await f.user.mutation(api.catalogues.saveTags, {
+    id: f.id, version: initial.version,
+    values: [{ key: "cats", tag: "", ignored: true }, { key: "empty", tag: "", ignored: true }],
+    validate: true, collect: false,
+  });
+  const proposals = await f.user.action(api.catalogueActions.suggestTags, { id: f.id, replaceExisting: true });
+  expect(proposals.map((col) => col.key)).toEqual(["dogs"]);
+  await f.validate();
+  const collected = await f.drain();
+  expect(collected).toMatchObject({ total: 4, complete: 4, failed: 0 });
+  const page = await f.t.query(internal.catalogues.page, { id: f.id, selected: true });
+  const onlyIgnored = page.page.find((p) => p.handle === "b")!;
+  expect(onlyIgnored.collections).toEqual(["cats"]);
+  const detail = decode<{ collections: string[]; data: { tags: string[]; collections: string[] } }>(await f.user.query(api.catalogues.product, { id: f.id, productId: onlyIgnored._id }));
+  expect(detail).toMatchObject({ collections: [], data: { tags: [], collections: [] } });
+  const none = await f.user.query(api.catalogues.products, { id: f.id, search: "", state: "", collection: "__none", sort: "rank", paginationOpts: { cursor: null, numItems: 25 } });
+  expect(none.page.map((row) => decode<{ id: string }>(row).id)).toContain(onlyIgnored._id);
+  const shared = page.page.find((p) => p.handle === "a")!;
+  const sharedDetail = decode<{ data: { tags: string[]; collections: string[] } }>(await f.user.query(api.catalogues.product, { id: f.id, productId: shared._id }));
+  expect(sharedDetail.data).toMatchObject({ tags: ["dogs"], collections: ["dogs"] });
+  // Reactivation of a collection without a valid tag requires a correction.
+  await expect(f.user.mutation(api.catalogues.saveTags, {
+    id: f.id, version: collected.version, values: [{ key: "cats", tag: "", ignored: false }], validate: true, collect: false,
+  })).rejects.toThrow("Saisissez au moins");
+  await f.user.mutation(api.catalogues.saveTags, {
+    id: f.id, version: collected.version, values: [{ key: "cats", tag: "cats", ignored: false }, { key: "empty", tag: "empty", ignored: false }], validate: true, collect: false,
+  });
+  const restored = decode<{ collections: string[]; data: { tags: string[] } }>(await f.user.query(api.catalogues.product, { id: f.id, productId: onlyIgnored._id }));
+  expect(restored).toMatchObject({ collections: ["cats"], data: { tags: ["cats"] } });
+  expect((await f.read())!).toMatchObject({ total: 4, complete: 4, generation: collected.generation });
+});
+
+test("ignoring all collections preserves collection of every product and snapshots carry only active associations", async () => {
+  const f = await setup();
+  const c = await f.drain();
+  await f.user.mutation(api.catalogues.saveTags, {
+    id: f.id, version: c.version,
+    values: decode<Structure>(c.structure).collections.map((col) => ({ key: col.key, tag: "", ignored: true })),
+    validate: true, collect: true,
+  });
+  const ready = await f.drain();
+  expect(ready).toMatchObject({ total: 4, complete: 4 });
+  const page = await f.t.query(internal.catalogues.page, { id: f.id, selected: true });
+  const manual = page.page.find((p) => p.handle === "a")!;
+  await f.user.mutation(api.catalogues.saveProduct, { id: f.id, productId: manual._id, version: ready.version, override: { tags: ["personnel"] } });
+  const snapshot = (await f.read())!;
+  const csv = await f.user.query(api.catalogues.exportCsvPage, { id: f.id, version: snapshot.version, generation: snapshot.generation, allowPartial: false, cursor: null });
+  expect(csv.products).toHaveLength(4);
+  expect(csv.products.join("")).toContain("personnel");
+  await f.user.mutation(api.catalogues.exportJson, { id: f.id, allowPartial: false });
+  await f.drain();
+  const exported = JSON.parse(source.exportText);
+  expect(exported.products).toHaveLength(4);
+  for (const p of exported.products) expect(p).toMatchObject({ collections: [], data: { collections: [] } });
+  expect(exported.products.find((p: { url: string }) => p.url === manual.url)).toMatchObject({ sourceCollections: ["cats", "dogs"], data: { tags: ["personnel"] } });
+  expect(exported.structure.collections.every((col: { ignored?: boolean }) => col.ignored)).toBe(true);
+});
+
 test("in-flight workers preserve saved tags and accept tag edits despite discovery progress", async () => {
   const f = await setup();
   const c = await f.drain(), snapshot = decode<Structure>(c.structure);
@@ -532,13 +594,13 @@ test("in-flight workers preserve saved tags and accept tag edits despite discove
   await f.t.mutation(internal.catalogues.claim, fence);
   await f.user.mutation(api.catalogues.saveTags, {
     id: f.id, version: c.version, tagVersion: c.tagVersion,
-    values: [{ key: "cats", tag: "chats" }], validate: true, collect: false,
+    values: [{ key: "cats", tag: "chats", ignored: true }], validate: true, collect: false,
   });
   await f.t.mutation(internal.catalogues.checkpoint, {
     ...fence, structure: encode(snapshot), status: "tags",
   });
   const changed = (await f.read())!;
-  expect(decode<Structure>(changed.structure).collections.find((x) => x.key === "cats")).toMatchObject({ tag: "chats", validated: true });
+  expect(decode<Structure>(changed.structure).collections.find((x) => x.key === "cats")).toMatchObject({ tag: "chats", ignored: true, validated: false });
   await expect(f.user.mutation(api.catalogues.saveTags, {
     id: f.id, version: changed.version, tagVersion: c.tagVersion,
     values: [{ key: "cats", tag: "autre" }], validate: true, collect: false,
@@ -570,6 +632,7 @@ test("tag edits enforce ownership, normalized uniqueness, and import/export snap
   const c = await f.drain();
   const other = f.t.withIdentity({ subject: await f.t.run((ctx) => ctx.db.insert("users", { approvalStatus: "approved" })) });
   await expect(other.mutation(api.catalogues.setTagLanguage, { id: f.id, language: "fr", tagVersion: c.tagVersion! })).rejects.toThrow("inaccessible");
+  await expect(other.mutation(api.catalogues.saveTags, { id: f.id, version: c.version, values: [{ key: "cats", tag: "", ignored: true }], validate: false, collect: false })).rejects.toThrow("inaccessible");
   const values = decode<Structure>(c.structure).collections.map((col, i) => ({ key: col.key, tag: i === 0 ? "été" : i === 1 ? "e\u0301te\u0301" : col.tag }));
   await expect(f.user.mutation(api.catalogues.saveTags, { id: f.id, version: c.version, values, validate: true, collect: false })).rejects.toThrow("plusieurs");
   const combinations = values.map((value, i) => ({ ...value, tag: i === 0 ? "mocassins, été" : i === 1 ? "e\u0301te\u0301, mocassins" : value.tag }));
@@ -578,7 +641,7 @@ test("tag edits enforce ownership, normalized uniqueness, and import/export snap
   for (const kind of ["export", "import"] as const) {
     await f.t.run((ctx) => ctx.db.patch(f.id, { status: "blocked", work: encode({ kind, phase: "setup" }) }));
     await expect(f.user.mutation(api.catalogues.setTagLanguage, { id: f.id, language: "fr", tagVersion: c.tagVersion! })).rejects.toThrow("figés");
-    await expect(f.user.mutation(api.catalogues.saveTags, { id: f.id, version: c.version, values: [], validate: false, collect: false })).rejects.toThrow("figés");
+    await expect(f.user.mutation(api.catalogues.saveTags, { id: f.id, version: c.version, values: [{ key: "cats", tag: "", ignored: true }], validate: false, collect: false })).rejects.toThrow("figés");
   }
   for (const tag of ["été", "mocassins-femme", "plüschtiere", "ぬいぐるみ", "ألعاب"]) expect(validCollectionTag(tag)).toBe(true);
   for (const tag of ["", "Été", "tag,tag", "-tag", "tag  tag", "a".repeat(101)]) expect(validCollectionTag(tag)).toBe(false);
@@ -710,6 +773,19 @@ describe("source fidelity and menu projection", () => {
     expect(output).toHaveLength(1);
     expect(output[0].url).toBe("#");
     expect(output[0].items).toHaveLength(1);
+  });
+  test("ignored menu parents become groups, ignored leaves and empty groups disappear", () => {
+    const ignored = { key: "cats", ignored: true } as Structure["collections"][number];
+    const leaf = { key: "cats", title: "Cats", url: `${origin}/collections/cats`, children: [] };
+    const structure: Structure = { collections: [ignored], warnings: [], menu: [
+      { ...leaf, children: [{ key: "dogs", title: "Dogs", url: `${origin}/collections/dogs`, children: [] }] },
+      { ...leaf, key: "ignored-leaf" },
+      { key: "group", title: "Empty group", url: null, children: [leaf] },
+    ] };
+    expect(effectiveMenu(structure, origin)).toEqual([{ ...leaf, url: null, children: structure.menu[0].children }]);
+    expect(targetMenu(structure, { dogs: { id: "gid://shopify/Collection/2", handle: "dogs" } }, origin)).toEqual([
+      { title: "Cats", type: "HTTP", url: "#", items: [{ title: "Dogs", type: "COLLECTION", resourceId: "gid://shopify/Collection/2", items: [] }] },
+    ]);
   });
   test("oversized data is rejected without truncation", () =>
     expect(() => guardSize({ raw: "x".repeat(950_000) })).toThrow("tronquée"));

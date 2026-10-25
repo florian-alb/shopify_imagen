@@ -11,6 +11,7 @@ import {
   collectionMenu,
   identity,
   effective,
+  includedCollectionKeys,
   type Structure,
   type Work,
   type CatalogProduct,
@@ -72,7 +73,7 @@ export const suggestTags = action({
       await ctx.runQuery(api.catalogues.get, { id: a.id }),
     );
     const proposals = await proposeTags(
-      c.structure.collections.filter((x) => a.replaceExisting || (!x.edited && !x.validated)),
+      c.structure.collections.filter((x) => !x.ignored && (a.replaceExisting || (!x.edited && !x.validated))),
       c.tagLanguage ?? "en",
     );
     const latest = decode<{ tagLanguage?: TagLanguage }>(await ctx.runQuery(api.catalogues.get, { id: a.id }));
@@ -347,11 +348,11 @@ async function discovery(
     let error: string | undefined;
     try {
       for (const p of await proposeTags(
-        s.collections.filter((x) => !x.edited && !x.validated),
+        s.collections.filter((x) => !x.ignored && !x.edited && !x.validated),
         c.tagLanguage ?? "en",
       )) {
         const col = s.collections.find((x) => x.key === p.key);
-        if (col && !col.edited && !col.validated) col.tag = p.tag;
+        if (col && !col.ignored && !col.edited && !col.validated) col.tag = p.tag;
       }
     } catch (e) {
       error = `Propositions IA indisponibles : ${message(e)}. Saisissez les tags ou réessayez.`;
@@ -387,6 +388,7 @@ async function collect(
     }
     return checkpoint(ctx, f, w);
   }
+  // Ignored collections still own source groups: their products must be collected.
   const groups = [...s.collections.map((x) => x.key), "~none"],
     group = groups[w.collection ?? 0];
   if (!group) {
@@ -561,7 +563,8 @@ async function exportCatalogue(
             encode({
               identity: p.identity,
               url: p.url,
-              collections: p.collections,
+              collections: includedCollectionKeys(p.collections, s),
+              sourceCollections: p.collections,
               rank: p.rank === Number.MAX_SAFE_INTEGER ? null : p.rank,
               state: p.state,
               error: p.error,

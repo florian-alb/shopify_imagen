@@ -1,5 +1,35 @@
 # Qualification de la refonte catalogue
 
+## Retrait des statuts sous les badges — 25 octobre 2026
+
+- Les libellés « Validé » et « À valider » sont retirés de l’éditeur ; seules les erreurs s’affichent sous les badges, avec une description accessible reliée à la saisie.
+- `npm run typecheck`, ESLint ciblé sur les deux composants, les cinq tests de `collection-tag-input.test.ts`, `npm run build` et `git diff --check` : réussis.
+- Banc UI isolé : absence des statuts sur les trois lignes, erreur visible et application bloquée après suppression du dernier tag, puis restauration par annulation vérifiées. Capture : `output/catalogue-tags-sans-statut.png`. Aucun E2E authentifié pour ce changement d’affichage.
+
+## Saisie dans les badges sur une ligne — 25 octobre 2026
+
+- Correction de la première présentation : suppression du champ permanent sous les badges. La ligne contient maintenant les badges Secondary et le bouton + ; la saisie apparaît dans le badge ajouté ou à la place du texte du badge édité.
+- Banc UI isolé : clic sur un tag avec focus/sélection de son texte dans le badge, remplacement de `bird` par `mocassins` confirmé uniquement par un clic ailleurs, clic sur + avec focus automatique dans le nouveau badge, saisie de `femme` confirmée à la perte du focus. Les deux badges et + restent sur une seule ligne.
+- Collage de `cuir, été`, retour du focus sur +, suppression avec × et enregistrement via le bouton existant contrôlés. Capture : `output/catalogue-tags-ligne.png`.
+- `npm test` : **638 tests réussis, 82 fichiers** ; `npm run typecheck`, ESLint ciblé, `npm run check:convex-contract` (**114 références**), `npm run build` et `git diff --check` réussis. Aucune modification du backend ni import Shopify réel ; le banc UI reste un client en mémoire, sans E2E authentifié.
+
+## Édition par badges — 25 octobre 2026
+
+- `npm test` : **638 tests réussis, 82 fichiers** lors du passage final. Cinq nouveaux tests couvrent l’ajout de tags contenant des espaces, Unicode NFC, le remplacement d’un seul tag sans altérer ses voisins, le collage de listes séparées par virgules/retours à la ligne, la suppression du dernier tag et la conservation des valeurs invalides/doublons/dépassements pour la validation existante.
+- Le premier passage global lancé en même temps que le build a rencontré quatre échecs dans les tests Shopify `jobImagePublishing` et `variantPublication`, dont deux timeouts. Ces deux fichiers ont ensuite passé seuls (**27 tests**) puis la suite complète a passé sans build simultané. Aucun de ces tests ni leur code de publication n’a été modifié pour cette évolution.
+- `npm run typecheck`, ESLint ciblé, `npm run check:convex-contract` (**114 références**) et `npm run build` : réussis. Aucun changement de contrat, de schéma ou de backend pour les badges.
+- Banc UI isolé : édition au clic, confirmation par Entrée, ajout par virgule, collage de `cuir, été` en deux badges, suppression par × et enregistrement direct d’un tag encore saisi sans Entrée vérifiés. La suppression du dernier tag bloque l’application ; un nouvel ajout, l’annulation et l’exclusion/réactivation des collections conservent le comportement attendu. Capture : `output/catalogue-tags-badges.png`.
+- Les boutons d’enregistrement sont conservés. Les contrôles navigateur utilisent le client en mémoire : ils ne constituent pas un E2E authentifié ni un import Shopify réel.
+
+## Collections ignorées — 25 octobre 2026
+
+- `npm test` : **633 tests réussis, 81 fichiers**. Tests Convex avec utilisateurs simulés : exclusion/réactivation groupée, refus d’une réactivation sans tag valide, absence de proposition IA pour les collections ignorées, conservation des 4 produits du scénario même avec toutes les collections ignorées, absence de tags hérités et d’associations effectives, filtre Sans collection, maintien des tags manuels, snapshots JSON/CSV et conservation des appartenances source. Les exclusions sont protégées contre les autres propriétaires, les révisions concurrentes, les workers périmés et les verrous d’export/import.
+- Worker Shopify simulé : imports complets, collections seules et menu seul avec toutes les collections ignorées ; aucun accès aux collections ni au menu, aucun tag issu des collections ignorées, produit sélectionné conservé et importé quand demandé. Tests du menu : parent ignoré conservé comme groupe avec enfant actif, feuilles ignorées et groupes devenus vides retirés.
+- `npm run typecheck`, `npx tsc --noEmit -p convex/tsconfig.json`, `npm run check:convex-contract` (**114 références**), ESLint ciblé et `npm run build` : réussis.
+- `npx convex dev --once` : fonctions prêtes sur **dev `curious-greyhound-437`**. Aucun déploiement de production.
+- Banc UI isolé dans le navigateur : exclusion et réactivation individuelles/groupées, enregistrement, filtres avec compteurs, sélection remise à zéro au changement de filtre, restauration des tags et fiche conservée affichée Sans collection et sans tag vérifiés. Capture : `output/catalogue-collections-ignorees.png`.
+- Aucun import Shopify réel ni E2E authentifié. L’exclusion ne prouve pas un nettoyage des anciennes collections Shopify : aucun objet existant n’est supprimé par cette fonctionnalité.
+
 ## Tags multiples — 25 octobre 2026
 
 - `npm test` : **627 tests réussis, 81 fichiers**. Les tests couvrent la saisie séparée par virgules, Unicode NFC, limites de 60 tags / 100 caractères par tag, valeurs vides et doublons ; les mutations avec utilisateurs simulés acceptent les tags partagés, refusent les combinaisons identiques dans un autre ordre et conservent brouillons, overrides et verrous.

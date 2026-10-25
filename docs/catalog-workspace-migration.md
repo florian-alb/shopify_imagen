@@ -22,6 +22,8 @@ Le choix des éléments à envoyer vers Shopify est également additif : `select
 
 ## Production et retour arrière
 
+Les exclusions de collection du 25 octobre 2026 ajoutent uniquement le booléen optionnel `Collection.ignored` au JSON de structure et aux éléments de `saveTags.values`. Aucune table, migration ni réécriture des produits n’est requise ; les catalogues existants gardent toutes leurs collections actives. Le JSON final distingue désormais les appartenances effectives (`collections`) des appartenances de découverte (`sourceCollections`). Un rollback vers une version qui ignore ce booléen réactiverait les collections lors des lectures/imports : revoir les exclusions avant ce rollback. La fonctionnalité n’efface aucun objet Shopify déjà importé.
+
 Ajout du 25 octobre 2026 : les tags multiples utilisent les champs JSON existants `Collection.tag` et `appliedTag`, sous forme de valeurs séparées par des virgules. Aucun backfill ni changement de schéma/API n’est requis ; les anciens tags simples et leurs identités Shopify restent compatibles. Un retour au code antérieur après enregistrement de listes multiples les interpréterait comme un seul tag : réexaminer ces listes et les règles des collections cibles avant ce rollback, avec l’autorisation correspondant aux éventuelles écritures Shopify. Aucun import Shopify réel n’a été effectué pour qualifier cette évolution.
 
 La production n’a pas reçu cette refonte ni ce nettoyage. Toute transition future exige un nouvel inventaire, une décision explicite sur ses données et un déploiement adapté ; **ne pas pousser aveuglément ce retrait de schéma en production**. L’autorisation dev de cette session n’est pas réutilisable pour la production.
