@@ -36,13 +36,13 @@ export function CatalogCollectionTagsTable({ collections, errors, busy, edit }: 
           <option value="ignored">Ignorées ({ignored})</option>
         </select>
       </div>
-      <div className="flex flex-wrap items-center gap-3">
-        <span className="text-sm" role="status">{chosen.length} sélectionnée(s)</span>
+      {chosen.length > 0 && <div className="flex flex-wrap items-center gap-3">
+        <span className="text-sm" role="status">{chosen.length} {chosen.length === 1 ? "sélectionnée" : "sélectionnées"}</span>
         <Button variant="outline" size="sm" disabled={busy || !chosen.some((col) => !col.ignored)}
           onClick={() => setIgnored(chosen.map((col) => col.key), true)}>Ignorer la sélection</Button>
         <Button variant="outline" size="sm" disabled={busy || !chosen.some((col) => col.ignored)}
           onClick={() => setIgnored(chosen.map((col) => col.key), false)}>Réactiver la sélection</Button>
-      </div>
+      </div>}
       <div className="overflow-x-auto">
         <table className="w-full text-left text-sm">
           <thead className="border-b text-muted-foreground">
