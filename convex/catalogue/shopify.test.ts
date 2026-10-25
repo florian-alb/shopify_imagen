@@ -5,7 +5,7 @@ import { beforeEach, afterEach, expect, test, vi } from "vitest"
 import schema from "../schema"
 import { api, internal } from "../_generated/api"
 import { extractProduct } from "./extract"
-import { encode, decode, type Work, type RemoteResult } from "./model"
+import { encode, decode, type Structure, type Work, type RemoteResult } from "./model"
 import { productInput } from "./shopifyModel"
 import { REQUIRED_SHOPIFY_ADMIN_SCOPES } from "../shopify/scopes"
 import type { ImportSelection } from "./importSelection"
@@ -444,6 +444,35 @@ test("existing products keep merchant tags and active status without productSet"
   expect(
     remote.calls.some((x) => x.query.includes("CatalogImportDescription")),
   ).toBe(false)
+})
+test.each([
+  { products: true, collections: true, menu: true },
+  { products: false, collections: true, menu: false },
+  { products: false, collections: false, menu: true },
+])("ignored collections are absent from Shopify while their products are retained: %j", async (selection) => {
+  const f = await fixture(selection)
+  remote.collectionTags = []
+  remote.membershipMissing = true
+  await f.t.run(async (ctx) => {
+    const c = (await ctx.db.get(f.id))!
+    const structure = decode<Structure>(c.structure)
+    Object.assign(structure.collections[0], { ignored: true, tag: "", validated: false })
+    await ctx.db.patch(f.id, { structure: encode(structure) })
+  })
+  const c = await f.run()
+  expect(c.work).toBeUndefined()
+  const summary = decode<{ collections: number; complete: number; menuId?: string }>(c.lastImport!)
+  expect(summary.collections).toBe(0)
+  expect(summary.menuId).toBeUndefined()
+  expect(remote.calls.some((call) => /CatalogImportCollection|CatalogImportMenu/.test(call.query))).toBe(false)
+  const product = (await f.t.query(internal.catalogues.byId, { id: f.productId }))!
+  expect(product.collections).toEqual(["cats"])
+  expect(product.selected).toBe(true)
+  if (selection.products) {
+    expect(JSON.parse(remote.uploads[0].trim()).input.tags).toEqual([])
+    expect(decode<RemoteResult>(product.remote!).status).toBe("complete")
+    expect(summary.complete).toBe(1)
+  } else expect(remote.uploads).toHaveLength(0)
 })
 test("multiple collection tags create separate AND rules and reach the product payload", async () => {
   const f = await fixture(undefined, "mocassins, femme")

@@ -12,6 +12,7 @@ import {
   decode,
   encode,
   effective,
+  effectiveMenu,
   identity,
   type Structure,
   type Work,
@@ -58,7 +59,7 @@ export function targetMenu(
       }
     })
   }
-  return walk(s.menu, 1)
+  return walk(effectiveMenu(s, origin), 1)
 }
 export async function importStep(
   ctx: ActionCtx,
@@ -162,8 +163,8 @@ export async function importStep(
         visit(node.children)
       }
     }
-    if (!selection.collections) visit(s.menu)
-    const collections = selection.collections ? s.collections : s.collections.filter((col) => needed.has(col.key))
+    if (!selection.collections) visit(effectiveMenu(s, c.origin))
+    const collections = s.collections.filter((col) => !col.ignored && (selection.collections || needed.has(col.key)))
     const col = collections[w.collection ?? 0]
     if (!col) {
       w.phase = "products"
@@ -301,6 +302,7 @@ export async function importStep(
       if (w.bulk.resultOffset >= w.bulk.ids.length) w.bulk = undefined
       return next()
     }
+    // Keep every source group, including ignored collections, to import its products.
     const groups = [...s.collections.map((x) => x.key), "~none"],
       group = groups[w.collection ?? 0]
     if (!group) {
@@ -506,7 +508,7 @@ export async function importStep(
           })
           continue
         }
-        const expected = (selection.collections ? s.collections : [])
+        const expected = (selection.collections ? s.collections.filter((col) => !col.ignored) : [])
           .filter((x) => parseCollectionTags(x.tag).every((tag) => data.tags.includes(tag)))
           .map((x) => w.mappings?.[x.key]?.id)
         const waiting =
@@ -624,7 +626,7 @@ export async function importStep(
   }
   if (w.phase === "finish") {
     let menuId: string | undefined
-    if (selection.menu) {
+    if (selection.menu && effectiveMenu(s, c.origin).length) {
       const handle = `imagen-catalogue-${c._id}-v${w.importVersion}`,
         found = await request<{ menus: { nodes: Mapping[] } }>(gql.MENUS, {
           query: `handle:${handle}`,
@@ -654,7 +656,7 @@ export async function importStep(
         domain: w.domain,
         version: w.importVersion,
         selection,
-        collections: selection.collections ? s.collections.length : 0,
+        collections: selection.collections ? s.collections.filter((col) => !col.ignored).length : 0,
         ...(menuId ? { menuId } : {}),
         completedAt: Date.now(),
       }),

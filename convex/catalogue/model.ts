@@ -12,6 +12,7 @@ export type Collection = {
   image: string | null
   tag: string // Comma-separated tags; a single tag remains compatible.
   validated: boolean
+  ignored?: boolean
   appliedTag?: string
   edited?: boolean
   outsideMenu: boolean
@@ -101,6 +102,7 @@ export const identity = (origin: string, id: string) =>
 export function validateTags(collections: Collection[]) {
   const seen = new Set<string>()
   for (const c of collections) {
+    if (c.ignored) continue
     const error = collectionTagsError(c.tag)
     if (error) throw new Error(`Tags invalides pour ${c.title} : ${error}`)
     const key = collectionTagKey(c.tag)
@@ -115,15 +117,34 @@ export function effective(
   override: ProductOverride = {},
 ) {
   const inherited = structure.collections
-    .filter((c) => data.collections.includes(c.key))
+    .filter((c) => !c.ignored && data.collections.includes(c.key))
     .flatMap((c) => parseCollectionTags(c.validated ? c.tag : c.appliedTag ?? ""))
   return {
     ...data,
+    collections: includedCollectionKeys(data.collections, structure),
     title: override.title ?? data.title,
     tags: tags(override.tags ?? inherited),
     excluded: override.excluded ?? false,
     reviewed: override.reviewed ?? false,
   }
+}
+export function includedCollectionKeys(keys: string[], structure: Structure) {
+  const ignored = new Set(structure.collections.filter((c) => c.ignored).map((c) => c.key))
+  return keys.filter((key) => !ignored.has(key))
+}
+
+export function effectiveMenu(structure: Structure, origin: string): MenuNode[] {
+  const ignored = new Set(structure.collections.filter((c) => c.ignored).map((c) => c.key))
+  function walk(nodes: MenuNode[]): MenuNode[] {
+    return nodes.flatMap((node) => {
+      const children = walk(node.children)
+      const key = node.url ? decodeURIComponent(new URL(node.url, origin).pathname.split("/")[2] ?? "") : null
+      const skip = key !== null && ignored.has(key)
+      if (!children.length && (skip || (!node.url && node.children.length > 0))) return []
+      return [{ ...node, url: skip ? null : node.url, children }]
+    })
+  }
+  return walk(structure.menu)
 }
 export function guardSize(value: unknown, limit = 900_000) {
   if (getConvexSize(JSON.parse(JSON.stringify(value))) > limit)

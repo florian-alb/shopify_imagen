@@ -34,6 +34,7 @@ import {
 import {
   decode,
   phaseLabels,
+  effectiveMenu,
   type Structure,
   type Work,
   type CatalogProduct,
@@ -126,7 +127,7 @@ function Workspace({ c }: { c: Catalogue }) {
       c.failed ||
       c.complete < c.total ||
       c.structure.warnings.length ||
-      c.structure.collections.some((x) => x.membership !== "complete")
+      c.structure.collections.some((x) => !x.ignored && x.membership !== "complete")
     ),
     outside = c.structure.collections.filter((x) => x.outsideMenu).length,
     locked = !!c.work && (c.status === "working" || c.work.kind === "import"),
@@ -203,7 +204,7 @@ function Workspace({ c }: { c: Catalogue }) {
             />
             <Button
               disabled={
-                locked || c.structure.collections.some((x) => !x.validated)
+                locked || c.structure.collections.some((x) => !x.ignored && !x.validated)
               }
               onClick={() => setDialog("import")}
             >
@@ -366,7 +367,7 @@ function Workspace({ c }: { c: Catalogue }) {
                 disabled={tagsLocked}
                 onClick={() => setTab("tags")}
               >
-                Modifier et valider les tags
+                Gérer les tags et les collections ignorées
               </Button>
               <Collections
                 c={c}
@@ -382,7 +383,7 @@ function Workspace({ c }: { c: Catalogue }) {
           {tab === "menu" && (
             <div className="max-w-3xl space-y-8 p-6">
               <MenuTree
-                nodes={c.structure.menu}
+                nodes={effectiveMenu(c.structure, c.origin)}
                 showCollection={(key) => {
                   setCollection(key)
                   setTab("products")
@@ -485,12 +486,13 @@ function Products({
     [selected, setSelected] = useState<Id<"produits"> | null>(null),
     returnFocus = useRef<HTMLButtonElement | null>(null),
     panel = useRef<HTMLElement | null>(null)
+  const collectionFilter = c.structure.collections.some((col) => col.key === collection && col.ignored) ? "" : collection
   useEffect(() => {
     if (selected) panel.current?.focus()
   }, [selected])
   const { results, status, loadMore } = usePaginatedQuery(
     api.catalogues.products,
-    { id: c._id, search, collection, state, sort },
+    { id: c._id, search, collection: collectionFilter, state, sort },
     { initialNumItems: 25 },
   )
   const pageSize = 25,
@@ -499,8 +501,8 @@ function Products({
     rows = results.slice(start, end).map((row) => decode<Row>(row)),
     hasNext = results.length > end,
     filling = status !== "Exhausted" && results.length <= end,
-    collectionCount = collection
-      ? c.structure.collections.find((col) => col.key === collection)
+    collectionCount = collectionFilter
+      ? c.structure.collections.find((col) => col.key === collectionFilter)
           ?.selectedCount
       : undefined,
     position = rows.findIndex((x) => x.id === selected)
@@ -535,7 +537,7 @@ function Products({
           <select
             className={selectClass}
             aria-label="Filtrer par collection"
-            value={collection}
+            value={collectionFilter}
             onChange={(e) => {
               setCollection(e.target.value)
               reset()
@@ -543,7 +545,7 @@ function Products({
           >
             <option value="">Toutes les collections</option>
             <option value="__none">Sans collection</option>
-            {c.structure.collections.map((col) => (
+            {c.structure.collections.filter((col) => !col.ignored).map((col) => (
               <option value={col.key} key={col.key}>
                 {col.title}
               </option>
@@ -1055,6 +1057,8 @@ function Collections({
         onChange={(e) => setFilter(e.target.value)}
       >
         <option value="all">Toutes</option>
+        <option value="active">Actives</option>
+        <option value="ignored">Ignorées</option>
         <option value="empty">Vides dans ce catalogue</option>
         <option value="outside">Hors menu</option>
         <option value="failed">À relancer</option>
@@ -1082,6 +1086,8 @@ function Collections({
               .filter(
                 (x) =>
                   filter === "all" ||
+                  (filter === "active" && !x.ignored) ||
+                  (filter === "ignored" && x.ignored) ||
                   (filter === "empty" &&
                     !x.selectedCount &&
                     x.membership === "complete") ||
@@ -1091,14 +1097,14 @@ function Collections({
               .map((col) => (
                 <tr className="border-b" key={col.key}>
                   <td className="p-3 font-medium">{col.title}</td>
-                  <td className="p-3">{col.tag || "À valider"}</td>
+                  <td className="p-3">{col.ignored ? "Aucun tag appliqué" : col.tag || "À valider"}</td>
                   <td className="p-3">
-                    <button
+                    {col.ignored ? <span>{col.selectedCount}</span> : <button
                       className="underline underline-offset-4"
                       onClick={() => showProducts(col.key)}
                     >
                       {col.selectedCount}
-                    </button>{" "}
+                    </button>}{" "}
                     /{" "}
                     {col.membership === "complete" ? col.count : "Non vérifié"}
                   </td>
@@ -1106,7 +1112,7 @@ function Collections({
                     {col.outsideMenu ? "Hors menu" : "Présente"}
                   </td>
                   <td className="p-3">
-                    {col.membership !== "complete"
+                    {col.ignored ? "Ignorée — produits conservés" : col.membership !== "complete"
                       ? "Appartenances non vérifiées"
                       : col.selectedCount === 0
                         ? "Aucun produit sélectionné — collection conservée"

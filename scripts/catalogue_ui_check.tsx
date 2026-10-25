@@ -14,6 +14,7 @@ import { CatalogHome } from "../app/features/catalog-import/components/CatalogHo
 import { CatalogWorkspace } from "../app/features/catalog-import/components/CatalogWorkspace"
 import {
   effective,
+  includedCollectionKeys,
   type Structure,
   type CatalogProduct,
 } from "../convex/catalogue/model"
@@ -245,12 +246,13 @@ function query(name: string, a: Record<string, unknown>) {
             (!a.state || a.state === p.state) &&
             (!a.collection ||
               (a.collection === "__none"
-                ? !p.collections.length
-                : p.collections.includes(String(a.collection)))),
+                ? !includedCollectionKeys(p.collections, structure).length
+                : includedCollectionKeys(p.collections, structure).includes(String(a.collection)))),
         )
         .map((p) =>
           JSON.stringify({
             ...p,
+            collections: includedCollectionKeys(p.collections, structure),
             id: p._id,
             image: data(p).images[0].url,
             tags: effective(data(p), structure, p.override).tags,
@@ -264,6 +266,7 @@ function query(name: string, a: Record<string, unknown>) {
     const p = rows.find((p) => p._id === a.productId)!
     return JSON.stringify({
       ...p,
+      collections: includedCollectionKeys(p.collections, structure),
       data: effective(data(p), structure, p.override),
     })
   }
@@ -296,12 +299,15 @@ const client = {
       p.override = a.override as typeof p.override
       if (p.override.title) p.title = p.override.title
     } else if (name === "catalogues:saveTags") {
-      for (const v of a.values as Array<{ key: string; tag: string }>) {
+      for (const v of a.values as Array<{ key: string; tag: string; ignored?: boolean }>) {
         const col = structure.collections.find((c) => c.key === v.key)!
-        if (col.validated) col.appliedTag = col.tag
-        col.tag = normalizeCollectionTags(v.tag)
-        col.validated = Boolean(a.validate)
-        if (col.validated) col.appliedTag = col.tag
+        col.ignored = v.ignored ?? col.ignored
+        if (col.tag !== normalizeCollectionTags(v.tag)) {
+          if (col.validated) col.appliedTag = col.tag
+          col.tag = normalizeCollectionTags(v.tag)
+          col.validated = false
+        }
+        if (a.validate && !col.ignored) { col.validated = true; col.appliedTag = col.tag }
       }
       catalogue.tagVersion++
       if (a.collect) catalogue.status = "ready"
@@ -331,7 +337,7 @@ const client = {
       const complete = selection.products ? rows.filter((p) => p.state === "complete" && !p.override.excluded).length : 0
       catalogue.lastImport = {
         domain: "fixture.myshopify.com", selection,
-        collections: selection.collections ? structure.collections.length : 0,
+        collections: selection.collections ? structure.collections.filter((col) => !col.ignored).length : 0,
         ...(selection.menu ? { menuId: "fixture-menu" } : {}),
         complete, created: complete, existing: 0, failed: 0,
         skipped: selection.products ? rows.length - complete : 0,
@@ -345,7 +351,7 @@ const client = {
   },
   async action(ref: Parameters<typeof getFunctionName>[0]) {
     if (getFunctionName(ref) === "catalogueActions:suggestTags")
-      return structure.collections.map((c, i) => ({ key: c.key, tag: catalogue.tagLanguage === "fr" ? ["oiseaux", "peluches", "nouveautés"][i] : c.tag }))
+      return structure.collections.filter((c) => !c.ignored).map((c, i) => ({ key: c.key, tag: catalogue.tagLanguage === "fr" ? ["oiseaux", "peluches", "nouveautés"][i] : c.tag }))
     throw new Error("Simulation : pas de téléchargement R2.")
   },
 } as unknown as ConvexReactClient
