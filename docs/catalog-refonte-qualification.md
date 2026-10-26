@@ -1,5 +1,12 @@
 # Qualification de la refonte catalogue
 
+## Confirmations d’import et d’export épurées — 25 octobre 2026
+
+- Import : boutique, éléments sélectionnables et accord partiel conservés. Volume des collections actives et nombre de fiches incomplètes affichés ; brouillon des nouveaux produits et menu non affecté au thème indiqués uniquement quand cochés, avec descriptions accessibles. JSON : compteur de fiches complètes, inclusion des données incomplètes/erreurs, avertissements source et collections non vérifiées conservés. CSV : périmètre, omissions et limites utiles ; bouton « Générer le CSV » sans formule d’acceptation longue.
+- `npm test -- app/features/catalog-import/lib/csv-export.test.ts convex/catalogue/catalogue.test.ts` : **43 tests réussis, 2 fichiers**. `npm run typecheck`, ESLint ciblé sur les trois composants, `npm run check:convex-contract` (**114 références**), `npm run build` et `git diff --check` réussis. Avertissement de taille de bundle inchangé.
+- Banc UI en mémoire : destination choisie mais import bloqué sans accord partiel, activation après accord, refus d’une sélection vide, descriptions liées aux choix, absence d’accord partiel sur catalogue complet. Export JSON partiel simulé jusqu’au bouton de téléchargement ; CSV partiel généré avec 3 produits / 1 fiche ignorée, puis CSV complet généré automatiquement avec 4 produits / 0 ignorée. Aucun import Shopify réel ni export R2 réel.
+- Les trois confirmations sont contrôlées sur ordinateur et mobile (page et viewport de 390 px, fenêtres et boutons visibles). Captures : `output/catalogue-confirmation-{import,json,csv}.png` et variantes `-mobile.png`. Ces données simulées ne constituent pas un E2E authentifié.
+
 ## Collection vide Montessori et diagnostic du worker — 25 octobre 2026
 
 - Incident identifié en lecture seule sur **prod `youthful-bandicoot-479`** : catalogue `q9793dr89ygmxzyfawghdrsma58gzen7`, 167 produits recensés, phase `members` bloquée après trois tentatives sur la 30e collection, `montessori-toys-by-category`. Les 29 collections précédentes sont complètes. La page publique exacte avec `?sort_by=best-selling`, inspectée dans le navigateur, indique « This collection is empty » et ne contient aucun lien produit dans `main` ; cette formulation manquait au lecteur.

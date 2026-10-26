@@ -104,11 +104,14 @@ function Workspace({ c }: { c: Catalogue }) {
     setTagLanguage = useMutation(api.catalogues.setTagLanguage),
     exportJson = useMutation(api.catalogues.exportJson),
     download = useAction(api.catalogueActions.download)
+  const activeCollections = c.structure.collections.filter((col) => !col.ignored)
+  const incompleteCount = Math.max(0, c.total - c.complete)
+  const unverifiedCount = activeCollections.filter((col) => col.membership !== "complete").length
   const partial = !!(
       c.failed ||
-      c.complete < c.total ||
+      incompleteCount ||
       c.structure.warnings.length ||
-      c.structure.collections.some((x) => !x.ignored && x.membership !== "complete")
+      unverifiedCount
     ),
     locked = !!c.work && (c.status === "working" || c.work.kind === "import"),
     tagsLocked = c.work?.kind === "import" || c.work?.kind === "export",
@@ -182,6 +185,7 @@ function Workspace({ c }: { c: Catalogue }) {
               generation={c.generation}
               total={c.total}
               partial={partial}
+              incompleteCount={incompleteCount}
               disabled={locked || busy || !!c.work}
             />
             <Button
@@ -305,26 +309,26 @@ function Workspace({ c }: { c: Catalogue }) {
           <DialogHeader>
             <DialogTitle>
               {dialog === "export"
-                ? "Exporter ce catalogue incomplet"
+                ? "Exporter le JSON"
                 : "Importer vers Shopify"}
             </DialogTitle>
             <DialogDescription>
-              {c.total} produits · {c.structure.collections.length} collections
-              {dialog === "export" && <> · {c.complete} fiches complètes</>}
+              {dialog === "export"
+                ? `${c.complete} / ${c.total} fiches complètes`
+                : `${c.total} ${c.total === 1 ? "produit" : "produits"} · ${activeCollections.length} ${activeCollections.length === 1 ? "collection" : "collections"}`}
             </DialogDescription>
           </DialogHeader>
           {dialog === "export" ? (
             <>
               <p className="text-sm">
-                Le JSON conservera les données disponibles, les erreurs et les
-                informations manquantes.
+                Le JSON inclut les fiches incomplètes et leurs erreurs.
               </p>
-              <ul className="list-disc pl-5 text-sm">
-                <li>{c.total - c.complete} fiches incomplètes</li>
+              {(unverifiedCount > 0 || c.structure.warnings.length > 0) && <ul className="list-disc pl-5 text-sm">
+                {unverifiedCount > 0 && <li>{unverifiedCount} {unverifiedCount === 1 ? "collection non vérifiée" : "collections non vérifiées"}</li>}
                 {c.structure.warnings.map((w, i) => (
                   <li key={i}>{w}</li>
                 ))}
-              </ul>
+              </ul>}
               <Button
                 disabled={busy}
                 onClick={() =>
@@ -342,6 +346,7 @@ function Workspace({ c }: { c: Catalogue }) {
               id={c._id}
               version={c.version}
               partial={partial}
+              incompleteCount={incompleteCount}
               close={() => setDialog(null)}
             />
           ) : null}
