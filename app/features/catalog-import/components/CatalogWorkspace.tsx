@@ -14,6 +14,7 @@ import {
   X,
 } from "lucide-react"
 import { api, type Id, type Doc } from "@/lib/convex"
+import { errorMessage } from "@/lib/errors"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -23,6 +24,7 @@ import { CatalogTags } from "./CatalogTags"
 import { CatalogCollections } from "./CatalogCollections"
 import { CatalogMenu } from "./CatalogMenu"
 import { CatalogImportResult } from "./CatalogImportResult"
+import { CatalogWorkStatus } from "./CatalogWorkStatus"
 import type { Catalogue } from "../types"
 import { ImportConfirmation } from "./ImportConfirmation"
 import type { TagLanguage } from "../../../../convex/catalogue/tags"
@@ -35,7 +37,6 @@ import {
 } from "@/components/ui/dialog"
 import {
   decode,
-  phaseLabels,
   type CatalogProduct,
   type ProductOverride,
   type RemoteResult,
@@ -125,7 +126,7 @@ function Workspace({ c }: { c: Catalogue }) {
     try {
       await fn()
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Opération impossible.")
+      setError(errorMessage(e))
     } finally {
       setBusy(false)
     }
@@ -198,41 +199,12 @@ function Workspace({ c }: { c: Catalogue }) {
             </Button>
           </div>}
         </header>
-        {c.work && (
-          <div className="mt-4">
-            <Notice>
-              <strong>{phaseLabels[c.phase] ?? c.phase}</strong>
-              {c.work.phase === "collect" &&
-              c.structure.collections[c.work.collection ?? 0]
-                ? ` · ${c.structure.collections[c.work.collection ?? 0].title}`
-                : ""}
-              <p>
-                {c.complete} / {c.total || "…"} fiches complètes
-                {c.failed ? ` · ${c.failed} en échec` : ""}
-                {c.status === "blocked"
-                  ? " · En attente de reprise"
-                  : c.work.kind === "import"
-                    ? " · Catalogue verrouillé pendant l’import"
-                    : ""}
-              </p>
-            </Notice>
-          </div>
-        )}
-        {(error || c.error) && (
-          <p role="alert" className="mt-3 text-sm text-destructive">
-            {error || c.error}
-          </p>
-        )}
-        {(c.status === "blocked" || c.resumeWork) && (
-          <Button
-            className="mt-3"
-            variant="outline"
-            disabled={busy}
-            onClick={() => void run(() => retry({ id: c._id }))}
-          >
-            Reprendre
-          </Button>
-        )}
+        <CatalogWorkStatus
+          c={c}
+          error={error}
+          busy={busy}
+          onRetry={() => void run(() => retry({ id: c._id }))}
+        />
         {!editingTags && tab === "products" && !locked && c.failed > 0 && (
           <div className="mt-4 flex flex-wrap items-center gap-3 text-sm" role="status">
             <button className="rounded-sm underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-ring"

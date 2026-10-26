@@ -123,7 +123,7 @@ async function fetchPublicImpl(value: string, redirects = 0): Promise<string> {
         : Date.parse(result.retry) - Date.now()
       : 0
     throw new CollectionHttpError(
-      `Le site répond HTTP ${result.status}.`,
+      `Le site répond HTTP ${result.status} : ${url.href}`,
       result.status,
       Number.isFinite(retry) ? Math.max(0, retry) : 0,
     )

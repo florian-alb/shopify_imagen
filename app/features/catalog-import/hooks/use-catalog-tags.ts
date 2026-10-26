@@ -1,16 +1,18 @@
 import { useRef, useState } from "react"
 import { useAction, useMutation } from "convex/react"
 import { api, type Doc } from "@/lib/convex"
-import type { Collection, Structure } from "../../../../convex/catalogue/model"
+import type { Structure } from "../../../../convex/catalogue/model"
 import { collectionTagKey, collectionTagsError } from "../../../../convex/catalogue/tags"
+import { captureTagEditBases, tagValuesForSave, type CollectionTagEdits } from "../lib/tag-draft"
+
+export type { CollectionTagEdit } from "../lib/tag-draft"
 
 export type TagCatalogue = Pick<Doc<"catalogues">, "_id" | "version" | "tagVersion" | "status" | "tagLanguage"> & { structure: Structure }
-export type CollectionTagEdit = Partial<Pick<Collection, "tag" | "ignored">>
 
 export function useCatalogTags(c: TagCatalogue, done: () => void) {
-  const [edits, setEdits] = useState<Record<string, CollectionTagEdit>>({})
+  const [edits, setEdits] = useState<CollectionTagEdits>({})
   const [saved, setSaved] = useState(false)
-  const editVersion = useRef<number | null>(null)
+  const editBases = useRef<CollectionTagEdits>({})
   const save = useMutation(api.catalogues.saveTags)
   const suggest = useAction(api.catalogueActions.suggestTags)
   const draft = c.structure.collections.map((col) => ({
@@ -28,8 +30,8 @@ export function useCatalogTags(c: TagCatalogue, done: () => void) {
       ? "Cette combinaison de tags est déjà utilisée par une autre collection."
       : null),
   ]))
-  function edit(values: Record<string, CollectionTagEdit>) {
-    editVersion.current ??= c.tagVersion ?? 0
+  function edit(values: CollectionTagEdits) {
+    editBases.current = captureTagEditBases(c.structure.collections, editBases.current, values)
     setSaved(false)
     setEdits((previous) => {
       const next = { ...previous }
@@ -39,14 +41,14 @@ export function useCatalogTags(c: TagCatalogue, done: () => void) {
   }
   function reset() {
     setEdits({})
-    editVersion.current = null
+    editBases.current = {}
     setSaved(false)
   }
   async function persist(validate: boolean, collect: boolean) {
     await save({
       id: c._id, version: c.version,
-      tagVersion: editVersion.current ?? c.tagVersion ?? 0,
-      values: draft.map(({ key, tag, ignored }) => ({ key, tag, ignored: Boolean(ignored) })),
+      tagVersion: c.tagVersion ?? 0,
+      values: tagValuesForSave(c.structure.collections, edits, editBases.current),
       validate, collect,
     })
     reset()
