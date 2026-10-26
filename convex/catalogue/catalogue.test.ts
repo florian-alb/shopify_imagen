@@ -359,7 +359,7 @@ test("CSV enforces authentication, ownership, partial acknowledgement and a stab
   await expect(f.user.query(api.catalogues.exportCsvPage, { ...request(), generation: c.generation - 1 })).rejects.toThrow("a changé");
 });
 
-test("CSV exports effective values and skips excluded, failed, unselected and alias rows", async () => {
+test("CSV exports effective values and skips excluded, unusable, unselected and alias rows", async () => {
   const f = await setup();
   await f.drain();
   await f.validate();
@@ -370,7 +370,7 @@ test("CSV exports effective values and skips excluded, failed, unselected and al
   await f.user.mutation(api.catalogues.saveProduct, { id: f.id, productId: manual._id, version: (await f.read())!.version, override: { title: "Titre manuel", tags: ["été"] } });
   await f.user.mutation(api.catalogues.saveProduct, { id: f.id, productId: excluded._id, version: (await f.read())!.version, override: { excluded: true } });
   await f.t.run(async (ctx) => {
-    await ctx.db.patch(page.page.find((p) => p.handle === "c")!._id, { state: "failed" });
+    await ctx.db.patch(page.page.find((p) => p.handle === "c")!._id, { state: "failed", data: undefined });
     await ctx.db.patch(page.page.find((p) => p.handle === "d")!._id, { selected: false });
     const { _id, _creationTime, ...copy } = manual;
     void _creationTime;
@@ -394,7 +394,7 @@ test("CSV paginates beyond empty batches and refuses a changed version between p
   await f.t.run(async (ctx) => {
     const { _id, _creationTime, ...copy } = page.page[0];
     void _id; void _creationTime;
-    for (let i = 0; i < 45; i++) await ctx.db.insert("produits", { ...copy, handle: `extra-${i}`, identity: `extra-${i}`, state: i < 40 ? "failed" : "complete" });
+    for (let i = 0; i < 45; i++) await ctx.db.insert("produits", { ...copy, handle: `extra-${i}`, identity: `extra-${i}`, state: i < 40 ? "failed" : "complete", data: i < 40 ? undefined : copy.data });
   });
   const c = (await f.read())!;
   const args = { id: f.id, version: c.version, generation: c.generation, allowPartial: true };
@@ -411,6 +411,28 @@ test("CSV paginates beyond empty batches and refuses a changed version between p
   expect(exported).toBe(9);
   await f.user.mutation(api.catalogues.saveProduct, { id: f.id, productId: page.page[0]._id, version: c.version, override: { title: "Modifié" } });
   await expect(f.user.query(api.catalogues.exportCsvPage, { ...args, cursor })).rejects.toThrow("a changé");
+});
+
+test("CSV includes already collected JSON products with failed or pending HTML without changing their diagnostics", async () => {
+  const f = await setup();
+  await f.drain();
+  await f.validate();
+  await f.drain();
+  const page = await f.t.query(internal.catalogues.page, { id: f.id, selected: true });
+  await f.t.run(async (ctx) => {
+    for (const [i, p] of page.page.slice(0, 2).entries()) {
+      const data = extractProduct({ handle: p.handle, url: p.url, collections: p.collections }, JSON.parse(p.jsonSource!), null);
+      await ctx.db.patch(p._id, { state: i ? "pending" : "failed", data: encode(data), error: data.errors.join(" · ") });
+    }
+    await ctx.db.patch(f.id, { complete: 2, failed: 1 });
+  });
+  const c = (await f.read())!;
+  const result = await f.user.query(api.catalogues.exportCsvPage, { id: f.id, version: c.version, generation: c.generation, allowPartial: true, cursor: null });
+  expect(result).toMatchObject({ scanned: 4, skipped: 0, isDone: true });
+  expect(result.products).toHaveLength(4);
+  expect(result.products.join("")).toContain("<p>German description</p>");
+  const p = await f.t.query(internal.catalogues.byId, { id: page.page[0]._id });
+  expect(p).toMatchObject({ state: "failed", error: "Page HTML indisponible." });
 });
 
 test("Top N is global, paginated, deduplicated, and never downloads unselected fiches", async () => {

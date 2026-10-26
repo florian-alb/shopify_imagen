@@ -1,4 +1,5 @@
 import { effective, identity } from "./model"
+import { isImportableProduct } from "./source"
 export const uniqueIdentifier = (origin: string, id: string) => ({
   namespace: "imagen_catalog",
   key: "source_id",
@@ -9,11 +10,7 @@ export function productInput(
   origin: string,
   description: string,
 ) {
-  if (
-    !product.sourceId ||
-    product.jsonStatus !== "complete" ||
-    product.htmlStatus !== "complete"
-  )
+  if (!isImportableProduct(product))
     throw new Error(`Fiche incomplète : ${product.title}`)
   if (product.variants.length > 2048)
     throw new Error(`Trop de variantes : ${product.title}`)

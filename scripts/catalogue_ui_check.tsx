@@ -23,6 +23,7 @@ import {
 import type { Id } from "../convex/_generated/dataModel"
 import { normalizeCollectionTags, type TagLanguage } from "../convex/catalogue/tags"
 import { productCsv } from "../convex/catalogue/csv"
+import { isImportableProduct } from "../convex/catalogue/source"
 import { allImportElements, hasImportElements, type ImportSelection } from "../convex/catalogue/importSelection"
 import raw from "../convex/catalogue/fixtures/kuscheltierland.json"
 import "../app/styles.css"
@@ -287,6 +288,7 @@ function query(name: string, a: Record<string, unknown>) {
             ...p,
             collections: includedCollectionKeys(p.collections, structure),
             id: p._id,
+            importable: !p.override.excluded && isImportableProduct(data(p)),
             image: data(p).images[0].url,
             tags: effective(data(p), structure, p.override).tags,
           }),

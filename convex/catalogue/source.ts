@@ -67,6 +67,11 @@ export type ProductOverride = {
   excluded?: boolean
   reviewed?: boolean
 }
+// HTML enriches a product; its collection status does not determine whether
+// the validated JSON data can be exported or imported, including older rows.
+export function isImportableProduct(product: CatalogProduct): product is CatalogProduct & { sourceId: string } {
+  return product.jsonStatus === "complete" && Boolean(product.sourceId) && product.variants.length > 0
+}
 export function sourceOrigin(input: string) {
   const url = new URL(
     input.includes("://") ? input.trim() : `https://${input.trim()}`,

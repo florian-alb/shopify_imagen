@@ -86,17 +86,18 @@ export function CatalogCsvExport({ id, origin, version, generation, total, parti
           <DialogHeader>
             <DialogTitle>Exporter le CSV Shopify</DialogTitle>
             <DialogDescription>
-              Fiches complètes uniquement, hors produits exclus.
+              Produits avec un JSON exploitable, hors produits exclus.
             </DialogDescription>
           </DialogHeader>
           <ul className="space-y-1 text-sm">
             <li>Produits en brouillon, stock non suivi.</li>
+            <li>Les compléments HTML manquants ne bloquent pas l’export.</li>
             <li>Collections et menu non inclus.</li>
           </ul>
           {partial && !busy && !downloads.length && (
             <p className="text-sm">
               {incompleteCount > 0
-                ? `${incompleteCount} ${incompleteCount === 1 ? "fiche incomplète ne sera pas exportée" : "fiches incomplètes ne seront pas exportées"}.`
+                ? `${incompleteCount} ${incompleteCount === 1 ? "fiche incomplète" : "fiches incomplètes"}. Seuls les produits sans JSON exploitable ou exclus sont ignorés.`
                 : "Données source incomplètes."}
             </p>
           )}

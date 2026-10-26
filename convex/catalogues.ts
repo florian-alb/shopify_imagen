@@ -14,7 +14,7 @@ import {
 import { internal } from "./_generated/api"
 import type { Doc, Id } from "./_generated/dataModel"
 import { requireUserId } from "./authz"
-import { sourceOrigin } from "./catalogue/source"
+import { isImportableProduct, sourceOrigin } from "./catalogue/source"
 import { productCsv } from "./catalogue/csv"
 import { allImportElements, hasImportElements } from "./catalogue/importSelection"
 import { normalizeCollectionTags, tagLanguageValidator } from "./catalogue/tags"
@@ -219,6 +219,7 @@ export const products = query({
             rank: p.rank === Number.MAX_SAFE_INTEGER ? null : p.rank,
             collections: includedCollectionKeys(p.collections, structure),
             state: p.state,
+            importable: Boolean(data && !p.aliasOf && !override.excluded && isImportableProduct(data)),
             error: p.error,
             image: data?.images[0]?.url,
             tags: data
@@ -489,7 +490,7 @@ export const exportCsvPage = query({
       .withIndex("by_catalogue_group", (q) => q.eq("catalogueId", c._id).eq("selected", true))
       .paginate({ cursor: a.cursor, numItems: 20, maximumRowsRead: 20, maximumBytesRead: 2_000_000 })
     const products = page.page.flatMap((p) => {
-      if (p.state !== "complete" || !p.data || p.aliasOf) return []
+      if (!p.data || p.aliasOf) return []
       const csv = productCsv(effective(
         { ...decode<CatalogProduct>(p.data), collections: p.collections },
         structure,

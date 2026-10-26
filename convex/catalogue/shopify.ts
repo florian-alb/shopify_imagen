@@ -7,6 +7,7 @@ import type { Doc, Id } from "../_generated/dataModel"
 import { shopifyGraphql } from "../shopify/client"
 import { shopifyCredentialsForShop } from "../shopScope"
 import { allImportElements } from "./importSelection"
+import { isImportableProduct } from "./source"
 import { parseCollectionTags } from "./tags"
 import {
   decode,
@@ -97,6 +98,7 @@ export async function importStep(
       productId: p._id,
       state: p.state,
       attempts: p.attempts,
+      ...(p.error ? { error: p.error } : {}),
       remote: encode({ ...result, catalogueVersion: w.importVersion, importGeneration: w.generation }),
     })
   if (w.phase === "setup") {
@@ -323,13 +325,13 @@ export async function importStep(
       }> = [],
       ids: string[] = []
     for (const p of page.page.slice(0, 20)) {
-      if (p.state !== "complete" || !p.data) continue
+      if (!p.data || p.aliasOf) continue
       const data = effective(
         { ...decode<CatalogProduct>(p.data), collections: p.collections },
         s,
         decode(p.override ?? "{}"),
       )
-      if (data.excluded) continue
+      if (data.excluded || !isImportableProduct(data)) continue
       const old = p.remote ? decode<RemoteResult>(p.remote) : null
       if (
         old &&
@@ -610,7 +612,9 @@ export async function importStep(
     for (const p of page.page) {
       const r = p.remote ? decode<RemoteResult>(p.remote) : null
       if (
-        p.state !== "complete" ||
+        p.aliasOf ||
+        !p.data ||
+        !isImportableProduct(decode<CatalogProduct>(p.data)) ||
         decode<{ excluded?: boolean }>(p.override ?? "{}").excluded
       )
         w.summary.skipped++
