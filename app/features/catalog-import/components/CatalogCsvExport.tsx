@@ -12,11 +12,12 @@ type Props = {
   generation: number
   total: number
   partial: boolean
+  incompleteCount: number
   disabled: boolean
 }
 type Download = { url: string; name: string }
 
-export function CatalogCsvExport({ id, origin, version, generation, total, partial, disabled }: Props) {
+export function CatalogCsvExport({ id, origin, version, generation, total, partial, incompleteCount, disabled }: Props) {
   const client = useConvex()
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -81,28 +82,31 @@ export function CatalogCsvExport({ id, origin, version, generation, total, parti
         setOpen(value)
         if (!value) reset()
       }}>
-        <DialogContent className="sm:max-w-xl">
+        <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>Exporter le CSV Shopify</DialogTitle>
             <DialogDescription>
-              Modèle Shopify · variantes, images et tags · produits en brouillon
+              Fiches complètes uniquement, hors produits exclus.
             </DialogDescription>
           </DialogHeader>
-          <p className="text-sm">
-            Seules les fiches complètes et non exclues sont exportées. Les champs
-            indisponibles restent vides et le stock n’est pas suivi.
-            Les collections et le menu ne sont pas inclus dans ce format.
-          </p>
+          <ul className="space-y-1 text-sm">
+            <li>Produits en brouillon, stock non suivi.</li>
+            <li>Collections et menu non inclus.</li>
+          </ul>
           {partial && !busy && !downloads.length && (
-            <p className="text-sm">Ce catalogue est incomplet. Le CSV contiendra uniquement les fiches importables disponibles.</p>
+            <p className="text-sm">
+              {incompleteCount > 0
+                ? `${incompleteCount} ${incompleteCount === 1 ? "fiche incomplète ne sera pas exportée" : "fiches incomplètes ne seront pas exportées"}.`
+                : "Données source incomplètes."}
+            </p>
           )}
-          {busy && <p role="status" className="text-sm">{progress.scanned} / {total} fiches examinées… Vous pouvez annuler en fermant cette fenêtre.</p>}
+          {busy && <p role="status" className="text-sm">{progress.scanned} / {total} fiches lues…</p>}
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
           {downloads.length > 0 ? (
             <div className="flex max-h-64 flex-col gap-3 overflow-y-auto">
               <p role="status" className="text-sm">
                 {progress.exported} {progress.exported === 1 ? "produit exporté" : "produits exportés"} · {progress.skipped} {progress.skipped === 1 ? "fiche ignorée" : "fiches ignorées"}.
-                {downloads.length > 1 ? ` ${downloads.length} fichiers de 15 Mo maximum, à importer séparément.` : ""}
+                {downloads.length > 1 ? ` ${downloads.length} fichiers à importer séparément.` : ""}
               </p>
               {downloads.map((file, i) => (
                 <Button key={file.url} variant="outline" asChild>
@@ -114,7 +118,7 @@ export function CatalogCsvExport({ id, origin, version, generation, total, parti
             </div>
           ) : !busy && (
             <Button disabled={disabled} onClick={() => void generate()}>
-              {error ? "Réessayer" : "J’accepte le caractère partiel — Générer le CSV"}
+              {error ? "Réessayer" : "Générer le CSV"}
             </Button>
           )}
         </DialogContent>

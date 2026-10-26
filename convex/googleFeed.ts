@@ -53,7 +53,7 @@ const googleFeedSyncCoordinatesValidator = v.object({
 
 type DbCtx = QueryCtx | MutationCtx
 
-async function requireOwnedActiveShop(ctx: DbCtx) {
+export async function requireOwnedActiveShop(ctx: DbCtx) {
   const userId = await requireUserId(ctx)
   const user = await ctx.db.get(userId)
   if (!user?.activeShopId) {
@@ -66,7 +66,7 @@ async function requireOwnedActiveShop(ctx: DbCtx) {
   return { userId, shop, shopId: shop._id }
 }
 
-async function configForShop(ctx: DbCtx, shopId: Id<"shops">) {
+export async function configForShop(ctx: DbCtx, shopId: Id<"shops">) {
   return await ctx.db
     .query("googleFeedConfigs")
     .withIndex("by_shop_id", (index) => index.eq("shopId", shopId))
@@ -99,7 +99,7 @@ function syncCoordinatesForConfig(config: Doc<"googleFeedConfigs"> | null) {
   }
 }
 
-function assertAttributeReady(
+export function assertAttributeReady(
   config: Doc<"googleFeedConfigs"> | null,
   attribute: GoogleFeedAttribute,
 ) {
@@ -112,7 +112,7 @@ function assertAttributeReady(
   return coordinate
 }
 
-function validateAttributeValue(attribute: GoogleFeedAttribute, value: string) {
+export function validateAttributeValue(attribute: GoogleFeedAttribute, value: string) {
   const normalized = value.trim()
   if (!normalized) throw new ConvexError("La valeur ne peut pas être vide.")
   if (
@@ -869,16 +869,18 @@ export const preview = query({
     conflictCount: v.number(),
     invalidCount: v.number(),
     excludedCount: v.number(),
+    countsAreCapped: v.boolean(),
   }),
   handler: async (ctx, args) => {
     const { shopId } = await requireOwnedActiveShop(ctx)
     const offset = Math.max(0, Math.floor(args.offset ?? 0))
     const limit = Math.max(1, Math.min(Math.floor(args.limit ?? 50), 100))
-    const drafts = await ctx.db
+    const sampled = await ctx.db
       .query("googleFeedDrafts")
       .withIndex("by_shop_id_and_updated_at", (index) => index.eq("shopId", shopId))
       .order("desc")
-      .take(5_000)
+      .take(5_001)
+    const drafts = sampled.slice(0, 5_000)
     const active = drafts.filter((draft) => draft.status !== "confirmed")
     const readyCount = selectPublishableDrafts(
       active.map((draft) => ({
@@ -938,6 +940,7 @@ export const preview = query({
       conflictCount: active.filter((draft) => draft.status === "conflict").length,
       invalidCount: active.filter((draft) => draft.status === "invalid").length,
       excludedCount: active.filter((draft) => !draft.included).length,
+      countsAreCapped: sampled.length > 5_000,
     }
   },
 })
@@ -1383,9 +1386,17 @@ export const saveEvaluationProposals = internalMutation({
       throw new ConvexError("Exécution d’évaluation invalide.")
     }
     let conflicts = 0
+    let saved = 0
     for (const proposal of args.proposals) {
       const rule = await ctx.db.get(proposal.selectedRuleId)
       if (!rule || rule.shopId !== run.shopId) continue
+      // An evaluation may finish after a user has corrected its old proposal.
+      // Recheck inside this transaction, not only when reading evaluationPage.
+      const existing = await ctx.db.query("googleFeedDrafts")
+        .withIndex("by_shop_id_and_owner_id_and_attribute", (index) =>
+          index.eq("shopId", run.shopId).eq("ownerId", proposal.ownerId).eq("attribute", proposal.attribute),
+        ).unique()
+      if (existing?.sourceKind === "manual") continue
       const draftId = await upsertDraft(ctx, {
         shopId: run.shopId,
         userId: args.userId,
@@ -1404,6 +1415,7 @@ export const saveEvaluationProposals = internalMutation({
         status: proposal.status === "conflict" ? "conflict" : "draft",
       })
       if (proposal.status === "conflict") conflicts += 1
+      saved += 1
       await ctx.db.insert("googleFeedRunItems", {
         shopId: run.shopId,
         runId: run._id,
@@ -1424,10 +1436,11 @@ export const saveEvaluationProposals = internalMutation({
     await ctx.db.patch(run._id, {
       totalItems: run.totalItems + args.proposals.length,
       conflictItems: run.conflictItems + conflicts,
-      succeededItems: run.succeededItems + args.proposals.length - conflicts,
+      succeededItems: run.succeededItems + saved - conflicts,
+      skippedItems: run.skippedItems + args.proposals.length - saved,
       updatedAt: Date.now(),
     })
-    return args.proposals.length
+    return saved
   },
 })
 

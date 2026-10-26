@@ -253,7 +253,7 @@ export function parseRuleNumber(value: string): number | null {
   return Number.isFinite(parsed) ? parsed : null
 }
 
-function fieldValues(
+export function fieldValues(
   field: RuleField,
   product: RuleProductContext,
   variant: RuleVariantContext | null,

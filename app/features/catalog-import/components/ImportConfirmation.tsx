@@ -3,7 +3,7 @@ import { useMutation, useQuery } from "convex/react"
 import { api, type Id } from "@/lib/convex"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Field, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field"
+import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field"
 import { decode } from "../../../../convex/catalogue/model"
 import { allImportElements, hasImportElements, type ImportSelection } from "../../../../convex/catalogue/importSelection"
 
@@ -11,15 +11,16 @@ type Props = {
   id: Id<"catalogues">
   version: number
   partial: boolean
+  incompleteCount: number
   close: () => void
 }
-const options: Array<{ key: keyof ImportSelection; title: string }> = [
-  { key: "products", title: "Produits" },
+const options: Array<{ key: keyof ImportSelection; title: string; description?: string }> = [
+  { key: "products", title: "Produits", description: "Nouveaux produits en brouillon." },
   { key: "collections", title: "Collections" },
-  { key: "menu", title: "Menu" },
+  { key: "menu", title: "Menu", description: "Non affecté au thème." },
 ]
 
-export function ImportConfirmation({ id, version, partial, close }: Props) {
+export function ImportConfirmation({ id, version, partial, incompleteCount, close }: Props) {
   const raw = useQuery(api.catalogues.destinationShops)
   const shops: Array<{ id: Id<"shops">; name?: string; domain: string }> = raw ? decode(raw) : []
   const start = useMutation(api.catalogues.startImport)
@@ -43,7 +44,7 @@ export function ImportConfirmation({ id, version, partial, close }: Props) {
     }
   }
   return (
-    <FieldGroup>
+    <FieldGroup className="gap-4">
       <Field>
         <FieldLabel htmlFor="import-destination">Boutique</FieldLabel>
         <select
@@ -59,15 +60,19 @@ export function ImportConfirmation({ id, version, partial, close }: Props) {
       </Field>
       <FieldSet disabled={busy}>
         <FieldLegend variant="label">À importer</FieldLegend>
-        <FieldGroup>
+        <FieldGroup className="gap-3">
           {options.map((option) => (
             <Field key={option.key} orientation="horizontal">
               <Checkbox
                 id={`import-${option.key}`}
                 checked={selection[option.key]}
+                aria-describedby={selection[option.key] && option.description ? `import-${option.key}-help` : undefined}
                 onCheckedChange={(checked) => setSelection((current) => ({ ...current, [option.key]: checked === true }))}
               />
-              <FieldLabel htmlFor={`import-${option.key}`}>{option.title}</FieldLabel>
+              <FieldContent>
+                <FieldLabel htmlFor={`import-${option.key}`}>{option.title}</FieldLabel>
+                {selection[option.key] && option.description && <FieldDescription id={`import-${option.key}-help`}>{option.description}</FieldDescription>}
+              </FieldContent>
             </Field>
           ))}
         </FieldGroup>
@@ -75,7 +80,11 @@ export function ImportConfirmation({ id, version, partial, close }: Props) {
       {partial && (
         <Field orientation="horizontal">
           <Checkbox id="import-partial" checked={accepted} disabled={busy} onCheckedChange={(checked) => setAccepted(checked === true)} />
-          <FieldLabel htmlFor="import-partial">Accepter l’import partiel</FieldLabel>
+          <FieldLabel htmlFor="import-partial">
+            {incompleteCount > 0
+              ? `Importer malgré ${incompleteCount} ${incompleteCount === 1 ? "fiche incomplète" : "fiches incomplètes"}`
+              : "Importer malgré les données incomplètes"}
+          </FieldLabel>
         </Field>
       )}
       {!hasSelection && <p role="status" className="text-sm">Choisissez au moins un élément.</p>}

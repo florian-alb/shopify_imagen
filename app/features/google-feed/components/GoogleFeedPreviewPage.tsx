@@ -17,16 +17,22 @@ import { ageGroupOptions, attributeLabels, genderOptions, statusLabels } from ".
 import type { GoogleFeedPreviewSearch } from "../lib/search"
 import { GoogleCategoryCombobox } from "./GoogleCategoryCombobox"
 import { GoogleValueSelect } from "./GoogleValueSelect"
+import { GoogleFeedConflictsPage } from "./GoogleFeedConflictsPage"
 
 const previewFilters = [
   { value: "all", label: "Toutes" },
   { value: "ready", label: "Prêtes" },
-  { value: "conflict", label: "Conflits" },
+  { value: "conflict", label: "Conflits par produit" },
   { value: "invalid", label: "Invalides" },
   { value: "excluded", label: "Exclues" },
 ] as const
 
 export function GoogleFeedPreviewPage({ search }: { search: GoogleFeedPreviewSearch }) {
+  if (search.status === "conflict") return <GoogleFeedConflictsPage />
+  return <GoogleFeedDraftPreview search={search} />
+}
+
+function GoogleFeedDraftPreview({ search }: { search: GoogleFeedPreviewSearch }) {
   const navigate = useNavigate()
   const preview = useQuery(api.googleFeed.preview, {
     offset: (search.page - 1) * 50,
@@ -70,7 +76,7 @@ export function GoogleFeedPreviewPage({ search }: { search: GoogleFeedPreviewSea
             <Button variant="outline" asChild><Link to="/google-feed" search={{ view: "all", page: 1, size: 20 }}><ArrowLeft data-icon="inline-start" />Retour au catalogue</Link></Button>
             <Button disabled={publishing || !preview?.readyCount} onClick={() => void publishReady()}>
               <Send data-icon="inline-start" />
-              {publishing ? "Publication…" : `Publier ${preview?.readyCount ?? 0} modifications`}
+              {publishing ? "Publication…" : preview?.countsAreCapped ? "Publier les modifications prêtes" : `Publier ${preview?.readyCount ?? 0} modifications`}
             </Button>
           </>
         }
@@ -80,8 +86,9 @@ export function GoogleFeedPreviewPage({ search }: { search: GoogleFeedPreviewSea
 
       {preview ? (
         <p className="mb-4 border-y py-3 text-sm" aria-live="polite">
-          <strong>{preview.readyCount} modifications prêtes</strong>
-          <span className="text-muted-foreground"> · {preview.conflictCount} conflits · {preview.invalidCount} invalides · {preview.excludedCount} exclues</span>
+          <strong>{preview.countsAreCapped ? "Au moins " : ""}{preview.readyCount} modifications prêtes</strong>
+          <span className="text-muted-foreground"> · {preview.countsAreCapped ? "au moins " : ""}{preview.conflictCount} conflits · {preview.invalidCount} invalides · {preview.excludedCount} exclues</span>
+          {preview.countsAreCapped ? <span className="mt-2 block text-xs text-muted-foreground">Cet aperçu est limité aux 5 000 derniers brouillons. Tous les conflits restent accessibles dans la vue par produit. Les compteurs affichés sont partiels.</span> : null}
         </p>
       ) : null}
       <SegmentedControl
@@ -133,8 +140,8 @@ export function GoogleFeedPreviewPage({ search }: { search: GoogleFeedPreviewSea
       )}
       {preview?.readyCount ? (
         <div className="sticky bottom-3 z-20 mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-background p-3 shadow-sm">
-          <div className="flex items-center gap-2 text-sm"><CheckCircle2 className="size-4 text-emerald-600" /><strong>{preview.readyCount} modifications publiables</strong></div>
-          <Button disabled={publishing} onClick={() => void publishReady()}><Send data-icon="inline-start" />{publishing ? "Publication…" : `Publier ${preview.readyCount} modifications`}</Button>
+          <div className="flex items-center gap-2 text-sm"><CheckCircle2 className="size-4 text-success" /><strong>{preview.countsAreCapped ? "Au moins " : ""}{preview.readyCount} modifications publiables</strong></div>
+          <Button disabled={publishing} onClick={() => void publishReady()}><Send data-icon="inline-start" />{publishing ? "Publication…" : preview.countsAreCapped ? "Publier les modifications prêtes" : `Publier ${preview.readyCount} modifications`}</Button>
         </div>
       ) : null}
     </main>

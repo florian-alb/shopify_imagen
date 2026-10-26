@@ -478,6 +478,9 @@ export default defineSchema({
     ])
     .index("by_shop_id_and_updated_at", ["shopId", "updatedAt"])
     .index("by_shop_id_and_status", ["shopId", "status"])
+    .index("by_shop_id_and_status_and_included_and_product_id", [
+      "shopId", "status", "included", "productId",
+    ])
     .index("by_product_id", ["productId"])
     .index("by_variant_id", ["variantId"]),
   googleFeedRuns: defineTable({

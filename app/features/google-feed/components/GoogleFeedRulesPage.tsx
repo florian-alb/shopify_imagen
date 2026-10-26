@@ -48,17 +48,18 @@ function toDraft(rule: RuleRow): RuleDraft {
   }
 }
 
-export function GoogleFeedRulesPage() {
+export function GoogleFeedRulesPage({ initialRuleId }: { initialRuleId?: string }) {
   const rules = useQuery(api.googleFeed.listRules)
   const saveRule = useMutation(api.googleFeed.saveRule)
   const duplicateRule = useMutation(api.googleFeed.duplicateRule)
   const deleteRule = useMutation(api.googleFeed.deleteRule)
   const evaluateRules = useAction(api.googleFeedActions.evaluateRules)
-  const [selectedId, setSelectedId] = useState<Id<"googleFeedRules"> | null>(null)
-  const [draft, setDraft] = useState<RuleDraft>(emptyRuleDraft)
+  const [selectedId, setSelectedId] = useState<Id<"googleFeedRules"> | null>(initialRuleId ? initialRuleId as Id<"googleFeedRules"> : null)
+  const [draftOverride, setDraft] = useState<RuleDraft | null>(null)
   const [saving, setSaving] = useState(false)
   const [evaluating, setEvaluating] = useState(false)
   const selected = rules?.find((rule) => rule.id === selectedId) ?? null
+  const draft = draftOverride ?? (selected ? toDraft(selected) : emptyRuleDraft())
 
   async function save() {
     setSaving(true)
