@@ -1,4 +1,4 @@
-import { getConvexSize } from "convex/values"
+import { ConvexError, getConvexSize } from "convex/values"
 import type { CatalogProduct, MenuNode, ProductOverride } from "./source"
 import { collectionTagKey, collectionTagsError, parseCollectionTags } from "./tags"
 import type { ImportSelection } from "./importSelection"
@@ -104,10 +104,10 @@ export function validateTags(collections: Collection[]) {
   for (const c of collections) {
     if (c.ignored) continue
     const error = collectionTagsError(c.tag)
-    if (error) throw new Error(`Tags invalides pour ${c.title} : ${error}`)
+    if (error) throw new ConvexError(`Tags invalides pour ${c.title} : ${error}`)
     const key = collectionTagKey(c.tag)
     if (seen.has(key))
-      throw new Error(`Combinaison de tags utilisée par plusieurs collections : ${c.tag}`)
+      throw new ConvexError(`Combinaison de tags utilisée par plusieurs collections : ${c.tag}`)
     seen.add(key)
   }
 }

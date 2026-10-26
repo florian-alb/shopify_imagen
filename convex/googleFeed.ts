@@ -132,7 +132,7 @@ export function validateAttributeValue(attribute: GoogleFeedAttribute, value: st
   return normalized
 }
 
-const configValidator = v.union(
+export const configValidator = v.union(
   v.object({
     status: v.union(
       v.literal("ready"),
@@ -787,7 +787,7 @@ export const setDraftInclusion = mutation({
 })
 
 export const updateDraftValue = mutation({
-  args: { draftId: v.id("googleFeedDrafts"), value: v.string() },
+  args: { draftId: v.id("googleFeedDrafts"), value: v.string(), expectedUpdatedAt: v.optional(v.number()) },
   returns: v.null(),
   handler: async (ctx, args) => {
     const { userId, shopId } = await requireOwnedActiveShop(ctx)
@@ -795,6 +795,9 @@ export const updateDraftValue = mutation({
     if (!draft || draft.shopId !== shopId) {
       throw new ConvexError("Modification introuvable pour la boutique active.")
     }
+    if (draft.status === "publishing") throw new ConvexError("Cette valeur est en cours de publication.")
+    if (args.expectedUpdatedAt !== undefined && args.expectedUpdatedAt !== draft.updatedAt)
+      throw new ConvexError("Cette valeur a changé. Rechargez le produit.")
     const config = await configForShop(ctx, shopId)
     assertAttributeReady(config, draft.attribute)
     const value = validateAttributeValue(draft.attribute, args.value)
@@ -990,6 +993,7 @@ export const history = query({
 
 const runItemValidator = v.object({
   id: v.id("googleFeedRunItems"),
+  productId: v.id("products"),
   ownerId: v.string(),
   attribute: googleFeedAttributeValidator,
   oldValue: v.union(v.string(), v.null()),
@@ -1036,6 +1040,7 @@ export const runDetails = query({
       },
       items: items.map((item) => ({
         id: item._id,
+        productId: item.productId,
         ownerId: item.ownerId,
         attribute: item.attribute,
         oldValue: item.oldValue,
@@ -1444,11 +1449,29 @@ export const saveEvaluationProposals = internalMutation({
   },
 })
 
+export const productRetryRows = internalQuery({
+  args: { userId: v.id("users"), productId: v.id("products") },
+  returns: v.array(v.object({ id: v.id("googleFeedDrafts"), updatedAt: v.number() })),
+  handler: async (ctx, args) => {
+    const user = await ctx.db.get(args.userId)
+    const shop = user?.activeShopId ? await ctx.db.get(user.activeShopId) : null
+    if (!shop || shop.createdByUserId !== args.userId) throw new ConvexError("Boutique inaccessible.")
+    const product = await ctx.db.get(args.productId)
+    if (!product || product.shopId !== shop._id) throw new ConvexError("Produit introuvable.")
+    const rows = await ctx.db.query("googleFeedDrafts")
+      .withIndex("by_product_id", (index) => index.eq("productId", args.productId)).take(1_001)
+    if (rows.length > 1_000) throw new ConvexError("Ce produit dépasse 1 000 modifications.")
+    return rows.filter((row) => row.shopId === shop._id && row.included && row.status === "failed")
+      .map((row) => ({ id: row._id, updatedAt: row.updatedAt }))
+  },
+})
+
 export const claimPublishBatch = internalMutation({
   args: {
     userId: v.id("users"),
     runId: v.id("googleFeedRuns"),
     retryRunId: v.optional(v.union(v.id("googleFeedRuns"), v.null())),
+    drafts: v.optional(v.array(v.object({ id: v.id("googleFeedDrafts"), updatedAt: v.number() }))),
   },
   returns: v.array(
     v.object({
@@ -1472,16 +1495,24 @@ export const claimPublishBatch = internalMutation({
     }
     const config = await configForShop(ctx, run.shopId)
     if (!config) throw new ConvexError("Lancez le diagnostic Shopify avant publication.")
-    const statuses = args.retryRunId ? (["failed"] as const) : (["draft", "failed"] as const)
     const candidates: Doc<"googleFeedDrafts">[] = []
-    for (const status of statuses) {
-      const rows = await ctx.db
-        .query("googleFeedDrafts")
-        .withIndex("by_shop_id_and_status", (index) =>
-          index.eq("shopId", run.shopId).eq("status", status),
-        )
-        .take(GOOGLE_FEED_METAFIELDS_SET_BATCH_SIZE * 4)
-      candidates.push(...rows)
+    if (args.drafts) {
+      if (args.drafts.length > GOOGLE_FEED_METAFIELDS_SET_BATCH_SIZE) throw new ConvexError("Lot de relance trop grand.")
+      for (const expected of args.drafts) {
+        const row = await ctx.db.get(expected.id)
+        if (!row || row.shopId !== run.shopId) throw new ConvexError("Modification introuvable.")
+        if (row.status === "failed" && row.updatedAt === expected.updatedAt) candidates.push(row)
+      }
+    } else {
+      const source = args.retryRunId
+        ? ctx.db.query("googleFeedDrafts").withIndex("by_shop_id_and_status_and_last_run_id_and_included", (index) =>
+            index.eq("shopId", run.shopId).eq("status", "failed").eq("lastRunId", args.retryRunId).eq("included", true))
+        : ctx.db.query("googleFeedDrafts").withIndex("by_shop_id_and_status_and_included_and_product_id", (index) =>
+            index.eq("shopId", run.shopId).eq("status", "draft").eq("included", true))
+      for await (const row of source) {
+        if (row.lastRunId !== run._id && row.currentValue !== row.proposedValue) candidates.push(row)
+        if (candidates.length === GOOGLE_FEED_METAFIELDS_SET_BATCH_SIZE) break
+      }
     }
     const publishable = selectPublishableDrafts(
       candidates.map((draft) => ({
@@ -1489,7 +1520,7 @@ export const claimPublishBatch = internalMutation({
         id: String(draft._id),
       })),
     )
-      .filter((draft) => !args.retryRunId || draft.lastRunId === args.retryRunId)
+      .filter((draft) => draft.lastRunId !== run._id && (!args.retryRunId || draft.lastRunId === args.retryRunId))
       .slice(0, GOOGLE_FEED_METAFIELDS_SET_BATCH_SIZE)
     const claimed = []
     for (const draft of publishable) {

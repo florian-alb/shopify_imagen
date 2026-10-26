@@ -18,10 +18,12 @@ import { extractProduct, cleanHtml } from "./extract";
 import { readFileSync } from "node:fs";
 import { targetMenu } from "./shopify";
 import { validCollectionTag, type TagLanguage } from "./tags";
+import { captureTagEditBases, tagValuesForSave } from "../../app/features/catalog-import/lib/tag-draft";
 
 const source = vi.hoisted(() => ({
   pages: new Map<string, string>(),
   failures: new Set<string>(),
+  httpFailures: new Map<string, { status: number; retryAfterMs: number }>(),
   calls: [] as string[],
   exportParts: new Map<number, string>(),
   exportText: "",
@@ -30,19 +32,29 @@ const source = vi.hoisted(() => ({
   finishLost: false,
   tagLanguages: [] as string[],
 }));
-vi.mock("./network", () => ({
-  withSourceBudget: (run: () => Promise<unknown>) => run(),
-  fetchPublic: async (url: string) => {
-    source.calls.push(url);
-    if (source.failures.has(url)) throw new Error("HTML timeout");
-    if (!source.pages.has(url)) throw new Error(`Unexpected URL ${url}`);
-    return source.pages.get(url)!;
-  },
-  CollectionHttpError: class extends Error {
-    status = 500;
-    retryAfterMs = 0;
-  },
-}));
+vi.mock("./network", () => {
+  class CollectionHttpError extends Error {
+    constructor(message: string, readonly status = 500, readonly retryAfterMs = 0) {
+      super(message);
+    }
+  }
+  return {
+    withSourceBudget: (run: () => Promise<unknown>) => run(),
+    fetchPublic: async (url: string) => {
+      source.calls.push(url);
+      const failure = source.httpFailures.get(url);
+      if (failure) throw new CollectionHttpError(
+        `Le site répond HTTP ${failure.status} : ${url}`,
+        failure.status,
+        failure.retryAfterMs,
+      );
+      if (source.failures.has(url)) throw new Error("HTML timeout");
+      if (!source.pages.has(url)) throw new Error(`Unexpected URL ${url}`);
+      return source.pages.get(url)!;
+    },
+    CollectionHttpError,
+  };
+});
 vi.mock("./ai", () => ({
   proposeTags: async (cols: Array<{ key: string }>, language: string) => {
     source.tagLanguages.push(language);
@@ -115,6 +127,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   source.pages.clear();
   source.failures.clear();
+  source.httpFailures.clear();
   source.calls.length = 0;
   source.exportParts.clear();
   source.exportText = "";
@@ -256,6 +269,77 @@ test("caught worker errors log retries and final blockage with collection contex
   expect(source.calls).toEqual([failedUrl]);
   expect(decode<Structure>(resumed.structure).collections.every((col) => col.membership === "complete"))
     .toBe(true);
+});
+
+test("a waiting 503 can be relaunched without losing progress or bypassing Retry-After", async () => {
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  const f = await setup("TOP_N", 2);
+  // Save the menu, root sitemap and product sitemap before the source fails.
+  for (let i = 0; i < 3; i++)
+    await f.t.action(internal.catalogueActions.work, { id: f.id, generation: 1 });
+  const url = `${origin}/sitemap_collections_1.xml`;
+  source.httpFailures.set(url, { status: 503, retryAfterMs: 150_000 });
+  await f.t.action(internal.catalogueActions.work, { id: f.id, generation: 1 });
+  const failed = (await f.read())!;
+  const savedWork = decode<Work>(failed.work!);
+  expect(failed).toMatchObject({ status: "working", phase: "sitemap", sourceCount: 4, total: 0 });
+  expect(savedWork).toMatchObject({ attempts: 1, retryAt: Date.now() + 150_000, sourceDelay: 900 });
+  const other = f.t.withIdentity({ subject: await f.t.run((ctx) => ctx.db.insert("users", { approvalStatus: "approved" })) });
+  await expect(f.t.mutation(api.catalogues.retry, { id: f.id })).rejects.toThrow();
+  await expect(other.mutation(api.catalogues.retry, { id: f.id })).rejects.toThrow("inaccessible");
+  source.calls.length = 0;
+  await f.user.mutation(api.catalogues.retry, { id: f.id });
+  const resumed = (await f.read())!;
+  expect(resumed.generation).toBe(failed.generation + 1);
+  expect(resumed.error).toBeUndefined();
+  expect(resumed.sourceCount).toBe(4);
+  expect(decode<Work>(resumed.work!)).toEqual({ ...savedWork, attempts: 0 });
+  // Both old scheduled work and an early new worker must make no source call.
+  await f.t.action(internal.catalogueActions.work, { id: f.id, generation: failed.generation });
+  await f.t.action(internal.catalogueActions.work, { id: f.id, generation: resumed.generation });
+  expect(source.calls).toEqual([]);
+  source.httpFailures.clear();
+  vi.setSystemTime(savedWork.retryAt! + 1);
+  expect((await f.drain()).status).toBe("tags");
+  expect(source.calls[0]).toBe(url);
+  expect(source.calls).not.toContain(origin);
+  expect(source.calls).not.toContain(`${origin}/sitemap_products_1.xml`);
+});
+
+test("retry refuses healthy work and a live worker, then fences an expired worker", async () => {
+  const f = await setup();
+  await expect(f.user.mutation(api.catalogues.retry, { id: f.id })).rejects.toThrow("déjà en cours");
+  await f.t.run((ctx) => ctx.db.patch(f.id, {
+    error: "Le site répond HTTP 503.",
+    work: encode({ kind: "discover", phase: "menu", attempts: 1, retryAt: Date.now() - 1 }),
+  }));
+  const fence = { id: f.id, generation: 1, token: "live-worker" };
+  await f.t.mutation(internal.catalogues.claim, fence);
+  await expect(f.user.mutation(api.catalogues.retry, { id: f.id })).rejects.toThrow("déjà en cours");
+  expect((await f.read())!.generation).toBe(1);
+  vi.advanceTimersByTime(180_001);
+  await f.user.mutation(api.catalogues.retry, { id: f.id });
+  await expect(f.t.mutation(internal.catalogues.checkpoint, {
+    ...fence, work: encode({ kind: "discover", phase: "sitemap" }),
+  })).rejects.toThrow("périmée");
+});
+
+test.each([403, 503])("HTTP %i stops after bounded attempts and a blocked retry keeps its deadline", async (status) => {
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  const f = await setup();
+  source.httpFailures.set(origin, { status, retryAfterMs: 150_000 });
+  const blocked = await f.drain();
+  const savedWork = decode<Work>(blocked.work!);
+  expect(blocked.status).toBe("blocked");
+  expect(savedWork.attempts).toBe(status === 403 ? 1 : 3);
+  expect(source.calls).toHaveLength(status === 403 ? 1 : 3);
+  await f.user.mutation(api.catalogues.retry, { id: f.id });
+  const resumed = (await f.read())!;
+  expect(decode<Work>(resumed.work!)).toMatchObject({ retryAt: savedWork.retryAt, attempts: 0 });
+  source.calls.length = 0;
+  await f.t.action(internal.catalogueActions.work, { id: f.id, generation: resumed.generation });
+  expect(source.calls).toEqual([]);
 });
 test("CSV enforces authentication, ownership, partial acknowledgement and a stable catalogue", async () => {
   const f = await setup();
@@ -516,6 +600,40 @@ test("tag language is selectable before discovery, editable during work, and use
   expect(source.tagLanguages.at(-1)).toBe("fr");
   const legacy = await setup();
   expect((await legacy.read())?.tagLanguage).toBe("en");
+});
+
+test("tag revision conflicts carry a client-readable error and preserve the catalogue", async () => {
+  const f = await setup();
+  const c = await f.drain();
+  await expect(f.user.mutation(api.catalogues.saveTags, {
+    id: f.id, version: c.version, tagVersion: (c.tagVersion ?? 0) - 1,
+    values: [{ key: "cats", tag: "chats" }], validate: false, collect: false,
+  })).rejects.toMatchObject({ data: "Les tags ont changé. Réessayez l’enregistrement." });
+  expect(await f.read()).toEqual(c);
+});
+
+test("a draft started before automatic tag proposals saves against the current tag revision", async () => {
+  const f = await setup();
+  const initial = (await f.read())!;
+  await f.t.action(internal.catalogueActions.work, { id: f.id, generation: initial.generation });
+  await f.t.action(internal.catalogueActions.work, { id: f.id, generation: initial.generation });
+  // Discover collection rows before the AI step changes tagVersion from 0 to 1.
+  for (let i = 0; i < 2; i++)
+    await f.t.action(internal.catalogueActions.work, { id: f.id, generation: initial.generation });
+  const before = (await f.read())!;
+  const edits = { cats: { tag: "chats" } };
+  const bases = captureTagEditBases(decode<Structure>(before.structure).collections, {}, edits);
+  const proposed = await f.drain();
+  expect(proposed.tagVersion).toBe((before.tagVersion ?? 0) + 1);
+  await f.user.mutation(api.catalogues.saveTags, {
+    id: f.id, version: proposed.version, tagVersion: proposed.tagVersion,
+    values: tagValuesForSave(decode<Structure>(proposed.structure).collections, edits, bases),
+    validate: true, collect: false,
+  });
+  const saved = (await f.read())!;
+  expect(decode<Structure>(saved.structure).collections.find((col) => col.key === "cats"))
+    .toMatchObject({ tag: "chats", edited: true, validated: true });
+  expect(decode<Structure>(saved.structure).collections.find((col) => col.key === "dogs")?.tag).toBe("dogs");
 });
 
 test("collection tag changes reach lists, details and exports while drafts and manual product tags remain intact", async () => {

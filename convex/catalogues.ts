@@ -1,4 +1,4 @@
-import { v } from "convex/values"
+import { ConvexError, v } from "convex/values"
 import {
   paginationOptsValidator,
   paginationResultValidator,
@@ -50,7 +50,7 @@ function unlocked(c: Doc<"catalogues">) {
 }
 function tagsEditable(c: Doc<"catalogues">) {
   if (c.work && ["import", "export"].includes(decode<Work>(c.work).kind))
-    throw new Error("Les tags sont figés pendant l’export ou l’import Shopify.")
+    throw new ConvexError("Les tags sont figés pendant l’export ou l’import Shopify.")
 }
 function partial(c: Doc<"catalogues">, accepted: boolean) {
   const s = decode<Structure>(c.structure)
@@ -325,7 +325,7 @@ export const setTagLanguage = mutation({
     const c = await owned(ctx, a.id)
     tagsEditable(c)
     if (a.tagVersion !== (c.tagVersion ?? 0))
-      throw new Error("Les tags ont changé. Relisez-les avant d’enregistrer.")
+      throw new ConvexError("Les tags ont changé. Relisez-les avant d’enregistrer.")
     if (a.language !== (c.tagLanguage ?? "en"))
       await ctx.db.patch(c._id, {
         tagLanguage: a.language,
@@ -349,13 +349,13 @@ export const saveTags = mutation({
     const c = await owned(ctx, a.id)
     tagsEditable(c)
     if (a.tagVersion !== undefined ? a.tagVersion !== (c.tagVersion ?? 0) : a.version !== c.version)
-      throw new Error("Le catalogue a changé. Rechargez les tags.")
+      throw new ConvexError("Les tags ont changé. Réessayez l’enregistrement.")
     if (a.collect && c.work && c.status === "working")
-      throw new Error("La découverte ou la collecte est déjà en cours. Enregistrez les tags sans la relancer.")
+      throw new ConvexError("La découverte ou la collecte est déjà en cours. Enregistrez les tags sans la relancer.")
     const s = decode<Structure>(c.structure)
     for (const value of a.values) {
       const col = s.collections.find((x) => x.key === value.key)
-      if (!col) throw new Error("Collection inconnue.")
+      if (!col) throw new ConvexError("Collection inconnue.")
       if (value.ignored !== undefined && value.ignored !== Boolean(col.ignored)) {
         col.ignored = value.ignored
         col.edited = true
@@ -377,7 +377,7 @@ export const saveTags = mutation({
       }
     }
     if (a.collect && s.collections.some((x) => !x.ignored && !x.validated))
-      throw new Error("Validez tous les tags avant la collecte.")
+      throw new ConvexError("Validez tous les tags avant la collecte.")
     guardSize({ ...c, structure: encode(s) })
     await ctx.db.patch(c._id, {
       structure: encode(s),
@@ -399,15 +399,20 @@ export const retry = mutation({
   returns: v.null(),
   handler: async (ctx, { id }) => {
     const c = await owned(ctx, id)
-    if (c.status === "working")
-      throw new Error("Une opération est déjà en cours.")
     const work =
       c.work || c.resumeWork
         ? decode<Work>((c.work ?? c.resumeWork)!)
         : { kind: "collect" as const, phase: "retry" }
+    // Only replace a worker between failed attempts. A live lease may still
+    // be fetching or reconciling a Shopify submission.
+    if (c.status === "working" && (
+      !c.work || !c.error || !work.retryAt || (c.leaseUntil ?? 0) > Date.now()
+    ))
+      throw new Error("Une opération est déjà en cours.")
     await ctx.db.patch(c._id, { resumeWork: undefined })
     work.attempts = 0
-    work.retryAt = undefined
+    // Keep the saved deadline, including Retry-After from the source. claim
+    // enforces it for the new generation as well as automatic retries.
     await launch(ctx, c, work)
     return null
   },

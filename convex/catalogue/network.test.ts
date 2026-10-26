@@ -108,6 +108,7 @@ test.each([403, 429, 503])(
     const rejected = expect(pending).rejects.toMatchObject({
       status,
       retryAfterMs: 12000,
+      message: `Le site répond HTTP ${status} : https://source.example/products/rabbit`,
     })
     await vi.runAllTimersAsync()
     await rejected

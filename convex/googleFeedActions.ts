@@ -263,6 +263,7 @@ export const evaluateRules = action({
 export const publish = action({
   args: {
     retryRunId: v.optional(v.id("googleFeedRuns")),
+    retryProductId: v.optional(v.id("products")),
   },
   returns: v.object({
     runId: v.id("googleFeedRuns"),
@@ -276,24 +277,36 @@ export const publish = action({
   }),
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx)
+    if (args.retryRunId && args.retryProductId) throw new ConvexError("Choisissez une seule portée de relance.")
+    const retryRows: Array<{ id: Id<"googleFeedDrafts">; updatedAt: number }> | undefined = args.retryProductId
+      ? await ctx.runQuery(internal.googleFeed.productRetryRows, { userId, productId: args.retryProductId })
+      : undefined
     const context = (await ctx.runQuery(internal.googleFeed.getActionContext, {
       userId,
     })) as ActionContext
     const runId = (await ctx.runMutation(internal.googleFeed.createRun, {
       userId,
       kind: "publication",
-      source: args.retryRunId ? "retry" : "manual",
+      source: args.retryRunId || args.retryProductId ? "retry" : "manual",
     })) as Id<"googleFeedRuns">
     const transport = transportFor(context)
     let published = 0
     let failed = 0
+    let retryOffset = 0
     while (true) {
+      const drafts = retryRows?.slice(retryOffset, retryOffset + 25)
+      if (drafts && !drafts.length) break
+      retryOffset += 25
       const claimed = await ctx.runMutation(internal.googleFeed.claimPublishBatch, {
         userId,
         runId,
         retryRunId: args.retryRunId ?? null,
+        ...(drafts ? { drafts } : {}),
       })
-      if (claimed.length === 0) break
+      if (claimed.length === 0) {
+        if (retryRows) continue
+        break
+      }
       const results = await publishGoogleFeedBatch(
         claimed.map((draft) => ({
           ...draft,

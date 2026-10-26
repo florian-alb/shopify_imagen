@@ -1,11 +1,11 @@
-import { Link } from "@tanstack/react-router"
+import { Link, useNavigate } from "@tanstack/react-router"
 import { useAction, useMutation, useQuery } from "convex/react"
 import type { FunctionReturnType } from "convex/server"
 import { Copy, Eye, Plus, Play, Trash2 } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
 
-import { EmptyState, StateBadge } from "@/components/page"
+import { EmptyState } from "@/components/page"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -20,9 +20,9 @@ import {
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { api, type Id } from "@/lib/convex"
-import { cn } from "@/lib/utils"
 
-import { attributeLabels } from "../constants"
+import { readFeedReturnTo } from "../lib/workspace-search"
+import { GoogleFeedRuleList } from "./GoogleFeedRuleList"
 import { GoogleFeedPageFrame } from "./GoogleFeedPageFrame"
 import { emptyRuleDraft, RuleBuilder, type RuleDraft } from "./RuleBuilder"
 
@@ -48,24 +48,42 @@ function toDraft(rule: RuleRow): RuleDraft {
   }
 }
 
-export function GoogleFeedRulesPage({ initialRuleId }: { initialRuleId?: string }) {
+export function GoogleFeedRulesPage({
+  initialRuleId,
+  returnTo,
+}: {
+  initialRuleId?: string
+  returnTo?: string
+}) {
+  const navigate = useNavigate()
+  const backSearch = readFeedReturnTo(returnTo)
   const rules = useQuery(api.googleFeed.listRules)
   const saveRule = useMutation(api.googleFeed.saveRule)
   const duplicateRule = useMutation(api.googleFeed.duplicateRule)
   const deleteRule = useMutation(api.googleFeed.deleteRule)
   const evaluateRules = useAction(api.googleFeedActions.evaluateRules)
-  const [selectedId, setSelectedId] = useState<Id<"googleFeedRules"> | null>(initialRuleId ? initialRuleId as Id<"googleFeedRules"> : null)
+  const [selectedId, setSelectedId] = useState<Id<"googleFeedRules"> | null>(
+    initialRuleId ? (initialRuleId as Id<"googleFeedRules">) : null,
+  )
   const [draftOverride, setDraft] = useState<RuleDraft | null>(null)
   const [saving, setSaving] = useState(false)
   const [evaluating, setEvaluating] = useState(false)
-  const selected = rules?.find((rule) => rule.id === selectedId) ?? null
+  const selected =
+    rules?.find((rule) => rule.id === selectedId) ??
+    (selectedId === null && draftOverride === null ? rules?.[0] : null) ??
+    null
   const draft = draftOverride ?? (selected ? toDraft(selected) : emptyRuleDraft())
+
+  const dirty =
+    draftOverride !== null &&
+    JSON.stringify(draftOverride) !==
+      JSON.stringify(selected ? toDraft(selected) : emptyRuleDraft())
 
   async function save() {
     setSaving(true)
     try {
       const ruleId = await saveRule({
-        ruleId: selectedId ?? undefined,
+        ruleId: selected?.id,
         rule: {
           name: draft.name,
           active: draft.active,
@@ -79,7 +97,12 @@ export function GoogleFeedRulesPage({ initialRuleId }: { initialRuleId?: string 
             ...(condition.operator === "between"
               ? { min: Number(condition.min), max: Number(condition.max) }
               : condition.operator === "in"
-                ? { values: condition.value.split(",").map((value) => value.trim()).filter(Boolean) }
+                ? {
+                    values: condition.value
+                      .split(",")
+                      .map((value) => value.trim())
+                      .filter(Boolean),
+                  }
                 : condition.operator === "empty" || condition.operator === "not_empty"
                   ? {}
                   : { value: condition.value }),
@@ -91,7 +114,9 @@ export function GoogleFeedRulesPage({ initialRuleId }: { initialRuleId?: string 
       setSelectedId(ruleId)
       toast.success("Règle enregistrée", { description: "Aucune donnée Shopify n’a été modifiée." })
     } catch (error) {
-      toast.error("Règle invalide", { description: error instanceof Error ? error.message : String(error) })
+      toast.error("Règle invalide", {
+        description: error instanceof Error ? error.message : String(error),
+      })
     } finally {
       setSaving(false)
     }
@@ -101,67 +126,127 @@ export function GoogleFeedRulesPage({ initialRuleId }: { initialRuleId?: string 
     setEvaluating(true)
     try {
       const result = await evaluateRules({})
-      toast.success("Règles appliquées au brouillon", { description: `${result.proposed} propositions à prévisualiser.` })
+      toast.success(`${result.proposed} propositions préparées`)
+      void navigate({ to: "/google-feed", search: backSearch ?? { view: "review" } })
     } catch (error) {
-      toast.error("Évaluation impossible", { description: error instanceof Error ? error.message : String(error) })
+      toast.error("Évaluation impossible", {
+        description: error instanceof Error ? error.message : String(error),
+      })
     } finally {
       setEvaluating(false)
     }
   }
 
   return (
-    <GoogleFeedPageFrame active="rules">
+    <GoogleFeedPageFrame active="rules" backSearch={backSearch}>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b pb-4">
         <div>
-          <p className="font-medium">Règles de la boutique active</p>
-          <p className="mt-1 text-sm text-muted-foreground">Priorités stables, conditions déterministes et aperçu avant publication.</p>
+          <p className="font-medium">{rules?.length ?? "…"} règles</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="outline" onClick={() => { setSelectedId(null); setDraft(emptyRuleDraft()) }}>
-            <Plus data-icon="inline-start" />Nouvelle règle
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              setSelectedId(null)
+              setDraft(emptyRuleDraft())
+            }}
+          >
+            <Plus data-icon="inline-start" />
+            Nouvelle règle
           </Button>
-          <Button type="button" disabled={evaluating || !rules?.some((rule) => rule.active)} onClick={() => void apply()}>
-            <Play data-icon="inline-start" />{evaluating ? "Évaluation…" : "Appliquer au catalogue"}
+          <Button
+            type="button"
+            title={dirty ? "Enregistrez d’abord la règle" : undefined}
+            disabled={dirty || evaluating || !rules?.some((rule) => rule.active)}
+            onClick={() => void apply()}
+          >
+            <Play data-icon="inline-start" />
+            {evaluating ? "Analyse…" : "Analyser le catalogue"}
           </Button>
-          <Button asChild variant="outline"><Link to="/google-feed/preview" search={{ status: "all", page: 1 }}><Eye data-icon="inline-start" />Voir l’aperçu</Link></Button>
+          <Button asChild variant="outline">
+            <Link to="/google-feed" search={backSearch ?? { view: "review" }}>
+              <Eye data-icon="inline-start" />
+              Produits
+            </Link>
+          </Button>
         </div>
       </div>
       {rules === undefined ? (
-        <EmptyState loading title="Chargement des règles" body="Lecture des règles propres à la boutique active." />
+        <EmptyState
+          loading
+          title="Chargement des règles"
+          body="Lecture des règles propres à la boutique active."
+        />
       ) : (
         <div className="grid gap-4 xl:grid-cols-[19rem_minmax(0,1fr)]">
-          <Card className="h-fit gap-0 overflow-hidden rounded-lg p-0">
-            <div className="border-b px-4 py-3 text-sm font-medium">{rules.length} règle{rules.length === 1 ? "" : "s"}</div>
-            <div className="divide-y">
-              {rules.length === 0 ? <p className="p-4 text-sm text-muted-foreground">Créez votre première règle. Aucune correspondance métier n’est codée en dur.</p> : null}
-              {rules.map((rule) => (
-                <button key={rule.id} type="button" className={cn("block w-full px-4 py-3 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", selectedId === rule.id && "bg-primary/8")} onClick={() => { setSelectedId(rule.id); setDraft(toDraft(rule)) }}>
-                  <div className="flex items-start justify-between gap-3">
-                    <span className="font-medium">{rule.priority}. {rule.name}</span>
-                    <StateBadge state={rule.active ? "success" : "neutral"}>{rule.active ? "Active" : "Inactive"}</StateBadge>
-                  </div>
-                  <p className="mt-2 text-xs text-muted-foreground">{attributeLabels[rule.attribute]} · {rule.conditions.length} condition{rule.conditions.length === 1 ? "" : "s"}</p>
-                </button>
-              ))}
-            </div>
-          </Card>
+          <GoogleFeedRuleList
+            rules={rules}
+            selectedId={selected?.id}
+            onSelect={(rule) => {
+              setSelectedId(rule.id)
+              setDraft(toDraft(rule))
+            }}
+          />
           <Card className="rounded-lg p-4 sm:p-5">
             <div className="mb-5 flex flex-wrap items-center justify-between gap-3 border-b pb-4">
-              <div><h2 className="text-lg font-semibold">{selected ? selected.name : "Nouvelle règle"}</h2><p className="mt-1 text-sm text-muted-foreground">L’éditeur se lit comme une phrase métier.</p></div>
+              <div>
+                <h2 className="text-lg font-semibold">
+                  {selected ? selected.name : "Nouvelle règle"}
+                </h2>
+              </div>
               {selected ? (
                 <div className="flex gap-1">
-                  <Button type="button" variant="ghost" size="sm" onClick={() => void duplicateRule({ ruleId: selected.id }).then((id) => setSelectedId(id))}><Copy data-icon="inline-start" />Dupliquer</Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() =>
+                      void duplicateRule({ ruleId: selected.id }).then((id) => setSelectedId(id))
+                    }
+                  >
+                    <Copy data-icon="inline-start" />
+                    Dupliquer
+                  </Button>
                   <AlertDialog>
-                    <AlertDialogTrigger asChild><Button type="button" variant="ghost" size="sm"><Trash2 data-icon="inline-start" />Supprimer</Button></AlertDialogTrigger>
+                    <AlertDialogTrigger asChild>
+                      <Button type="button" variant="ghost" size="sm">
+                        <Trash2 data-icon="inline-start" />
+                        Supprimer
+                      </Button>
+                    </AlertDialogTrigger>
                     <AlertDialogContent>
-                      <AlertDialogHeader><AlertDialogTitle>Supprimer « {selected.name} » ?</AlertDialogTitle><AlertDialogDescription>Les brouillons déjà créés restent visibles, mais cette règle ne sera plus évaluée.</AlertDialogDescription></AlertDialogHeader>
-                      <AlertDialogFooter><AlertDialogCancel>Annuler</AlertDialogCancel><AlertDialogAction onClick={() => void deleteRule({ ruleId: selected.id }).then(() => { setSelectedId(null); setDraft(emptyRuleDraft()) })}>Supprimer</AlertDialogAction></AlertDialogFooter>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Supprimer « {selected.name} » ?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          Les brouillons déjà créés restent visibles, mais cette règle ne sera plus
+                          évaluée.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Annuler</AlertDialogCancel>
+                        <AlertDialogAction
+                          onClick={() =>
+                            void deleteRule({ ruleId: selected.id }).then(() => {
+                              setSelectedId(null)
+                              setDraft(emptyRuleDraft())
+                            })
+                          }
+                        >
+                          Supprimer
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
                     </AlertDialogContent>
                   </AlertDialog>
                 </div>
               ) : null}
             </div>
-            <RuleBuilder draft={draft} saving={saving} onChange={setDraft} onSave={() => void save()} />
+            <RuleBuilder
+              draft={draft}
+              saving={saving}
+              onChange={setDraft}
+              onSave={() => void save()}
+            />
           </Card>
         </div>
       )}

@@ -1,13 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router"
 
-import { GoogleFeedCatalogPage } from "@/features/google-feed/components/GoogleFeedCatalogPage"
-import { validateGoogleFeedCatalogSearch } from "@/features/google-feed/lib/search"
+import { GoogleFeedWorkspacePage } from "@/features/google-feed/components/GoogleFeedWorkspacePage"
+import { validateFeedSearch } from "@/features/google-feed/lib/workspace-search"
 
 export const Route = createFileRoute("/google-feed/")({
-  validateSearch: validateGoogleFeedCatalogSearch,
+  validateSearch: validateFeedSearch,
   component: GoogleFeedCatalogRoute,
 })
 
 function GoogleFeedCatalogRoute() {
-  return <GoogleFeedCatalogPage search={Route.useSearch()} />
+  return <GoogleFeedWorkspacePage search={Route.useSearch()} />
 }

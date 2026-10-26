@@ -2,6 +2,7 @@
 import { createRoot } from "react-dom/client"
 import { ConvexProvider, type ConvexReactClient } from "convex/react"
 import { getFunctionName } from "convex/server"
+import { ConvexError } from "convex/values"
 import {
   createRootRoute,
   createRoute,
@@ -17,6 +18,7 @@ import {
   includedCollectionKeys,
   type Structure,
   type CatalogProduct,
+  type Work,
 } from "../convex/catalogue/model"
 import type { Id } from "../convex/_generated/dataModel"
 import { normalizeCollectionTags, type TagLanguage } from "../convex/catalogue/tags"
@@ -65,7 +67,9 @@ let catalogue = {
   status: "ready",
   phase: "ready",
   structure,
-  work: null,
+  work: null as Work | null,
+  error: undefined as string | undefined,
+  lease: undefined as string | undefined,
   version: 1,
   generation: 1,
   tagLanguage: "en" as TagLanguage,
@@ -109,6 +113,27 @@ const rows = [
   override: {} as { title?: string; tags?: string[]; excluded?: boolean },
   remote: null,
 }))
+// The source can throttle discovery before any Top N product is selected.
+const sourceScenario = new URL(window.location.href).searchParams.get("scenario")
+const tagRefreshScenario = sourceScenario === "tag-refresh"
+if (tagRefreshScenario) {
+  catalogue.status = catalogue.phase = "tags"
+  structure.collections.forEach((col) => { col.validated = false })
+}
+if (["source-waiting", "source-active", "source-blocked"].includes(sourceScenario ?? "")) {
+  catalogue.origin = "https://le-mocassin-chic.com"
+  catalogue.topN = 130
+  catalogue.status = sourceScenario === "source-blocked" ? "blocked" : "working"
+  catalogue.phase = "sitemap"
+  catalogue.total = catalogue.complete = catalogue.failed = 0
+  catalogue.sourceCount = 499
+  catalogue.error = "Le site répond HTTP 503 : https://le-mocassin-chic.com/sitemap_products_1.xml?from=10393332154714&to=10769889591642"
+  catalogue.work = { kind: "discover", phase: "sitemap", offset: 500, attempts: sourceScenario === "source-blocked" ? 3 : 1, retryAt: Date.now() + 150_000 }
+  if (sourceScenario === "source-active") catalogue.lease = "fixture-worker"
+  structure.collections = []
+  structure.menu = []
+  rows.length = 0
+}
 // A previous import result for checking the collapsible summary without Shopify.
 if (new URL(window.location.href).searchParams.get("scenario") === "import-result") {
   catalogue.lastImport = {
@@ -307,13 +332,17 @@ const client = {
       p.override = a.override as typeof p.override
       if (p.override.title) p.title = p.override.title
     } else if (name === "catalogues:saveTags") {
+      if (a.tagVersion !== undefined && a.tagVersion !== catalogue.tagVersion)
+        throw new ConvexError("Les tags ont changé. Réessayez l’enregistrement.")
       for (const v of a.values as Array<{ key: string; tag: string; ignored?: boolean }>) {
         const col = structure.collections.find((c) => c.key === v.key)!
+        if (v.ignored !== undefined && v.ignored !== Boolean(col.ignored)) col.edited = true
         col.ignored = v.ignored ?? col.ignored
         if (col.tag !== normalizeCollectionTags(v.tag)) {
           if (col.validated) col.appliedTag = col.tag
           col.tag = normalizeCollectionTags(v.tag)
           col.validated = false
+          col.edited = true
         }
         if (a.validate && !col.ignored) { col.validated = true; col.appliedTag = col.tag }
       }
@@ -322,12 +351,20 @@ const client = {
     } else if (name === "catalogues:setTagLanguage") {
       catalogue.tagLanguage = a.language as TagLanguage
     } else if (name === "catalogues:retry") {
-      rows.forEach((p) => {
-        p.state = "complete"
-        p.error = undefined
-      })
-      catalogue.complete = 4
-      catalogue.failed = 0
+      if (catalogue.work) {
+        if (catalogue.lease) throw new Error("Une opération est déjà en cours.")
+        catalogue.generation++
+        catalogue.status = "working"
+        catalogue.error = undefined
+        catalogue.work = { ...catalogue.work, attempts: 0 }
+      } else {
+        rows.forEach((p) => {
+          p.state = "complete"
+          p.error = undefined
+        })
+        catalogue.complete = 4
+        catalogue.failed = 0
+      }
     } else if (name === "catalogues:exportJson")
       catalogue.exportVersion = catalogue.version + 1
     else if (name === "catalogues:create") {
@@ -363,6 +400,17 @@ const client = {
     throw new Error("Simulation : pas de téléchargement R2.")
   },
 } as unknown as ConvexReactClient
+function refreshFixtureTags(manual: boolean) {
+  for (const [i, col] of structure.collections.entries()) {
+    if (manual && i > 0) continue
+    col.tag = manual ? "rapaces" : ["oiseaux", "peluches", "nouveautés"][i]
+    col.edited = manual
+    col.validated = false
+  }
+  catalogue.tagVersion++
+  catalogue.version++
+  listeners.forEach((cb) => cb())
+}
 const root = createRootRoute({
   component: () => (
     <>
@@ -374,6 +422,10 @@ const root = createRootRoute({
         >
           Clair / sombre
         </button>
+        {tagRefreshScenario && <>
+          <button className="ml-3 underline" onClick={() => refreshFixtureTags(false)}>Propositions automatiques</button>
+          <button className="ml-3 underline" onClick={() => refreshFixtureTags(true)}>Modification concurrente</button>
+        </>}
       </div>
       <Outlet />
     </>
