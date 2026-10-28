@@ -21,7 +21,7 @@ beforeEach(() => {
 });
 
 async function fixture() {
-  const t = convexTest(schema, modules);
+  const t = convexTest({ schema, modules, transactionLimits: true });
   const userId = await t.run(async (ctx) => {
     const userId = await ctx.db.insert("users", { approvalStatus: "approved" });
     const shopId = await ctx.db.insert("shops", {
@@ -39,7 +39,7 @@ async function fixture() {
   return { t, client: t.withIdentity({ subject: userId }) };
 }
 
-function mockCatalogue(total: number) {
+function mockCatalogue(total: number, metafieldBytes = 0) {
   graphql.mockImplementation(async (query, variables, _token, credentials) => {
     expect(query).toBe(PRODUCTS_QUERY);
     expect(credentials?.domain).toBe("full-sync.myshopify.com");
@@ -56,7 +56,8 @@ function mockCatalogue(total: number) {
           title: `Produit ${start + offset}`,
           handle: `produit-${start + offset}`,
           status: "ACTIVE",
-          productType: "Rideaux",
+          productType: metafieldBytes ? `Type ${start + offset}` : "Rideaux",
+          metafields: { nodes: metafieldBytes ? [{ value: "x".repeat(metafieldBytes) }] : [] },
           variants: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } },
         })),
         pageInfo: { hasNextPage: end < total, endCursor: String(end) },
@@ -88,6 +89,36 @@ test("an explicit limit is honored beyond 250 and within the last page", async (
   expect(graphql.mock.calls.at(-1)?.[1]).toMatchObject({ first: 13, after: "260" });
   expect((await client.query(api.products.navigation, {})).total).toBe(273);
 });
+
+test("sync rebuilds every facet when product documents exceed the transaction read limit", async () => {
+  const { client } = await fixture();
+  // Over 20 MiB in one shop: even a shop-indexed collect exceeds 16 MiB.
+  mockCatalogue(70, 300 * 1024);
+  expect(await client.action(api.shopify.syncProducts, {})).toEqual({ synced: 70 });
+  expect((await client.query(api.products.facets, {})).productTypes).toEqual(
+    Array.from({ length: 70 }, (_, index) => `Type ${index}`).sort(),
+  );
+
+  const { page: [product] } = await client.query(api.products.list, { limit: 1 });
+  graphql.mockResolvedValueOnce({
+    product: {
+      id: product.shopifyProductId,
+      title: product.title,
+      handle: product.handle,
+      productType: "Nouveau type",
+      status: "DRAFT",
+    },
+  });
+  await client.action(api.shopify.syncProduct, { productId: product._id });
+  expect(await client.query(api.products.facets, {})).toMatchObject({
+    productTypes: [
+      ...Array.from({ length: 70 }, (_, index) => `Type ${index}`)
+        .filter((type) => type !== `Type ${product.shopifyProductId.split("/").at(-1)}`),
+      "Nouveau type",
+    ].sort(),
+    shopifyStatuses: ["ACTIVE", "DRAFT"],
+  });
+}, 30_000);
 
 test("empty catalogues finish and incomplete pagination fails rather than looping", async () => {
   const { client } = await fixture();

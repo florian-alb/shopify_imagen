@@ -4,8 +4,8 @@ import { createHash } from "node:crypto"
 import { beforeEach, afterEach, expect, test, vi } from "vitest"
 import schema from "../schema"
 import { api, internal } from "../_generated/api"
-import { extractProduct } from "./extract"
-import { encode, decode, type Structure, type Work, type RemoteResult } from "./model"
+import { extractProduct, importDescription } from "./extract"
+import { encode, decode, type CatalogProduct, type Structure, type Work, type RemoteResult } from "./model"
 import { productInput } from "./shopifyModel"
 import { REQUIRED_SHOPIFY_ADMIN_SCOPES } from "../shopify/scopes"
 import type { ImportSelection } from "./importSelection"
@@ -550,7 +550,7 @@ test("media failures stay failures even if Shopify created the product", async (
   const p = await f.t.query(internal.catalogues.byId, { id: f.productId })
   expect(decode<RemoteResult>(p!.remote!).status).toBe("failed")
 })
-test("incomplete HTML cannot enter a Shopify payload", () => {
+test.each([null, "<main>Unrecognized theme</main>"])("JSON description can enter Shopify without recognized HTML: %s", (html) => {
   const p = extractProduct(
     {
       handle: "cat",
@@ -558,13 +558,58 @@ test("incomplete HTML cannot enter a Shopify payload", () => {
       collections: [],
     },
     raw,
-    null,
+    html,
   )
-  expect(() =>
-    productInput(
+  expect(productInput(
       { ...p, tags: [], excluded: false, reviewed: false },
       "https://source.example",
-      "",
-    ),
-  ).toThrow("incomplète")
+      importDescription(p),
+    )).toMatchObject({ title: raw.product.title, descriptionHtml: raw.product.body_html })
+  expect(p.htmlStatus).toBe("failed")
+  expect(p.errors.length).toBeGreaterThan(0)
+  for (const invalid of [{ ...p, jsonStatus: "failed" as const }, { ...p, sourceId: null }, { ...p, variants: [] }]) {
+    expect(() => productInput(
+      { ...invalid, tags: [], excluded: false, reviewed: false },
+      "https://source.example", importDescription(p),
+    )).toThrow("incomplète")
+  }
+})
+
+test.each(["pending", "failed"] as const)("imports JSON-backed products with %s collection state and counts them in the result", async (state) => {
+  const f = await fixture()
+  const data = extractProduct({ handle: "cat", url: "https://source.example/products/cat", collections: ["cats"] }, raw, "<main>Unrecognized theme</main>")
+  await f.t.run(async (ctx) => {
+    await ctx.db.patch(f.productId, { state, data: encode(data), error: data.errors.join(" · ") })
+    await ctx.db.patch(f.id, { complete: 0, failed: state === "failed" ? 1 : 0 })
+  })
+  const c = await f.run()
+  expect(c.error).toBeUndefined()
+  expect(decode(c.lastImport!)).toMatchObject({ complete: 1, created: 1, skipped: 0, failed: 0 })
+  expect(remote.uploads).toHaveLength(1)
+  expect(JSON.parse(remote.uploads[0]).input.descriptionHtml).toBe(raw.product.body_html)
+  const p = await f.t.query(internal.catalogues.byId, { id: f.productId })
+  expect(p!.error).toContain("Page HTML produit non reconnue")
+  expect(decode<RemoteResult>(p!.remote!).status).toBe("complete")
+})
+
+test.each(["json", "excluded", "alias"])("still skips %s products with unusable or excluded source data", async (reason) => {
+  const f = await fixture()
+  await f.t.run(async (ctx) => {
+    const p = (await ctx.db.get(f.productId))!
+    const { _id, _creationTime, ...copy } = p
+    void _id; void _creationTime
+    const aliasOf = reason === "alias"
+      ? await ctx.db.insert("produits", { ...copy, handle: "canonical", selected: false })
+      : undefined
+    await ctx.db.patch(f.productId, {
+      state: "failed",
+      ...(reason === "json" ? { data: encode({ ...decode<CatalogProduct>(p.data!), jsonStatus: "failed" }) } : {}),
+      ...(reason === "excluded" ? { override: encode({ excluded: true }) } : {}),
+      ...(aliasOf ? { aliasOf } : {}),
+    })
+  })
+  const c = await f.run()
+  expect(decode(c.lastImport!)).toMatchObject({ complete: 0, skipped: 1, failed: 0 })
+  expect(remote.uploads).toEqual([])
+  expect(remote.calls.some((call) => call.query.includes("CatalogImportFindProduct"))).toBe(false)
 })

@@ -64,14 +64,15 @@ describe("Shopify CSV", () => {
     p.variants[0] = { ...p.variants[0], weight: Number(weight), weightUnit: String(unit) }
     expect((await parse(productCsv(p)))[0]["Weight value (grams)"]).toBe(grams)
   })
-  test("supports a default variant and omits excluded or incomplete products", async () => {
+  test("exports JSON data despite missing HTML and omits excluded or unusable products", async () => {
     const p = product()
     p.options = []
     p.variants = [{ ...p.variants[0], options: [] }]
     expect((await parse(productCsv(p)))[0]).toMatchObject({ "Option1 name": "Title", "Option1 value": "Default Title" })
     expect(productCsv({ ...p, excluded: true })).toBe("")
-    expect(productCsv({ ...p, htmlStatus: "failed" })).toBe("")
+    expect((await parse(productCsv({ ...p, htmlStatus: "failed", errors: ["Page HTML produit non reconnue"] })))[0]).toMatchObject({ Title: p.title, Description: p.description })
     expect(productCsv({ ...p, jsonStatus: "failed" })).toBe("")
+    expect(productCsv({ ...p, sourceId: null })).toBe("")
     expect(productCsv({ ...p, variants: [] })).toBe("")
   })
 })

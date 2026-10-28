@@ -1,4 +1,5 @@
 import type { effective } from "./model"
+import { isImportableProduct } from "./source"
 
 // Column names and order from the supplied Shopify product_template.csv.
 export const shopifyCsvColumns = [
@@ -40,10 +41,9 @@ function object(value: unknown): Record<string, unknown> {
     ? value as Record<string, unknown> : {}
 }
 
-/** One complete product group, so file splitting never separates its variants/images. */
+/** One product group, so file splitting never separates its variants/images. */
 export function productCsv(product: ReturnType<typeof effective>, jsonSource?: string): string {
-  if (product.excluded || product.jsonStatus !== "complete" || product.htmlStatus !== "complete") return ""
-  if (!product.variants.length) return ""
+  if (product.excluded || !isImportableProduct(product)) return ""
   if (product.options.length > 3)
     throw new Error(`Le CSV Shopify accepte au maximum trois options : ${product.title}`)
 

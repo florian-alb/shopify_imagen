@@ -1,4 +1,5 @@
 import { v } from "convex/values";
+import { paginationOptsValidator } from "convex/server";
 import {
   internalMutation,
   internalQuery,
@@ -24,6 +25,7 @@ import {
   legacyReviewState,
   lightProduct,
   productMatches,
+  productFacetsValidator,
   type ProductFacets,
   type ProductFilters,
 } from "./products/catalog";
@@ -406,34 +408,56 @@ export const upsertSynced = internalMutation({
   }
 });
 
-export const refreshFacets = internalMutation({
-  args: { shopId: v.optional(v.union(v.id("shops"), v.null())) },
+export const facetPage = internalQuery({
+  args: {
+    shopId: v.optional(v.union(v.id("shops"), v.null())),
+    paginationOpts: paginationOptsValidator,
+  },
+  returns: v.object({
+    facets: productFacetsValidator,
+    isDone: v.boolean(),
+    continueCursor: v.string(),
+  }),
   handler: async (ctx, args) => {
     const shopId = args.shopId ?? undefined;
-    const products = (await ctx.db.query("products").collect()).filter((product: Doc<"products">) =>
-      shopId ? product.shopId === shopId : product.shopId == null
-    );
+    const result = await ctx.db
+      .query("products")
+      .withIndex("by_shop", (q) => q.eq("shopId", shopId))
+      .paginate(args.paginationOpts);
     const rootProducts: Doc<"products">[] = [];
-    for (const product of products) {
+    for (const product of result.page) {
       if (!(await isVisualProductFamilyMember(ctx, product))) {
         rootProducts.push(product);
       }
     }
-    const facets = buildFacets(rootProducts);
-    const existing = shopId
-      ? await ctx.db
-        .query("appSettings")
-        .withIndex("by_shop_and_key", (q) => q.eq("shopId", shopId).eq("key", PRODUCT_FACETS_KEY))
-        .unique()
-      : await ctx.db.query("appSettings").withIndex("by_key", (q) => q.eq("key", PRODUCT_FACETS_KEY)).unique();
+    return {
+      facets: buildFacets(rootProducts),
+      isDone: result.isDone,
+      continueCursor: result.continueCursor,
+    };
+  },
+});
+
+export const storeFacets = internalMutation({
+  args: {
+    shopId: v.optional(v.union(v.id("shops"), v.null())),
+    facets: productFacetsValidator,
+  },
+  returns: v.id("appSettings"),
+  handler: async (ctx, args) => {
+    const shopId = args.shopId ?? undefined;
+    const existing = await ctx.db
+      .query("appSettings")
+      .withIndex("by_shop_and_key", (q) => q.eq("shopId", shopId).eq("key", PRODUCT_FACETS_KEY))
+      .unique();
     if (existing) {
-      await ctx.db.patch(existing._id, { value: facets, updatedAt: Date.now() });
+      await ctx.db.patch(existing._id, { value: args.facets, updatedAt: Date.now() });
       return existing._id;
     }
     return ctx.db.insert("appSettings", {
       shopId,
       key: PRODUCT_FACETS_KEY,
-      value: facets,
+      value: args.facets,
       updatedAt: Date.now()
     });
   }

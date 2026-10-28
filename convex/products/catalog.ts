@@ -1,4 +1,5 @@
 import type { Doc } from "../_generated/dataModel";
+import { v, type Infer } from "convex/values";
 import {
   calculateProductStatus as calculateProductStatusFromImages,
   calculateProductWorkflow as calculateProductWorkflowFromImages,
@@ -20,11 +21,17 @@ export const PRODUCT_FACETS_KEY = "PRODUCT_FACETS";
 export const DEFAULT_PAGE_SIZE = 20;
 export const MAX_PAGE_SIZE = 100;
 
-export type ProductFacets = {
-  productTypes: string[];
-  shopifyStatuses: string[];
-  collections: Array<{ id: string; title: string; handle?: string }>;
-};
+export const productFacetsValidator = v.object({
+  productTypes: v.array(v.string()),
+  shopifyStatuses: v.array(v.string()),
+  collections: v.array(v.object({
+    id: v.string(),
+    title: v.string(),
+    handle: v.optional(v.string()),
+  })),
+});
+
+export type ProductFacets = Infer<typeof productFacetsValidator>;
 
 export function calculateProductStatus(images: Doc<"generatedImages">[]): Doc<"products">["generationStatus"] {
   return calculateProductStatusFromImages(images);
@@ -138,6 +145,17 @@ export function buildFacets(products: Doc<"products">[]): ProductFacets {
     });
   });
   return { productTypes, shopifyStatuses, collections: Array.from(collections.values()).sort((a, b) => a.title.localeCompare(b.title)) };
+}
+
+export function mergeFacets(current: ProductFacets, next: ProductFacets): ProductFacets {
+  const collections = new Map(
+    [...current.collections, ...next.collections].map((collection) => [collection.id, collection]),
+  );
+  return {
+    productTypes: Array.from(new Set([...current.productTypes, ...next.productTypes])).sort(),
+    shopifyStatuses: Array.from(new Set([...current.shopifyStatuses, ...next.shopifyStatuses])).sort(),
+    collections: Array.from(collections.values()).sort((a, b) => a.title.localeCompare(b.title)),
+  };
 }
 
 export function productMatches(product: Doc<"products">, args: ProductFilters, needle: string) {

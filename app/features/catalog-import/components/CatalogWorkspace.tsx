@@ -28,6 +28,7 @@ import { CatalogWorkStatus } from "./CatalogWorkStatus"
 import type { Catalogue } from "../types"
 import { ImportConfirmation } from "./ImportConfirmation"
 import type { TagLanguage } from "../../../../convex/catalogue/tags"
+import { isImportableProduct } from "../../../../convex/catalogue/source"
 import {
   Dialog,
   DialogContent,
@@ -48,6 +49,7 @@ type Row = {
   rank: number | null
   collections: string[]
   state: string
+  importable: boolean
   image?: string
   error?: string
   tags: string[]
@@ -495,7 +497,9 @@ function Products({
                         {row.state === "complete" && (
                           <CheckCircle2 className="size-4 shrink-0 text-success" />
                         )}
-                        {stateLabel(row.state)}
+                        {row.state !== "complete" && row.importable
+                          ? "Importable · compléments manquants"
+                          : stateLabel(row.state)}
                       </span>
                       {row.remote && (
                         <span className="mt-1 block text-xs">
@@ -663,6 +667,11 @@ function Detail({ c, p }: { c: Catalogue; p: Product }) {
         {p.state !== "complete" && <p className="mt-1 text-muted-foreground">
           {p.error || "Fiche en attente de collecte."}
         </p>}
+        {d && isImportableProduct(d) && d.htmlStatus !== "complete" && (
+          <p className="mt-1 text-muted-foreground">
+            Les données JSON seront utilisées. L’absence de compléments HTML ne bloque ni l’export ni l’import.
+          </p>
+        )}
       </div>
       <section>
         <h4 className="mb-2 font-semibold">Collections et tags</h4>

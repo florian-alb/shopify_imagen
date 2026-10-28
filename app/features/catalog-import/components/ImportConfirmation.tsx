@@ -77,6 +77,11 @@ export function ImportConfirmation({ id, version, partial, incompleteCount, clos
           ))}
         </FieldGroup>
       </FieldSet>
+      {partial && selection.products && (
+        <p className="text-sm text-muted-foreground">
+          Les produits avec un JSON exploitable sont importés, même sans compléments HTML. Les produits sans JSON exploitable ou exclus sont ignorés.
+        </p>
+      )}
       {partial && (
         <Field orientation="horizontal">
           <Checkbox id="import-partial" checked={accepted} disabled={busy} onCheckedChange={(checked) => setAccepted(checked === true)} />
