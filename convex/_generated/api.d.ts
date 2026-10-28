@@ -89,6 +89,7 @@ import type * as pricing from "../pricing.js";
 import type * as productVisualContext from "../productVisualContext.js";
 import type * as products from "../products.js";
 import type * as products_catalog from "../products/catalog.js";
+import type * as products_facets from "../products/facets.js";
 import type * as promptConditions from "../promptConditions.js";
 import type * as promptRuntime from "../promptRuntime.js";
 import type * as prompts from "../prompts.js";
@@ -219,6 +220,7 @@ declare const fullApi: ApiFromModules<{
   productVisualContext: typeof productVisualContext;
   products: typeof products;
   "products/catalog": typeof products_catalog;
+  "products/facets": typeof products_facets;
   promptConditions: typeof promptConditions;
   promptRuntime: typeof promptRuntime;
   prompts: typeof prompts;

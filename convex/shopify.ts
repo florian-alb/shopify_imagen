@@ -12,6 +12,7 @@ import { requireUserId } from "./authz";
 import schema from "./schema";
 import { assertImageMutable } from "./shared/publicationGuards";
 import { refreshProductSummary } from "./products";
+import { refreshFacets } from "./products/facets";
 import { refreshJobSummary } from "./jobs";
 import {
   normalizeShopDomain,
@@ -412,9 +413,7 @@ export const syncProducts = action({
       after = nextCursor;
     }
 
-    await ctx.runMutation(internal.products.refreshFacets, {
-      shopId: credentials.shopId ?? null,
-    });
+    await refreshFacets(ctx, credentials.shopId ?? null);
     return { synced };
   },
 });
@@ -470,9 +469,7 @@ export const syncProduct = action({
         removeMissing: true,
       });
     }
-    await ctx.runMutation(internal.products.refreshFacets, {
-      shopId: credentials.shopId ?? null,
-    });
+    await refreshFacets(ctx, credentials.shopId ?? null);
     return { productId: id };
   },
 });
@@ -555,9 +552,7 @@ export const reorderProductImages = action({
           internal.products.upsertSynced,
           mapProductForUpsert(after.product, credentials),
         );
-        await ctx.runMutation(internal.products.refreshFacets, {
-          shopId: credentials.shopId ?? null,
-        });
+        await refreshFacets(ctx, credentials.shopId ?? null);
       }
     }
 
