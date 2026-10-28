@@ -32,4 +32,10 @@ describe("getShopifyAdminUrl", () => {
       getShopifyAdminUrl({ shopifyProductId: "gid://shopify/Product/" }, "demo"),
     ).toBeNull();
   });
+
+  it("does not offer a Shopify link for a confirmed deleted product", () => {
+    expect(getShopifyAdminUrl({
+      shopifyProductId: "gid://shopify/Product/1234567890", shopifyDeletedAt: 1,
+    }, "demo-store")).toBeNull();
+  });
 });

@@ -24,7 +24,7 @@ export function ProductImageHistory({
   productId: string;
   images: Doc<"generatedImages">[];
   hasProductJobs: boolean;
-  onDelete: (image: Doc<"generatedImages">) => void;
+  onDelete?: (image: Doc<"generatedImages">) => void;
 }) {
   return (
     <Card className="mb-4 rounded-lg">
@@ -47,7 +47,7 @@ export function ProductImageHistory({
               <HistoryItem
                 key={image._id}
                 image={image}
-                onDelete={() => onDelete(image)}
+                onDelete={onDelete ? () => onDelete(image) : undefined}
               />
             ))}
           </Accordion>
@@ -66,7 +66,7 @@ function HistoryItem({
   onDelete,
 }: {
   image: Doc<"generatedImages">;
-  onDelete: () => void;
+  onDelete?: () => void;
 }) {
   const providerLabel =
     image.imageProvider === "gemini" ? "Nano Banana Pro" : "OpenAI";
@@ -112,7 +112,7 @@ function HistoryItem({
           <pre className="max-h-64 overflow-auto rounded-lg bg-muted p-3 text-xs whitespace-pre-wrap">
             {image.promptUsed}
           </pre>
-          <div className="flex justify-end">
+          {onDelete ? <div className="flex justify-end">
             <Button
               variant="outline"
               size="sm"
@@ -122,7 +122,7 @@ function HistoryItem({
               <Trash2 data-icon="inline-start" />
               Supprimer partout
             </Button>
-          </div>
+          </div> : null}
         </div>
       </AccordionContent>
     </AccordionItem>

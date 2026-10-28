@@ -1,9 +1,10 @@
 import { useNavigate } from "@tanstack/react-router";
-import { useAction, useMutation, useQuery } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { api, type Doc, type Id } from "@/lib/convex";
+import { useShopifyProductSync } from "@/features/shopify";
 import {
   productFilterArgs,
   type ProductSearch,
@@ -24,7 +25,6 @@ export function useProductsListPage(search: ProductSearch) {
   const navigate = useNavigate();
   const [selected, setSelected] = useState<Set<Id<"products">>>(new Set());
   const [chooserOpen, setChooserOpen] = useState(false);
-  const [syncing, setSyncing] = useState(false);
   const [creatingJob, setCreatingJob] = useState(false);
 
   const page = search.page ?? 1;
@@ -85,7 +85,7 @@ export function useProductsListPage(search: ProductSearch) {
   const prompts = useQuery(api.prompts.list) as
     | Doc<"promptTemplates">[]
     | undefined;
-  const syncProducts = useAction(api.shopify.syncProducts);
+  const productSync = useShopifyProductSync();
   const createJob = useMutation(api.jobs.create);
   const selectedProductIds = useMemo(() => Array.from(selected), [selected]);
   const bulkTransform = useBulkImageTransform({
@@ -134,23 +134,6 @@ export function useProductsListPage(search: ProductSearch) {
       page: undefined,
       pageSize: nextPageSize === 20 ? undefined : nextPageSize,
     });
-  }
-
-  async function runSync() {
-    setSyncing(true);
-    try {
-      const { synced } = await syncProducts({});
-      toast.success("Catalogue Shopify synchronisé", {
-        description: `${synced.toLocaleString("fr-FR")} produit${synced === 1 ? "" : "s"} synchronisé${synced === 1 ? "" : "s"}.`,
-      });
-    } catch (syncError) {
-      toast.error("Sync failed", {
-        description:
-          syncError instanceof Error ? syncError.message : String(syncError),
-      });
-    } finally {
-      setSyncing(false);
-    }
   }
 
   function toggleProduct(productId: Id<"products">) {
@@ -241,11 +224,11 @@ export function useProductsListPage(search: ProductSearch) {
     bulkReorder,
     hasTrackedBulk: hasTrackedBulk ?? false,
     selected,
-    syncing,
+    syncing: productSync.busy,
     generate,
     openChooser,
     openChooserForProduct,
-    runSync,
+    runSync: productSync.start,
     setChooserOpen,
     toggleProduct,
     toggleVisible,

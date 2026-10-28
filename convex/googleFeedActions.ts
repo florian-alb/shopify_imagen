@@ -1,4 +1,5 @@
 import { ConvexError, v } from "convex/values"
+import type { FunctionReturnType } from "convex/server"
 
 import { internal } from "./_generated/api"
 import type { Id } from "./_generated/dataModel"
@@ -293,18 +294,22 @@ export const publish = action({
     let published = 0
     let failed = 0
     let retryOffset = 0
+    let claimCursor: string | null = null
     while (true) {
       const drafts = retryRows?.slice(retryOffset, retryOffset + 25)
       if (drafts && !drafts.length) break
       retryOffset += 25
-      const claimed = await ctx.runMutation(internal.googleFeed.claimPublishBatch, {
+      const batch: FunctionReturnType<typeof internal.googleFeed.claimPublishBatch> = await ctx.runMutation(internal.googleFeed.claimPublishBatch, {
         userId,
         runId,
         retryRunId: args.retryRunId ?? null,
+        cursor: claimCursor,
         ...(drafts ? { drafts } : {}),
       })
+      const claimed = batch.claimed
+      claimCursor = batch.cursor
       if (claimed.length === 0) {
-        if (retryRows) continue
+        if (retryRows || batch.hasMore) continue
         break
       }
       const results = await publishGoogleFeedBatch(
@@ -325,6 +330,7 @@ export const publish = action({
           runItemId: result.runItemId as Id<"googleFeedRunItems">,
         })),
       })
+      if (!retryRows && !batch.hasMore) break
     }
     const status = (await ctx.runMutation(internal.googleFeed.finishRun, {
       runId,

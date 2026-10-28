@@ -1,5 +1,6 @@
 import type { Doc } from "../_generated/dataModel";
 import { v, type Infer } from "convex/values";
+import { isProductActive } from "./lifecycle";
 import {
   calculateProductStatus as calculateProductStatusFromImages,
   calculateProductWorkflow as calculateProductWorkflowFromImages,
@@ -159,6 +160,7 @@ export function mergeFacets(current: ProductFacets, next: ProductFacets): Produc
 }
 
 export function productMatches(product: Doc<"products">, args: ProductFilters, needle: string) {
+  if (!isProductActive(product)) return false;
   const workflow = productWorkflowFields(product);
   const matchesSearch =
     !needle ||

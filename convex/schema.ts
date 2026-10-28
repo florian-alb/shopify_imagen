@@ -299,6 +299,25 @@ export default defineSchema({
   })
     .index("by_state_hash", ["stateHash"])
     .index("by_expires_at", ["expiresAt"]),
+  productSyncRuns: defineTable({
+    shopId: v.id("shops"),
+    createdByUserId: v.id("users"),
+    workflowId: v.optional(v.string()),
+    status: v.union(v.literal("running"), v.literal("completed"), v.literal("failed")),
+    phase: v.union(v.literal("syncing"), v.literal("reconciling"), v.literal("completed")),
+    productQuery: v.string(),
+    syncCursor: v.union(v.string(), v.null()),
+    reconcileCursor: v.union(v.string(), v.null()),
+    synced: v.number(),
+    checked: v.number(),
+    removed: v.number(),
+    startedAt: v.number(),
+    updatedAt: v.number(),
+    completedAt: v.optional(v.number()),
+    error: v.optional(v.string()),
+  })
+    .index("by_shop_id_and_started_at", ["shopId", "startedAt"])
+    .index("by_shop_id_and_status", ["shopId", "status"]),
   products: defineTable({
     shopId: v.optional(v.id("shops")),
     shopifyProductId: v.string(),
@@ -334,6 +353,8 @@ export default defineSchema({
     vibeCostUsd: v.optional(v.number()),
     vibeAnalyzedAt: v.optional(v.number()),
     lastSyncedAt: v.optional(v.number()),
+    shopifyDeletedAt: v.optional(v.number()),
+    shopifyPresenceCheckedAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })

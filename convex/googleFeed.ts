@@ -14,6 +14,8 @@ import {
   type QueryCtx,
 } from "./_generated/server"
 import { requireUserId } from "./authz"
+import { isProductActive } from "./products/lifecycle"
+import { assertFeedDraftOwnerActive, filterActiveFeedDrafts, isFeedDraftOwnerActive } from "./googleFeed/lifecycle"
 import {
   GOOGLE_AGE_GROUPS,
   GOOGLE_GENDERS,
@@ -183,6 +185,11 @@ export const overview = query({
         )
         .take(5_001),
     ])
+    const activeProducts = products.filter(isProductActive)
+    const activeProductIds = new Set(activeProducts.map((product) => product._id))
+    const activeVariants = variants.filter((variant) => activeProductIds.has(variant.productId))
+    const activeVariantIds = new Set(activeVariants.map((variant) => variant._id))
+    const activeDraft = (draft: Doc<"googleFeedDrafts">) => activeProductIds.has(draft.productId) && (!draft.variantId || activeVariantIds.has(draft.variantId))
     return {
       config: config
         ? {
@@ -192,10 +199,10 @@ export const overview = query({
             checkedAt: config.checkedAt,
           }
         : null,
-      productCount: Math.min(products.length, MAX_PRODUCTS_PER_CATALOG_SCAN),
-      variantCount: Math.min(variants.length, 5_000),
-      draftCount: Math.min(drafts.length, 5_000),
-      conflictCount: Math.min(conflicts.length, 5_000),
+      productCount: Math.min(activeProducts.length, MAX_PRODUCTS_PER_CATALOG_SCAN),
+      variantCount: Math.min(activeVariants.length, 5_000),
+      draftCount: Math.min(drafts.filter(activeDraft).length, 5_000),
+      conflictCount: Math.min(conflicts.filter(activeDraft).length, 5_000),
       catalogCountIsCapped:
         products.length > MAX_PRODUCTS_PER_CATALOG_SCAN || variants.length > 5_000,
     }
@@ -292,6 +299,7 @@ export const catalog = query({
     const page = []
     let matched = 0
     for (const product of products) {
+      if (!isProductActive(product)) continue
       const [variants, drafts] = await Promise.all([
         ctx.db
           .query("productVariants")
@@ -306,7 +314,8 @@ export const catalog = query({
           )
           .take(MAX_DRAFTS_PER_PRODUCT),
       ])
-      const scopedDrafts = drafts.filter((draft) => draft.shopId === shopId)
+      const variantIds = new Set(variants.map((variant) => variant._id))
+      const scopedDrafts = drafts.filter((draft) => draft.shopId === shopId && (!draft.variantId || variantIds.has(draft.variantId)))
       const searchMatches =
         !needle ||
         product.title.toLocaleLowerCase("fr-FR").includes(needle) ||
@@ -431,7 +440,7 @@ export const variantsForProduct = query({
   handler: async (ctx, args) => {
     const { shopId } = await requireOwnedActiveShop(ctx)
     const product = await ctx.db.get(args.productId)
-    if (!product || product.shopId !== shopId) {
+    if (!isProductActive(product) || product.shopId !== shopId) {
       throw new ConvexError("Produit introuvable pour la boutique active.")
     }
     const [variants, drafts] = await Promise.all([
@@ -628,6 +637,14 @@ async function upsertDraft(
     status: "draft" | "conflict"
   },
 ) {
+  const product = await ctx.db.get(args.productId)
+  if (!isProductActive(product) || product.shopId !== args.shopId)
+    throw new ConvexError("Ce produit n’existe plus dans Shopify. Son historique est conservé.")
+  if (args.variantId) {
+    const variant = await ctx.db.get(args.variantId)
+    if (!variant || variant.shopId !== args.shopId || variant.productId !== args.productId)
+      throw new ConvexError("Cette variante n’existe plus dans Shopify.")
+  }
   const existing = await ctx.db
     .query("googleFeedDrafts")
     .withIndex("by_shop_id_and_owner_id_and_attribute", (index) =>
@@ -684,7 +701,7 @@ export const setProductDraft = mutation({
       ctx.db.get(args.productId),
       configForShop(ctx, shopId),
     ])
-    if (!product || product.shopId !== shopId) {
+    if (!isProductActive(product) || product.shopId !== shopId) {
       throw new ConvexError("Produit introuvable pour la boutique active.")
     }
     assertAttributeReady(config, args.attribute)
@@ -781,6 +798,7 @@ export const setDraftInclusion = mutation({
     if (!draft || draft.shopId !== shopId) {
       throw new ConvexError("Modification introuvable pour la boutique active.")
     }
+    await assertFeedDraftOwnerActive(ctx, draft)
     await ctx.db.patch(draft._id, { included: args.included, updatedAt: Date.now() })
     return null
   },
@@ -795,6 +813,7 @@ export const updateDraftValue = mutation({
     if (!draft || draft.shopId !== shopId) {
       throw new ConvexError("Modification introuvable pour la boutique active.")
     }
+    await assertFeedDraftOwnerActive(ctx, draft)
     if (draft.status === "publishing") throw new ConvexError("Cette valeur est en cours de publication.")
     if (args.expectedUpdatedAt !== undefined && args.expectedUpdatedAt !== draft.updatedAt)
       throw new ConvexError("Cette valeur a changé. Rechargez le produit.")
@@ -826,6 +845,7 @@ export const discardDraft = mutation({
     if (!draft || draft.shopId !== shopId) {
       throw new ConvexError("Modification introuvable pour la boutique active.")
     }
+    await assertFeedDraftOwnerActive(ctx, draft)
     await ctx.db.delete(draft._id)
     return null
   },
@@ -883,7 +903,8 @@ export const preview = query({
       .withIndex("by_shop_id_and_updated_at", (index) => index.eq("shopId", shopId))
       .order("desc")
       .take(5_001)
-    const drafts = sampled.slice(0, 5_000)
+    const activeOwners = await filterActiveFeedDrafts(ctx, shopId, sampled.slice(0, 5_000))
+    const drafts = activeOwners.drafts
     const active = drafts.filter((draft) => draft.status !== "confirmed")
     const readyCount = selectPublishableDrafts(
       active.map((draft) => ({
@@ -915,7 +936,7 @@ export const preview = query({
         ctx.db.get(draft.productId),
         draft.variantId ? ctx.db.get(draft.variantId) : null,
       ])
-      if (!product || product.shopId !== shopId) continue
+      if (!isProductActive(product) || product.shopId !== shopId) continue
       rows.push({
         id: draft._id,
         productId: draft.productId,
@@ -943,7 +964,7 @@ export const preview = query({
       conflictCount: active.filter((draft) => draft.status === "conflict").length,
       invalidCount: active.filter((draft) => draft.status === "invalid").length,
       excludedCount: active.filter((draft) => !draft.included).length,
-      countsAreCapped: sampled.length > 5_000,
+      countsAreCapped: sampled.length > 5_000 || activeOwners.capped,
     }
   },
 })
@@ -1167,7 +1188,7 @@ export const upsertSyncedVariants = internalMutation({
   returns: v.number(),
   handler: async (ctx, args) => {
     const product = await ctx.db.get(args.productId)
-    if (!product || product.shopId !== args.shopId) {
+    if (!isProductActive(product) || product.shopId !== args.shopId) {
       throw new ConvexError("Produit synchronisé hors de la boutique attendue.")
     }
     const now = Date.now()
@@ -1192,6 +1213,18 @@ export const upsertSyncedVariants = internalMutation({
           index.eq("shopId", args.shopId).eq("productId", product._id),
         )
         .take(MAX_VARIANTS_PER_PRODUCT + 1)
+      if (existingVariants.length > MAX_VARIANTS_PER_PRODUCT)
+        throw new ConvexError("Ce produit dépasse la limite de synchronisation des variantes.")
+      const missing = new Set(existingVariants.filter((variant) => !seen.has(variant.shopifyVariantId)).map((variant) => variant._id))
+      if (missing.size) {
+        const drafts = await ctx.db.query("googleFeedDrafts")
+          .withIndex("by_product_id", (index) => index.eq("productId", product._id)).take(1_001)
+        if (drafts.length > 1_000) throw new ConvexError("Ce produit dépasse 1 000 modifications.")
+        for (const draft of drafts) {
+          if (draft.shopId === args.shopId && draft.variantId && missing.has(draft.variantId) && draft.included)
+            await ctx.db.patch(draft._id, { included: false, updatedAt: now })
+        }
+      }
       for (const variant of existingVariants) {
         if (!seen.has(variant.shopifyVariantId)) await ctx.db.delete(variant._id)
       }
@@ -1277,6 +1310,7 @@ export const evaluationPage = internalQuery({
       .paginate(args.paginationOpts)
     const rows = []
     for (const product of page.page) {
+      if (!isProductActive(product)) continue
       const [variants, drafts] = await Promise.all([
         ctx.db
           .query("productVariants")
@@ -1393,6 +1427,7 @@ export const saveEvaluationProposals = internalMutation({
     let conflicts = 0
     let saved = 0
     for (const proposal of args.proposals) {
+      if (!(await isFeedDraftOwnerActive(ctx, { shopId: run.shopId, productId: proposal.localProductId, variantId: proposal.localVariantId }))) continue
       const rule = await ctx.db.get(proposal.selectedRuleId)
       if (!rule || rule.shopId !== run.shopId) continue
       // An evaluation may finish after a user has corrected its old proposal.
@@ -1461,8 +1496,12 @@ export const productRetryRows = internalQuery({
     const rows = await ctx.db.query("googleFeedDrafts")
       .withIndex("by_product_id", (index) => index.eq("productId", args.productId)).take(1_001)
     if (rows.length > 1_000) throw new ConvexError("Ce produit dépasse 1 000 modifications.")
-    return rows.filter((row) => row.shopId === shop._id && row.included && row.status === "failed")
-      .map((row) => ({ id: row._id, updatedAt: row.updatedAt }))
+    const retryable = []
+    for (const row of rows) {
+      if (row.shopId === shop._id && row.included && row.status === "failed" && await isFeedDraftOwnerActive(ctx, row))
+        retryable.push({ id: row._id, updatedAt: row.updatedAt })
+    }
+    return retryable
   },
 })
 
@@ -1471,9 +1510,10 @@ export const claimPublishBatch = internalMutation({
     userId: v.id("users"),
     runId: v.id("googleFeedRuns"),
     retryRunId: v.optional(v.union(v.id("googleFeedRuns"), v.null())),
+    cursor: v.optional(v.union(v.string(), v.null())),
     drafts: v.optional(v.array(v.object({ id: v.id("googleFeedDrafts"), updatedAt: v.number() }))),
   },
-  returns: v.array(
+  returns: v.object({ claimed: v.array(
     v.object({
       draftId: v.id("googleFeedDrafts"),
       runItemId: v.id("googleFeedRunItems"),
@@ -1487,7 +1527,7 @@ export const claimPublishBatch = internalMutation({
       currentDigest: v.union(v.string(), v.null()),
       proposedValue: v.string(),
     }),
-  ),
+  ), hasMore: v.boolean(), cursor: v.union(v.string(), v.null()) }),
   handler: async (ctx, args) => {
     const run = await ctx.db.get(args.runId)
     if (!run || run.createdByUserId !== args.userId || run.status !== "running") {
@@ -1496,12 +1536,17 @@ export const claimPublishBatch = internalMutation({
     const config = await configForShop(ctx, run.shopId)
     if (!config) throw new ConvexError("Lancez le diagnostic Shopify avant publication.")
     const candidates: Doc<"googleFeedDrafts">[] = []
+    let hasMore = false
+    let cursor: string | null = null
     if (args.drafts) {
       if (args.drafts.length > GOOGLE_FEED_METAFIELDS_SET_BATCH_SIZE) throw new ConvexError("Lot de relance trop grand.")
       for (const expected of args.drafts) {
         const row = await ctx.db.get(expected.id)
         if (!row || row.shopId !== run.shopId) throw new ConvexError("Modification introuvable.")
-        if (row.status === "failed" && row.updatedAt === expected.updatedAt) candidates.push(row)
+        if (row.status === "failed" && row.updatedAt === expected.updatedAt) {
+          if (await isFeedDraftOwnerActive(ctx, row)) candidates.push(row)
+          else if (row.included) await ctx.db.patch(row._id, { included: false, updatedAt: Date.now() })
+        }
       }
     } else {
       const source = args.retryRunId
@@ -1509,7 +1554,14 @@ export const claimPublishBatch = internalMutation({
             index.eq("shopId", run.shopId).eq("status", "failed").eq("lastRunId", args.retryRunId).eq("included", true))
         : ctx.db.query("googleFeedDrafts").withIndex("by_shop_id_and_status_and_included_and_product_id", (index) =>
             index.eq("shopId", run.shopId).eq("status", "draft").eq("included", true))
-      for await (const row of source) {
+      const page = await source.paginate({ cursor: args.cursor ?? null, numItems: GOOGLE_FEED_METAFIELDS_SET_BATCH_SIZE, maximumBytesRead: 512 * 1024 })
+      hasMore = !page.isDone
+      cursor = page.continueCursor
+      for (const row of page.page) {
+        if (!(await isFeedDraftOwnerActive(ctx, row))) {
+          await ctx.db.patch(row._id, { included: false, updatedAt: Date.now() })
+          continue
+        }
         if (row.lastRunId !== run._id && row.currentValue !== row.proposedValue) candidates.push(row)
         if (candidates.length === GOOGLE_FEED_METAFIELDS_SET_BATCH_SIZE) break
       }
@@ -1562,7 +1614,7 @@ export const claimPublishBatch = internalMutation({
         proposedValue: draft.proposedValue,
       })
     }
-    return claimed
+    return { claimed, hasMore, cursor }
   },
 })
 
@@ -1591,20 +1643,27 @@ export const completePublishBatch = internalMutation({
         ctx.db.get(result.draftId),
         ctx.db.get(result.runItemId),
       ])
-      if (!draft || !item || draft.shopId !== run.shopId || item.runId !== run._id) {
+      if (!draft || !item || draft.shopId !== run.shopId || item.runId !== run._id || item.draftId !== draft._id || item.status !== "ready") {
         continue
       }
       const now = Date.now()
+      const activeOwner = await isFeedDraftOwnerActive(ctx, draft)
+      const currentClaim = draft.status === "publishing" && draft.lastRunId === run._id && draft.proposedValue === item.newValue
       if (result.status === "confirmed") {
         succeeded += 1
+        await ctx.db.patch(item._id, { status: "confirmed", error: null, updatedAt: now })
+        if (!currentClaim) continue
         await ctx.db.patch(draft._id, {
           status: "confirmed",
           currentValue: result.value ?? draft.proposedValue,
           currentDigest: result.digest ?? null,
           error: null,
+          ...(!activeOwner ? { included: false } : {}),
           updatedAt: now,
         })
-        await ctx.db.patch(item._id, { status: "confirmed", error: null, updatedAt: now })
+        // A response received after Shopify deletion remains in run history;
+        // it must never recreate an owner or reopen its archived proposals.
+        if (!activeOwner) continue
         if (draft.attribute === "google_product_category") {
           await ctx.db.patch(draft.productId, {
             googleProductCategory: result.value ?? draft.proposedValue,
@@ -1630,12 +1689,13 @@ export const completePublishBatch = internalMutation({
       } else {
         failed += 1
         const error = result.error ?? "Shopify n’a pas confirmé la valeur."
-        await ctx.db.patch(draft._id, { status: "failed", error, updatedAt: now })
         await ctx.db.patch(item._id, { status: "failed", error, updatedAt: now })
+        if (currentClaim)
+          await ctx.db.patch(draft._id, { status: "failed", error, ...(!activeOwner ? { included: false } : {}), updatedAt: now })
       }
     }
     await ctx.db.patch(run._id, {
-      totalItems: run.totalItems + args.results.length,
+      totalItems: run.totalItems + succeeded + failed,
       succeededItems: run.succeededItems + succeeded,
       failedItems: run.failedItems + failed,
       updatedAt: Date.now(),

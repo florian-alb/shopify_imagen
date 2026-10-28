@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { api } from "@/lib/convex";
+import { ShopifyProductSyncStatus } from "@/features/shopify";
 import type { ProductSearch } from "@/lib/productFilters";
 
 import { useProductsListPage } from "../hooks/useProductsListPage";
@@ -90,6 +91,7 @@ function ProductsPageForShop({ search }: { search: ProductSearch }) {
         }
       ></PageHeader>
 
+      <ShopifyProductSyncStatus className="mb-4" />
       <ProductsFilters
         search={search}
         facets={facets}

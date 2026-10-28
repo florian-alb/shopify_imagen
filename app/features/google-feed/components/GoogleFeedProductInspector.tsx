@@ -12,6 +12,7 @@ import type { FeedDetails, FeedView } from "../types"
 import { GoogleFeedProductDecision } from "./GoogleFeedProductDecision"
 import { GoogleFeedProductChanges } from "./GoogleFeedProductChanges"
 import { GoogleFeedRuleComparison } from "./GoogleFeedRuleComparison"
+import { GoogleFeedShopifyProductLink } from "./GoogleFeedShopifyProductLink"
 import { GoogleFeedVariantRows } from "./GoogleFeedVariantRows"
 import { GoogleValueSelect } from "./GoogleValueSelect"
 
@@ -89,6 +90,7 @@ function Inspector({
         <h2 className="break-words text-xl font-semibold tracking-tight">
           {details.product.title}
         </h2>
+        <GoogleFeedShopifyProductLink productId={details.product.id} />
         {attribute ? (
           <p className="break-words text-sm text-muted-foreground">
             {attributeLabels[attribute]} · Shopify : {current}

@@ -9,7 +9,7 @@ Application **mobile-first** pour générer automatiquement des visuels produits
 ## ✨ Fonctionnalités
 
 - 🔐 Pages protégées par **Convex Auth** (mot de passe).
-- 🔄 Sync des produits Shopify actifs via l'**Admin GraphQL API** dans Convex.
+- 🔄 Synchronisation complète Shopify en arrière-plan via l'**Admin GraphQL API**, avec archivage des produits supprimés et conservation de leur historique dans Convex. Voir [le fonctionnement de la réconciliation](docs/shopify-product-reconciliation.md).
 - 🧠 Détection automatique des **fixations** (œillets, passe-tringle, plis flamands…) par normalisation + synonymes.
 - 🎨 Génération par type d'image en **jobs background** avec progression temps réel — moteur OpenAI **ou** Gemini, au choix.
 - ⚡ Deux modes : **temps réel** (immédiat) ou **batch** (asynchrone, ~50 % moins cher).

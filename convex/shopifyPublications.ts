@@ -7,6 +7,7 @@ import {
 import type { Id } from "./_generated/dataModel";
 import { publicationResultValidator } from "./shopify/publicationSchema";
 import schema from "./schema";
+import { assertProductActive } from "./products/lifecycle";
 
 export const PUBLICATION_LEASE_MS = 11 * 60 * 1000;
 
@@ -57,6 +58,7 @@ export const claim = internalMutation({
     ) {
       return { state: "completed" as const, result: previous.result! };
     }
+    assertProductActive(await ctx.db.get(args.productId));
     if (previous && previous.state !== "completed") {
       if (previous.leaseExpiresAt > now)
         throw new Error("Une publication de ce produit est déjà en cours.");

@@ -2,6 +2,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "convex/react";
 import { pageContentClass } from "@/components/page";
 import { api } from "@/lib/convex";
+import { ShopifyProductSyncStatus } from "@/features/shopify";
 import type { FeedSearch } from "../lib/workspace-search";
 import { GoogleFeedDataBoundary } from "./GoogleFeedDataBoundary";
 import { GoogleFeedWorkspaceResults } from "./GoogleFeedWorkspaceResults";
@@ -36,6 +37,9 @@ export function GoogleFeedWorkspacePage({ search }: { search: FeedSearch }) {
           </GoogleFeedDataBoundary>
         ) : null}
       </GoogleFeedWorkspaceHeader>
+      <GoogleFeedDataBoundary compact>
+        <ShopifyProductSyncStatus className="mb-4" />
+      </GoogleFeedDataBoundary>
       <GoogleFeedWorkspaceViews
         view={search.view}
         onChange={(view) =>

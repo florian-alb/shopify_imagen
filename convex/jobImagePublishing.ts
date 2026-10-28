@@ -6,6 +6,7 @@ import {
   vWorkflowId,
 } from "@convex-dev/workflow";
 import { v } from "convex/values";
+import { assertProductActive } from "./products/lifecycle";
 import { components, internal } from "./_generated/api";
 import {
   internalMutation,
@@ -104,6 +105,7 @@ export const start = mutation({
           throw new Error(
             "Un produit de la sélection n’appartient plus à cette boutique.",
           );
+        assertProductActive(product);
         group = { product, images: [] };
         groups.set(image.productId, group);
       }
@@ -261,6 +263,7 @@ export const productForPush = internalQuery({
         "Le compte à l’origine de cette publication n’est plus autorisé.",
       );
     const product = await ctx.db.get(item.productId);
+    assertProductActive(product);
     if (
       !product ||
       (product.shopId !== run.shopId &&

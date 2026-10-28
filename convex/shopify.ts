@@ -13,6 +13,8 @@ import schema from "./schema";
 import { assertImageMutable } from "./shared/publicationGuards";
 import { refreshProductSummary } from "./products";
 import { refreshFacets } from "./products/facets";
+import { reconcileMissingProducts } from "./productSyncActions";
+import { loadRemainingGoogleFeedVariants, validateProductPage } from "./shopify/productSyncHelpers";
 import { refreshJobSummary } from "./jobs";
 import {
   normalizeShopDomain,
@@ -78,40 +80,6 @@ type ProductsResponse = {
     nodes: Array<any>;
   };
 };
-
-async function loadRemainingGoogleFeedVariants(
-  product: any,
-  coordinates: GoogleFeedSyncCoordinates,
-  credentials: ShopifyCredentials,
-) {
-  const nodes = [...(product.variants?.nodes ?? [])];
-  let pageInfo = product.variants?.pageInfo as
-    { hasNextPage: boolean; endCursor: string | null } | undefined;
-  while (pageInfo?.hasNextPage && pageInfo.endCursor) {
-    const response = await shopifyGraphql<{
-      product: {
-        variants: {
-          nodes: any[];
-          pageInfo: { hasNextPage: boolean; endCursor: string | null };
-        };
-      } | null;
-    }>(
-      PRODUCT_VARIANTS_GOOGLE_FEED_QUERY,
-      {
-        productId: product.id,
-        after: pageInfo.endCursor,
-        ...googleFeedQueryVariables(coordinates),
-      },
-      undefined,
-      credentials,
-    );
-    if (!response.product) break;
-    nodes.push(...response.product.variants.nodes);
-    pageInfo = response.product.variants.pageInfo;
-  }
-  product.variants = { nodes, pageInfo };
-  return product;
-}
 
 const REJECTED_IMAGE_RETENTION_MS = 5 * 24 * 60 * 60 * 1000;
 const REJECTED_IMAGE_CLEANUP_BATCH_SIZE = 50;
@@ -343,6 +311,7 @@ export const syncProducts = action({
   args: { limit: v.optional(v.number()) },
   returns: v.object({ synced: v.number() }),
   handler: async (ctx, args) => {
+    const startedAt = Date.now();
     const userId = await requireUserId(ctx);
     if (
       args.limit !== undefined &&
@@ -383,7 +352,8 @@ export const syncProducts = action({
         undefined,
         credentials,
       );
-      for (const product of data.products.nodes) {
+      const page = validateProductPage(data, after);
+      for (const product of page.nodes) {
         await loadRemainingGoogleFeedVariants(
           product,
           googleFeedContext.coordinates,
@@ -403,16 +373,12 @@ export const syncProducts = action({
         }
         synced += 1;
       }
-      if (!data.products.pageInfo.hasNextPage || synced >= limit) break;
-      const nextCursor = data.products.pageInfo.endCursor;
-      if (!nextCursor || nextCursor === after || !data.products.nodes.length) {
-        throw new ConvexError(
-          "Shopify n’a pas fourni de curseur valide pour poursuivre la synchronisation.",
-        );
-      }
-      after = nextCursor;
+      if (!page.hasNextPage || synced >= limit) break;
+      after = page.endCursor;
     }
 
+    if (args.limit === undefined && credentials.shopId)
+      await reconcileMissingProducts(ctx, credentials.shopId, startedAt);
     await refreshFacets(ctx, credentials.shopId ?? null);
     return { synced };
   },
@@ -424,6 +390,7 @@ export const syncProduct = action({
     const userId = await requireUserId(ctx);
     const product = (await ctx.runQuery(internal.products.internalGet, {
       productId: args.productId,
+      includeArchived: true,
     })) as Doc<"products"> | null;
     if (!product) throw new Error("Product not found.");
     const googleFeedContext = (await ctx.runQuery(
@@ -451,7 +418,17 @@ export const syncProduct = action({
       undefined,
       credentials,
     );
-    if (!data.product) throw new Error("Product no longer exists in Shopify.");
+    if (data.product === undefined || (data.product !== null && typeof data.product !== "object"))
+      throw new ConvexError("Shopify a retourné une réponse produit incomplète.");
+    if (data.product === null) {
+      await ctx.runMutation(internal.productSyncReconciliation.applyVerifiedPresence, {
+        shopId: googleFeedContext.shopId,
+        checks: [{ id: product._id, shopifyProductId: product.shopifyProductId,
+          updatedAt: product.updatedAt, ...(product.lastSyncedAt === undefined ? {} : { lastSyncedAt: product.lastSyncedAt }), missing: true }],
+      });
+      await refreshFacets(ctx, credentials.shopId ?? null);
+      throw new Error("Product no longer exists in Shopify. Its history is preserved.");
+    }
     await loadRemainingGoogleFeedVariants(
       data.product,
       googleFeedContext.coordinates,

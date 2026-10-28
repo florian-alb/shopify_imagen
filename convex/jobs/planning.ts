@@ -1,5 +1,6 @@
 import type { Doc, Id } from "../_generated/dataModel";
 import type { GenerationTarget, VariantSelection } from "../generationTargets";
+import { assertProductActive } from "../products/lifecycle";
 import {
   evaluatePromptCondition,
   validateConditionalPrompt,
@@ -72,6 +73,7 @@ export function buildImageTasks(args: {
 
   const planned: PlannedImageTask[] = [];
   for (const product of args.products) {
+    assertProductActive(product);
     const visualContext = inferProductVisualContext(product);
     const targets = args.restoredTarget
       ? [args.restoredTarget]

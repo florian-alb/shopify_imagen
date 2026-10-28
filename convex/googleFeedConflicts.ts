@@ -17,6 +17,8 @@ import {
   conflictProductValidator,
 } from "./googleFeed/conflictValidators"
 import { googleFeedAttributeValidator } from "./googleFeed/validators"
+import { assertFeedDraftOwnerActive, filterExistingVariantDrafts } from "./googleFeed/lifecycle"
+import { isProductActive } from "./products/lifecycle"
 
 // Products are paged by the indexed product id, so a variant never splits a
 // product across pages and unrelated drafts cannot hide older conflicts.
@@ -37,7 +39,7 @@ async function productDrafts(
     throw new ConvexError(
       "Ce produit dépasse la limite de revue. Réduisez ses brouillons avant de le résoudre.",
     )
-  return drafts.filter((draft) => draft.shopId === shopId)
+  return filterExistingVariantDrafts(ctx, shopId, productId, drafts.filter((draft) => draft.shopId === shopId))
 }
 
 function productSummary(product: Doc<"products">, drafts: Doc<"googleFeedDrafts">[]) {
@@ -86,7 +88,7 @@ export const listProducts = query({
       if (!first) return { products, after: after ?? null, hasMore: false }
       after = first.productId
       const product = await ctx.db.get(first.productId)
-      if (!product || product.shopId !== shopId) continue
+      if (!isProductActive(product) || product.shopId !== shopId) continue
       if (
         search &&
         !product.title
@@ -119,7 +121,7 @@ export const productDetails = query({
   handler: async (ctx, args) => {
     const { shopId } = await requireOwnedActiveShop(ctx)
     const product = await ctx.db.get(args.productId)
-    if (!product || product.shopId !== shopId)
+    if (!isProductActive(product) || product.shopId !== shopId)
       throw new ConvexError("Produit introuvable pour la boutique active.")
     const drafts = await productDrafts(ctx, shopId, product._id)
     const conflicts = drafts.filter(isUnresolvedConflict)
@@ -216,7 +218,7 @@ export const resolve = mutation({
   handler: async (ctx, args) => {
     const { shopId, userId } = await requireOwnedActiveShop(ctx)
     const product = await ctx.db.get(args.productId)
-    if (!product || product.shopId !== shopId)
+    if (!isProductActive(product) || product.shopId !== shopId)
       throw new ConvexError("Produit introuvable pour la boutique active.")
     if (!args.drafts.length || args.drafts.length > MAX_PRODUCT_DRAFTS)
       throw new ConvexError("Sélectionnez les modifications de ce produit à résoudre.")
@@ -243,6 +245,7 @@ export const resolve = mutation({
         preserved++
         continue
       }
+      await assertFeedDraftOwnerActive(ctx, draft)
       if (draft.updatedAt !== expected.updatedAt)
         throw new ConvexError(
           "Les propositions ont changé. Vérifiez les nouvelles valeurs avant de valider.",

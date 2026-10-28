@@ -1,6 +1,7 @@
 import { ConvexError } from "convex/values"
 import type { Doc, Id } from "../_generated/dataModel"
 import type { QueryCtx, MutationCtx } from "../_generated/server"
+import { filterExistingVariantDrafts } from "./lifecycle"
 
 export type FeedView = "review" | "ready" | "errors"
 export const PRODUCT_DRAFT_LIMIT = 1_000
@@ -38,7 +39,7 @@ export async function readProductDrafts(
     .take(PRODUCT_DRAFT_LIMIT + 1)
   if (rows.length > PRODUCT_DRAFT_LIMIT)
     throw new ConvexError("Ce produit dépasse 1 000 modifications.")
-  return rows.filter((row) => row.shopId === shopId)
+  return filterExistingVariantDrafts(ctx, shopId, productId, rows.filter((row) => row.shopId === shopId))
 }
 
 // Seek one distinct product at a time; the number of variants never affects

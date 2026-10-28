@@ -8,6 +8,8 @@
 
 Un produit apparaît une fois dans chaque vue concernée, même si plusieurs attributs ou variantes nécessitent une action. Les variantes restent dans le panneau produit. Les propositions exclues, en publication ou confirmées ne sont pas dans ces files et ne sont pas supprimées. Le catalogue sans proposition ne fait pas partie de cet écran.
 
+Les produits supprimés de Shopify sont archivés après une [synchronisation complète avec contrôle d'existence](shopify-product-reconciliation.md). Le marqueur d'archivage les retire immédiatement des listes, compteurs et publications, avant le nettoyage paginé des inclusions. Les propositions et résultats historiques sont conservés. La publication parcourt les pages même si une page entière ne contient que des propriétaires archivés ou des valeurs déjà identiques ; une réponse tardive conserve son résultat dans le run sans réactiver le produit.
+
 ## Navigation et lecture
 
 Le point d’entrée est `GoogleFeedWorkspacePage`. Les routes règles et historique restent accessibles depuis son en-tête. Le paramètre `returnTo` conserve la vue, la recherche, le produit et les curseurs ; ouvrir une règle puis revenir retrouve le produit. L’ancienne route `/google-feed/preview` redirige vers cet espace.

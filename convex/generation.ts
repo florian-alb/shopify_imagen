@@ -1123,6 +1123,7 @@ async function processPostprocessingImage(
     }
     const product = (await ctx.runQuery(internal.products.internalGet, {
       productId: image.productId,
+      includeArchived: true,
     })) as Doc<"products"> | null;
     if (!product) throw new Error("Product not found.");
     const safeHandle = product.handle

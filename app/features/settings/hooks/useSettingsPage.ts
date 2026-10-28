@@ -1,8 +1,9 @@
-import { useAction, useMutation, useQuery } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { useState } from "react";
 import { useShopConnection } from "./useShopConnection";
 import { toast } from "sonner";
 import { api, type Id } from "@/lib/convex";
+import { useShopifyProductSync } from "@/features/shopify";
 import {
   settingString,
   shopDisplayName,
@@ -18,9 +19,8 @@ export function useSettingsPage() {
   const shops = useQuery(api.shops.list) as ShopRow[] | undefined;
   const setSetting = useMutation(api.settings.set);
   const setActiveShop = useMutation(api.shops.setActive);
-  const syncProducts = useAction(api.shopify.syncProducts);
+  const productSync = useShopifyProductSync();
   const [saving, setSaving] = useState<string | null>(null);
-  const [syncing, setSyncing] = useState(false);
   const [drafts, setDrafts] = useState<SettingsDrafts>({});
   const connection = useShopConnection();
   const activeShop = shops?.find((shop) => shop.isActive) ?? null;
@@ -92,22 +92,6 @@ export function useSettingsPage() {
     }
   }
 
-  async function runSync() {
-    setSyncing(true);
-    try {
-      const { synced } = await syncProducts({});
-      toast.success("Catalogue Shopify synchronisé", {
-        description: `${synced.toLocaleString("fr-FR")} produit${synced === 1 ? "" : "s"} synchronisé${synced === 1 ? "" : "s"}.`,
-      });
-    } catch (error) {
-      toast.error("Synchronisation impossible", {
-        description: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      setSyncing(false);
-    }
-  }
-
   return {
     activeShop,
     connection,
@@ -118,8 +102,8 @@ export function useSettingsPage() {
     saving,
     settings,
     shops,
-    syncing,
-    runSync,
+    syncing: productSync.busy,
+    runSync: productSync.start,
     save,
     switchSetting,
     updateDraft,
