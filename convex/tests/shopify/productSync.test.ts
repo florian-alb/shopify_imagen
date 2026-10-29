@@ -107,6 +107,7 @@ test("sync rebuilds every facet when product documents exceed the transaction re
       handle: product.handle,
       productType: "Nouveau type",
       status: "DRAFT",
+      variants: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } },
     },
   });
   await client.action(api.shopify.syncProduct, { productId: product._id });
@@ -129,7 +130,7 @@ test("empty catalogues finish and incomplete pagination fails rather than loopin
     mockCatalogue(50);
     graphql.mockResolvedValueOnce({
       products: {
-        nodes: [{ id: "first", title: "Premier", handle: "premier" }],
+        nodes: [{ id: "first", title: "Premier", handle: "premier", variants: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } }],
         pageInfo: { hasNextPage: true, endCursor: "20" },
       },
     });

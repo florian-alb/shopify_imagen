@@ -46,6 +46,7 @@ import {
 import { sanitizeModelReferences } from "./prompts/access";
 import { refreshProductSummary } from "./products";
 import { assertImageMutable } from "./shared/publicationGuards";
+import { assertProductActive } from "./products/lifecycle";
 import {
   ensureActiveShop,
   getActiveShopScope,
@@ -1815,6 +1816,7 @@ export const regenerateImage = mutation({
     if (!product || !shopMatchesScope(product, scope)) {
       throw new Error("Product not found.");
     }
+    assertProductActive(product);
 
     const { imageProvider, imageModel, executionMode } =
       await currentGenerationEngine(ctx, scope);
@@ -2001,6 +2003,8 @@ export const retry = mutation({
 
     const toRetry = images.filter((img) => isRetryableImageStatus(img.status));
     if (!toRetry.length) throw new Error("No failed images to retry.");
+    for (const productId of new Set(toRetry.map((image) => image.productId)))
+      assertProductActive(await ctx.db.get(productId));
     const canResumePostProcessing = canResumeBackgroundRemoval(toRetry);
 
     const now = Date.now();

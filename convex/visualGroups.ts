@@ -10,6 +10,7 @@ import {
   type MutationCtx,
 } from "./_generated/server";
 import { requireUserId } from "./authz";
+import { assertProductActive, isProductActive } from "./products/lifecycle";
 import {
   ensureActiveShop,
   getActiveShopScope,
@@ -121,7 +122,7 @@ export const getForProduct = query({
     const userId = await requireUserId(ctx);
     const scope = await getActiveShopScope(ctx, userId);
     const product = await ctx.db.get(args.productId);
-    if (!product || !shopMatchesScope(product, scope)) return null;
+    if (!isProductActive(product) || !shopMatchesScope(product, scope)) return null;
 
     const mapped = mappedProduct(product);
     const config = await configForProduct(ctx, product._id);
@@ -197,6 +198,7 @@ export const configure = mutation({
     if (!product || !shopMatchesScope(product, scope)) {
       throw new Error("Product not found.");
     }
+    assertProductActive(product);
 
     const mapped = mappedProduct(product);
     const drafts = buildVisualGroupDrafts({
@@ -351,6 +353,7 @@ export const setGroupSwatch = mutation({
     if (!group || !shopMatchesScope(group, scope)) {
       throw new Error("Visual group not found.");
     }
+    assertProductActive(await ctx.db.get(group.productId));
     await ctx.db.patch(group._id, {
       swatchCss: args.swatchCss,
       updatedAt: Date.now(),
@@ -372,6 +375,7 @@ async function assignReferenceToGroup(
   if (!group || !shopMatchesScope(group, scope)) {
     throw new Error("Visual group not found.");
   }
+  assertProductActive(await ctx.db.get(group.productId));
 
   const candidates = await ctx.db
     .query("visualGroupReferences")
@@ -472,6 +476,7 @@ export const reorderReferences = mutation({
     if (!group || !shopMatchesScope(group, scope)) {
       throw new Error("Visual group not found.");
     }
+    assertProductActive(await ctx.db.get(group.productId));
     if (args.referenceIds.length > 50) {
       throw new Error("A visual group cannot contain more than 50 references.");
     }
@@ -515,6 +520,7 @@ export const confirmReference = mutation({
     if (!reference || !shopMatchesScope(reference, scope)) {
       throw new Error("Reference image not found.");
     }
+    assertProductActive(await ctx.db.get(reference.productId));
     await ctx.db.patch(reference._id, {
       confirmed: true,
       updatedAt: Date.now(),
@@ -532,6 +538,7 @@ export const confirmGroupReferences = mutation({
     if (!group || !shopMatchesScope(group, scope)) {
       throw new Error("Visual group not found.");
     }
+    assertProductActive(await ctx.db.get(group.productId));
 
     const references = await ctx.db
       .query("visualGroupReferences")
@@ -577,6 +584,7 @@ export const removeReference = mutation({
     if (!reference || !shopMatchesScope(reference, scope)) {
       throw new Error("Reference image not found.");
     }
+    assertProductActive(await ctx.db.get(reference.productId));
     if (reference.sourceReferenceId) {
       await ctx.db.delete(reference._id);
       return reference._id;
@@ -621,7 +629,7 @@ export const analysisContext = internalQuery({
   handler: async (ctx, args) => {
     const product = await ctx.db.get(args.productId);
     const scope = await getActiveShopScope(ctx, args.userId);
-    if (!product || !shopMatchesScope(product, scope)) return null;
+    if (!isProductActive(product) || !shopMatchesScope(product, scope)) return null;
     const config = await configForProduct(ctx, product._id);
     if (!config) return null;
     const rows = await rowsForConfig(ctx, config._id);
@@ -771,7 +779,7 @@ export const groupTargets = internalQuery({
     }> = [];
     for (const groupId of Array.from(new Set(args.groupIds))) {
       const group = await ctx.db.get(groupId);
-      if (!group) continue;
+      if (!group || !isProductActive(await ctx.db.get(group.productId))) continue;
       const [variants, references] = await Promise.all([
         ctx.db
           .query("visualGroupVariants")
@@ -807,6 +815,7 @@ export const createFamily = internalMutation({
   handler: async (ctx, args) => {
     const product = await ctx.db.get(args.sourceProductId);
     if (!product?.shopId) throw new Error("Source product has no shop.");
+    assertProductActive(product);
     const config = await configForProduct(ctx, product._id);
     if (!config) throw new Error("Visual configuration not found.");
     const existing = await ctx.db

@@ -14,6 +14,7 @@ import {
   type QueryCtx,
 } from "./_generated/server";
 import { requireUserId } from "./authz";
+import { isProductActive, assertProductActive } from "./products/lifecycle";
 import { activeProductLocksForIds } from "./bulkTransforms";
 import {
   BULK_REORDER_OPERATION,
@@ -489,9 +490,11 @@ export const createJob = internalMutation({
     const shop = await ensureActiveShop(ctx, args.userId);
     const scope = await getActiveShopScope(ctx, args.userId);
     const products = await Promise.all(productIds.map((id) => ctx.db.get(id)));
+    for (const product of products)
+      if (product && shopMatchesScope(product, scope)) assertProductActive(product);
     const availableProducts = products.filter(
       (product): product is Doc<"products"> =>
-        Boolean(product && shopMatchesScope(product, scope)),
+        Boolean(isProductActive(product) && shopMatchesScope(product, scope)),
     );
     const locks = await activeProductLocksForIds(
       ctx,
@@ -809,6 +812,8 @@ export const processNext = internalAction({
     const { job } = claimed;
     let { item } = claimed;
     try {
+      const sourceProduct = await ctx.runQuery(internal.products.internalGet, { productId: item.productId });
+      assertProductActive(sourceProduct);
       const credentials = (await ctx.runQuery(
         internal.shops.getShopifyCredentials,
         { shopId: job.shopId ?? null, userId: job.createdByUserId },
@@ -1279,6 +1284,8 @@ export const processNextRestore = internalAction({
     }
     const { job, item } = claimed;
     try {
+      const sourceProduct = await ctx.runQuery(internal.products.internalGet, { productId: item.productId });
+      assertProductActive(sourceProduct);
       if (!item.sourceImageIds || !item.targetImageIds) {
         throw new Error("Le snapshot original de ce produit est indisponible.");
       }

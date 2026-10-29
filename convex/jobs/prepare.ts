@@ -6,6 +6,7 @@ import { promptSettingsForScope, promptsForScope } from "../prompts/repository";
 import { sanitizeModelReferences } from "../prompts/access";
 import { visualReferencePosition } from "../visualGroups/model";
 import { buildImageTasks, type VisualGroupTaskTarget } from "./planning";
+import { assertProductActive } from "../products/lifecycle";
 
 export async function prepareImageTasks(
   ctx: QueryCtx | MutationCtx,
@@ -29,6 +30,7 @@ export async function prepareImageTasks(
   const textOnly = new Set(args.textOnlyGroupIds);
   const found = new Set<Id<"visualGroups">>();
   for (const product of args.products) {
+    assertProductActive(product);
     const [config, family, member] = await Promise.all([
       ctx.db
         .query("visualGroupConfigs")

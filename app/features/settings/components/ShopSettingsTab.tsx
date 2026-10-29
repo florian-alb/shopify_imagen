@@ -2,6 +2,7 @@ import { RefreshCw } from "lucide-react";
 import { BusyIcon } from "@/components/page";
 import { Button } from "@/components/ui/button";
 import type { Id } from "@/lib/convex";
+import { ShopifyProductSyncStatus } from "@/features/shopify";
 import { useShopAuthorization } from "../hooks/useShopAuthorization";
 import type { useShopConnection } from "../hooks/useShopConnection";
 import type { ShopRow } from "../types";
@@ -74,6 +75,7 @@ export function ShopSettingsTab({
           </Button>
         </div>
       )}
+      <ShopifyProductSyncStatus />
       <ShopAuthorizationDialog
         state={authorization.state}
         open={authorization.isOpen}

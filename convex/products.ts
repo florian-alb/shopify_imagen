@@ -12,6 +12,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { requireUserId } from "./authz";
 import schema from "./schema";
 import { getActiveShopScope, shopMatchesScope, type ShopScope } from "./shopScope";
+import { isProductActive } from "./products/lifecycle";
 import {
   DEFAULT_PAGE_SIZE,
   MAX_PAGE_SIZE,
@@ -176,6 +177,7 @@ async function filteredProductsForShop(
   const filtered: Doc<"products">[] = [];
 
   for await (const product of productQueryForShop(ctx, args, shopId)) {
+    if (!isProductActive(product)) continue;
     if (await isVisualProductFamilyMember(ctx, product)) continue;
     // Workflow counters are maintained on the product write path. Recomputing
     // them here would read every generated image for every catalogue row.
@@ -283,19 +285,22 @@ export const facets = query({
 
 export const get = query({
   args: { productId: v.id("products") },
+  returns: v.union(productDocumentValidator, v.null()),
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
     const scope = await getActiveShopScope(ctx, userId);
     const product = await ctx.db.get(args.productId);
-    if (!product || !shopMatchesScope(product, scope)) return null;
+    if (!isProductActive(product) || !shopMatchesScope(product, scope)) return null;
     return product;
   }
 });
 
 export const internalGet = internalQuery({
-  args: { productId: v.id("products") },
+  args: { productId: v.id("products"), includeArchived: v.optional(v.boolean()) },
+  returns: v.union(productDocumentValidator, v.null()),
   handler: async (ctx, args) => {
-    return ctx.db.get(args.productId);
+    const product = await ctx.db.get(args.productId);
+    return args.includeArchived || isProductActive(product) ? product : null;
   }
 });
 
@@ -321,11 +326,12 @@ export const getWithImages = query({
 
 export const byIds = query({
   args: { productIds: v.array(v.id("products")) },
+  returns: v.array(productDocumentValidator),
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
     const scope = await getActiveShopScope(ctx, userId);
     const products = await Promise.all(args.productIds.map((id) => ctx.db.get(id)));
-    return products.filter((product) => product && shopMatchesScope(product, scope)) as Doc<"products">[];
+    return products.filter((product) => isProductActive(product) && shopMatchesScope(product, scope)) as Doc<"products">[];
   }
 });
 
@@ -349,6 +355,7 @@ export const upsertSynced = internalMutation({
     featuredImageUrl: v.optional(v.union(v.string(), v.null())),
     currentShopifyImages: v.array(v.any())
   },
+  returns: v.id("products"),
   handler: async (ctx, args) => {
     const now = Date.now();
     const scopedExisting = args.shopId
@@ -390,6 +397,8 @@ export const upsertSynced = internalMutation({
           )
         : ("generate" as const),
       lastSyncedAt: now,
+      shopifyPresenceCheckedAt: now,
+      shopifyDeletedAt: undefined,
       updatedAt: now
     };
     if (existing) {
@@ -426,6 +435,7 @@ export const facetPage = internalQuery({
       .paginate(args.paginationOpts);
     const rootProducts: Doc<"products">[] = [];
     for (const product of result.page) {
+      if (!isProductActive(product)) continue;
       if (!(await isVisualProductFamilyMember(ctx, product))) {
         rootProducts.push(product);
       }
@@ -524,7 +534,7 @@ export const backfillProductSummaries = mutation({
       await ctx.db.patch(product._id, {
         shopifyImageCount: product.currentShopifyImages.length
       });
-      if (!(await isVisualProductFamilyMember(ctx, product))) {
+      if (isProductActive(product) && !(await isVisualProductFamilyMember(ctx, product))) {
         rootProducts.push(product);
       }
     }

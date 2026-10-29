@@ -17,6 +17,7 @@ import { ShopifyImagesGallery } from "./ShopifyImagesGallery";
 import { VisualGroupsSection } from "./VisualGroupsSection";
 import { VisualProductWorkspace } from "./VisualProductWorkspace";
 import { useProductDetail } from "../hooks/useProductDetail";
+import { ArchivedProductHistory } from "./ArchivedProductHistory";
 import { useProductImageDelete } from "../hooks/useProductImageDelete";
 import { useProductImageGeneration } from "../hooks/useProductImageGeneration";
 import { useProductImageReview } from "../hooks/useProductImageReview";
@@ -68,6 +69,7 @@ export function ProductDetailPage({ productId, search }: ProductDetailPageProps)
 
   if (detail.data === undefined) return <main className={pageContentClass}><EmptyState loading title="Chargement du produit" body="Lecture des images, déclinaisons et informations Shopify." /></main>;
   if (!detail.product) return <main className={pageContentClass}><EmptyState title="Produit introuvable" body="Revenez aux produits pour vérifier la synchronisation de la boutique." /></main>;
+  if (detail.product.shopifyDeletedAt != null) return <ArchivedProductHistory product={detail.product} images={detail.images} hasProductJobs={viewModel.hasProductJobs} />;
 
   const reorder = shopifyReorder.canReorderShopifyImages ? {
     dragId: shopifyReorder.dragShopifyMediaId, disabled: shopifyReorder.busy,

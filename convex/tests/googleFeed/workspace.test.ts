@@ -285,7 +285,7 @@ describe("Google feed product workspace", () => {
       kind: "publication",
       source: "manual",
     })
-    const batch = await t.mutation(internal.googleFeed.claimPublishBatch, { userId: user, runId })
+    const { claimed: batch } = await t.mutation(internal.googleFeed.claimPublishBatch, { userId: user, runId })
     expect(batch.map((row) => row.draftId).sort()).toEqual(drafts.slice(2, 4).sort())
     await t.mutation(internal.googleFeed.completePublishBatch, {
       runId,
@@ -297,7 +297,7 @@ describe("Google feed product workspace", () => {
       })),
     })
     expect(
-      await t.mutation(internal.googleFeed.claimPublishBatch, { userId: user, runId }),
+      (await t.mutation(internal.googleFeed.claimPublishBatch, { userId: user, runId })).claimed,
     ).toEqual([])
     expect((await t.run((ctx) => ctx.db.get(drafts[2]!)))?.sourceKind).toBe("manual")
   })
@@ -320,17 +320,70 @@ describe("Google feed product workspace", () => {
       source: "retry",
     })
     expect(
-      await t.mutation(internal.googleFeed.claimPublishBatch, {
+      (await t.mutation(internal.googleFeed.claimPublishBatch, {
         userId: user,
         runId,
         drafts: retry,
-      }),
+      })).claimed,
     ).toEqual([])
     expect(await t.run((ctx) => ctx.db.get(drafts[4]!))).toMatchObject({
       proposedValue: "female",
       sourceKind: "manual",
       status: "draft",
     })
+  })
+
+  test("hides archived owners immediately, before draft cleanup, and rejects stale edits", async () => {
+    const { t, owner, product, drafts } = await setup()
+    await t.run((ctx) => ctx.db.patch(product, { shopifyDeletedAt: 10 }))
+    for (const view of ["review", "ready", "errors"] as const) {
+      expect((await owner.query(api.googleFeedWorkspace.listProducts, { view })).products).toEqual([])
+      expect(await owner.query(api.googleFeedWorkspace.countProducts, { view })).toEqual({ count: 0, hasMore: false })
+    }
+    expect(await owner.query(api.googleFeed.overview)).toMatchObject({ productCount: 0, variantCount: 0, draftCount: 0, conflictCount: 0 })
+    await expect(owner.mutation(api.googleFeed.updateDraftValue, { draftId: drafts[2]!, value: "female" })).rejects.toThrow("n’existe plus")
+    await expect(owner.query(api.googleFeedWorkspace.productDetails, { productId: product, view: "review" })).rejects.toThrow("introuvable")
+    // The marker alone hides the rows; historical proposals have not been erased.
+    expect(await t.run((ctx) => ctx.db.get(drafts[2]!))).toMatchObject({ included: true, proposedValue: "male", sourceKind: "manual" })
+  })
+
+  test("keeps late publication responses in history without updating archived owners", async () => {
+    const { t, owner, user, product } = await setup()
+    const runId = await t.mutation(internal.googleFeed.createRun, { userId: user, kind: "publication", source: "manual" })
+    const { claimed } = await t.mutation(internal.googleFeed.claimPublishBatch, { userId: user, runId })
+    const before = await t.run((ctx) => ctx.db.query("productVariants").collect())
+    await t.run((ctx) => ctx.db.patch(product, { shopifyDeletedAt: 10 }))
+    const results = claimed.map((row) => ({ draftId: row.draftId, runItemId: row.runItemId, status: "confirmed" as const, value: "male" }))
+    await t.mutation(internal.googleFeed.completePublishBatch, { runId, results })
+    await t.mutation(internal.googleFeed.completePublishBatch, { runId, results })
+    expect(await t.run((ctx) => ctx.db.query("productVariants").collect())).toEqual(before)
+    expect(await t.run((ctx) => ctx.db.get(runId))).toMatchObject({ totalItems: 2, succeededItems: 2, failedItems: 0 })
+    for (const row of claimed) {
+      expect(await t.run((ctx) => ctx.db.get(row.draftId))).toMatchObject({ included: false, status: "confirmed" })
+      expect(await t.run((ctx) => ctx.db.get(row.runItemId))).toMatchObject({ status: "confirmed" })
+    }
+    expect((await owner.query(api.googleFeedWorkspace.listProducts, { view: "ready" })).products).toEqual([])
+  })
+
+  test("continues past full pages of no-op drafts to reach a publishable owner", async () => {
+    const { t, user, product, drafts } = await setup()
+    const lastDraft = await t.run(async (ctx) => {
+      for (const id of drafts) await ctx.db.patch(id, { included: false })
+      const original = (await ctx.db.get(drafts[2]!))!
+      const { _id, _creationTime, ...data } = original
+      void [_id, _creationTime]
+      for (let index = 0; index < 30; index++) {
+        await ctx.db.insert("googleFeedDrafts", { ...data, productId: product, included: true, currentValue: "male" })
+      }
+      return ctx.db.insert("googleFeedDrafts", { ...data, included: true })
+    })
+    const runId = await t.mutation(internal.googleFeed.createRun, { userId: user, kind: "publication", source: "manual" })
+    const first = await t.mutation(internal.googleFeed.claimPublishBatch, { userId: user, runId })
+    expect(first.claimed).toEqual([])
+    expect(first.hasMore).toBe(true)
+    const next = await t.mutation(internal.googleFeed.claimPublishBatch, { userId: user, runId, cursor: first.cursor })
+    expect(next.claimed.map((row) => row.draftId)).toEqual([lastDraft])
+    expect(next.hasMore).toBe(false)
   })
 
   test("paginates distinct products without duplicating variants", async () => {

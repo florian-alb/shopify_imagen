@@ -11,6 +11,8 @@ import {
 } from "./googleFeed";
 import { conflictAttributeValidator } from "./googleFeed/conflictValidators";
 import { googleFeedAttributeValidator } from "./googleFeed/validators";
+import { assertFeedDraftOwnerActive, isFeedDraftOwnerActive } from "./googleFeed/lifecycle";
+import { isProductActive } from "./products/lifecycle";
 import {
   belongsToView,
   nextProductDraft,
@@ -95,7 +97,7 @@ export const listProducts = query({
       if (!head) return { products, after: after ?? null, hasMore: false };
       after = head.productId;
       const product = await ctx.db.get(head.productId);
-      if (!product || product.shopId !== shopId) continue;
+      if (!isProductActive(product) || product.shopId !== shopId) continue;
       if (
         search &&
         !normalizeFeedSearch(`${product.title} ${product.handle}`).includes(
@@ -130,7 +132,9 @@ export const countProducts = query({
       const head = await nextProductDraft(ctx, shopId, args.view, after);
       if (!head) return { count, hasMore: false };
       after = head.productId;
-      if (belongsToView(head, args.view)) count++;
+      const product = await ctx.db.get(head.productId);
+      if (!isProductActive(product) || product.shopId !== shopId) continue;
+      if (belongsToView(head, args.view) && await isFeedDraftOwnerActive(ctx, head)) count++;
       else {
         const rows = await readProductDrafts(ctx, shopId, after);
         fallbackReads += rows.length;
@@ -156,7 +160,7 @@ export const productDetails = query({
   handler: async (ctx, args) => {
     const { shopId } = await requireOwnedActiveShop(ctx);
     const product = await ctx.db.get(args.productId);
-    if (!product || product.shopId !== shopId)
+    if (!isProductActive(product) || product.shopId !== shopId)
       throw new ConvexError("Produit introuvable.");
     const drafts = await readProductDrafts(ctx, shopId, product._id);
     const selected = drafts.filter((row) => belongsToView(row, args.view));
@@ -227,7 +231,7 @@ export const choose = mutation({
   handler: async (ctx, args) => {
     const { userId, shopId } = await requireOwnedActiveShop(ctx);
     const product = await ctx.db.get(args.productId);
-    if (!product || product.shopId !== shopId)
+    if (!isProductActive(product) || product.shopId !== shopId)
       throw new ConvexError("Produit introuvable.");
     if (!args.rows.length || args.rows.length > 1_000)
       throw new ConvexError("Sélectionnez les variantes à corriger.");
@@ -248,6 +252,7 @@ export const choose = mutation({
         throw new ConvexError(
           "Cette modification n’appartient pas au produit sélectionné.",
         );
+      await assertFeedDraftOwnerActive(ctx, row);
       // A concurrent manual correction always wins, even if it was made after
       // the inspector loaded. Publishing/confirmed/excluded rows are untouched.
       if (

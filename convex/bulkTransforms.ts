@@ -13,6 +13,7 @@ import {
   type QueryCtx,
 } from "./_generated/server";
 import { requireUserId } from "./authz";
+import { isProductActive, assertProductActive } from "./products/lifecycle";
 import { bulkReorderJobIsTerminal } from "./bulkReorders/model";
 import {
   BULK_TRANSFORM_ASSET_RETENTION_MS,
@@ -685,7 +686,7 @@ export const selectionOptions = query({
     const products = await Promise.all(productIds.map((id) => ctx.db.get(id)));
     const availableProducts = products.filter(
       (product): product is Doc<"products"> =>
-        Boolean(product && shopMatchesScope(product, scope)),
+        Boolean(isProductActive(product) && shopMatchesScope(product, scope)),
     );
     const productLocks = await activeProductLocksForIds(
       ctx,
@@ -1178,6 +1179,7 @@ export const createJob = internalMutation({
     if (selectedProducts.some((product) => !shopMatchesScope(product, scope))) {
       throw new Error("Selected products must belong to the active shop.");
     }
+    for (const product of selectedProducts) assertProductActive(product);
     if (
       args.selectionSnapshotToken &&
       args.selectionSnapshotToken !==
@@ -1262,7 +1264,7 @@ export const getSeedContext = internalQuery({
     const productId = job.productIds[job.seededProductCount];
     if (!productId) return { job, product: null, productIndex: null };
     const product = await ctx.db.get(productId);
-    return { job, product, productIndex: job.seededProductCount };
+    return { job, product: isProductActive(product) ? product : null, productIndex: job.seededProductCount };
   },
 });
 
@@ -1949,6 +1951,15 @@ export const getProcessingContext = internalQuery({
     if (!item) return null;
     const job = await ctx.db.get(item.jobId);
     if (!job) return null;
+    // Legacy media tasks can outlive a physically removed local product.
+    // Only the explicit Shopify tombstone is evidence to stop these writes.
+    let allSourcesArchived = item.referencedProductIds.length > 0;
+    for (const productId of new Set(item.referencedProductIds)) {
+      const product = await ctx.db.get(productId);
+      if (!product || isProductActive(product)) { allSourcesArchived = false; break; }
+    }
+    if (allSourcesArchived)
+      throw new Error("Les produits de cette opération n’existent plus dans Shopify. L’historique est conservé.");
     return { item, job };
   },
 });

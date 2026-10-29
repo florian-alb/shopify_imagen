@@ -166,7 +166,7 @@ describe("Google feed multi-shop workflow", () => {
       kind: "publication",
       source: "manual",
     })
-    const claimed = await t.mutation(internal.googleFeed.claimPublishBatch, {
+    const { claimed } = await t.mutation(internal.googleFeed.claimPublishBatch, {
       userId: userA,
       runId,
       retryRunId: null,
