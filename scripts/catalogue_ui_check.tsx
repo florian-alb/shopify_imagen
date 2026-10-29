@@ -24,6 +24,7 @@ import type { Id } from "../convex/_generated/dataModel"
 import { normalizeCollectionTags, type TagLanguage } from "../convex/catalogue/tags"
 import { productCsv } from "../convex/catalogue/csv"
 import { isImportableProduct } from "../convex/catalogue/source"
+import type { SourceScope } from "../convex/catalogue/scope"
 import { allImportElements, hasImportElements, type ImportSelection } from "../convex/catalogue/importSelection"
 import raw from "../convex/catalogue/fixtures/kuscheltierland.json"
 import "../app/styles.css"
@@ -63,6 +64,7 @@ const structure: Structure = {
 let catalogue = {
   _id: id,
   origin: "https://source.example",
+  sourceScope: undefined as SourceScope | undefined,
   mode: "TOP_N",
   topN: 4,
   status: "ready",
@@ -369,12 +371,13 @@ const client = {
       }
     } else if (name === "catalogues:exportJson")
       catalogue.exportVersion = catalogue.version + 1
-    else if (name === "catalogues:create") {
+    else if (name === "catalogues:create" || name === "catalogues:createSegmented") {
       catalogue = {
         ...catalogue,
         mode: String(a.mode),
         topN: Number(a.topN ?? 4),
         tagLanguage: (a.tagLanguage ?? "en") as TagLanguage,
+        sourceScope: (a.scopes as SourceScope[] | undefined)?.[0],
         status: "tags",
       }
       structure.collections.forEach((c) => (c.validated = false))
@@ -394,9 +397,19 @@ const client = {
       throw new Error(`Unsupported fixture mutation: ${name}`)
     catalogue.version++
     listeners.forEach((cb) => cb())
-    return name === "catalogues:create" ? id : null
+    return name === "catalogues:createSegmented" ? (a.scopes as SourceScope[]).map((_, i) => i ? `${id}-${i}` : id) : name === "catalogues:create" ? id : null
   },
   async action(ref: Parameters<typeof getFunctionName>[0]) {
+    if (getFunctionName(ref) === "catalogueActions:discoverMarkets") return {
+      origin: "https://source.example",
+      scopes: [
+        { path: "", language: "fr" },
+        { path: "/en-gb", language: "en", market: "GB" },
+        { path: "/de-de", language: "de", market: "DE" },
+        { path: "/fr-ca", language: "fr", market: "CA" },
+        { path: "/en-ca", language: "en", market: "CA" },
+      ],
+    }
     if (getFunctionName(ref) === "catalogueActions:suggestTags")
       return structure.collections.filter((c) => !c.ignored).map((c, i) => ({ key: c.key, tag: catalogue.tagLanguage === "fr" ? ["oiseaux", "peluches", "nouveautés"][i] : c.tag }))
     throw new Error("Simulation : pas de téléchargement R2.")

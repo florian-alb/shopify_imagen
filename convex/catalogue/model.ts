@@ -2,6 +2,8 @@ import { ConvexError, getConvexSize } from "convex/values"
 import type { CatalogProduct, MenuNode, ProductOverride } from "./source"
 import { collectionTagKey, collectionTagsError, parseCollectionTags } from "./tags"
 import type { ImportSelection } from "./importSelection"
+import { collectionKey } from "./source"
+import { inSourceScope, type SourceScope } from "./scope"
 export type { CatalogProduct, MenuNode, ProductOverride } from "./source"
 
 export type Collection = {
@@ -138,7 +140,7 @@ export function effectiveMenu(structure: Structure, origin: string): MenuNode[] 
   function walk(nodes: MenuNode[]): MenuNode[] {
     return nodes.flatMap((node) => {
       const children = walk(node.children)
-      const key = node.url ? decodeURIComponent(new URL(node.url, origin).pathname.split("/")[2] ?? "") : null
+      const key = node.url ? collectionKey(node.url, origin) : null
       const skip = key !== null && ignored.has(key)
       if (!children.length && (skip || (!node.url && node.children.length > 0))) return []
       return [{ ...node, url: skip ? null : node.url, children }]
@@ -152,14 +154,14 @@ export function guardSize(value: unknown, limit = 900_000) {
       "Données trop volumineuses pour une fiche Convex. Aucune donnée n’a été tronquée.",
     )
 }
-export function collectionMenu(nodes: MenuNode[], origin: string): MenuNode[] {
+export function collectionMenu(nodes: MenuNode[], origin: string, scope?: SourceScope): MenuNode[] {
   return nodes.flatMap((node) => {
-    const children = collectionMenu(node.children, origin)
+    const children = collectionMenu(node.children, origin, scope)
     const url = node.url ? new URL(node.url, origin) : null
     const isCollection =
       url?.hostname.replace(/^www\./, "") ===
         new URL(origin).hostname.replace(/^www\./, "") &&
-      /^\/collections\/[^/]+\/?$/.test(url.pathname)
+      !!collectionKey(url.href, origin) && inSourceScope(url.href, origin, scope)
     return isCollection || children.length
       ? [
           {

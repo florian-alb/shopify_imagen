@@ -1,6 +1,6 @@
 # Catalogue — contexte d’implémentation courant
 
-Mis à jour le 26 octobre 2026. Cette refonte remplace l’ancien moteur, ses tables de tâches/index et ses fichiers R2 intermédiaires. Voir [transition](catalog-workspace-migration.md) et [qualification](catalog-refonte-qualification.md). L’[ancien contexte](catalog-workspace-context-historique.md) est historique.
+Mis à jour le 29 octobre 2026. Cette refonte remplace l’ancien moteur, ses tables de tâches/index et ses fichiers R2 intermédiaires. Voir [transition](catalog-workspace-migration.md) et [qualification](catalog-refonte-qualification.md). L’[ancien contexte](catalog-workspace-context-historique.md) est historique.
 
 ## Frontières
 
@@ -27,6 +27,16 @@ Des lignes URL seules recensent les appartenances des produits hors Top N : elle
 Indexes : propriétaire/état/origine pour catalogue ; catalogue+handle/identité/rang/titre/état/groupe pour produit. Pas de table d’index de suffixes, tâche, checkpoint, rapport, snapshot ou lot métier supplémentaire.
 
 ## Découverte et collecte
+
+### Marchés et langues source
+
+`catalogueActions.discoverMarkets` lit le sitemap principal et la langue HTML de l’accueil après authentification. Le formulaire propose Tous les marchés / un marché et Toutes les langues / une langue. Les combinaisons réellement annoncées par les sitemaps produits/collections du même domaine sont dédupliquées par préfixe (`/en-gb`, `/de-de`, etc.). Un préfixe sans pays reste rattaché au marché principal ; aucun pays n’est déduit du domaine ou de la langue HTML. Les domaines alternatifs ne sont pas parcourus.
+
+`catalogues.createSegmented` crée transactionnellement **un catalogue par combinaison sélectionnée** (maximum 50). Le Top N s’applique à chaque catalogue. `catalogues.sourceScope` est optionnel pour les documents existants et immuable après création : chemin, langue, pays lorsqu’il figure dans le préfixe. Les catalogues historiques sans ce champ restent inchangés et sont signalés « Marchés et langues non segmentés » ; il faut créer une nouvelle analyse pour obtenir des segments séparés, aucune réécriture des données historiques n’est effectuée. L’ancien appel `create` reste disponible et cible par défaut le segment principal pour les nouvelles analyses.
+
+Menu, sitemaps, classement, appartenances et pagination sont limités au segment. Les URL localisées sont conservées jusqu’aux requêtes JSON/HTML ; les mutations de découverte refusent un produit hors du segment. Les collections et identités source restent inchangées dans chaque catalogue, sans ajouter de table ou d’index produit ; le bail par domaine reste partagé entre les segments. Les menus affichés, exclusions, liens et mappings Shopify utilisent `collectionKey` pour les URL localisées. Le résolveur effectif et les protections de version/snapshot restent communs. Le JSON contient `sourceScope` ; les noms de téléchargements JSON/CSV incluent le segment. Le choix de langue des tags reste indépendant de la langue du contenu source.
+
+La qualification locale comprend des sitemaps multilingues, deux langues dans un marché, une langue dans plusieurs marchés, l’isolation de deux catalogues partageant les mêmes identifiants Shopify, leur Top N, collecte, menu et export JSON. Le banc UI simule détection et création ; il ne constitue pas un E2E authentifié contre la boutique réelle.
 
 Menu HTML filtré aux collections et parents nécessaires ; sitemaps produits/collections ; classement `/collections/all?sort_by=best-selling` paginé et dédupliqué ; listes publiques de toutes les collections pour les appartenances. Les anomalies sont visibles : page répétée, classement indisponible/incomplet, collection du menu absente du sitemap, membres inconnus.
 

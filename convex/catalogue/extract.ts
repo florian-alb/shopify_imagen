@@ -9,6 +9,7 @@ import {
   type ProductLink,
 } from "./source"
 import { extractNavigation, type NavigationStatus } from "./navigation"
+import { inSourceScope, type SourceScope } from "./scope"
 
 export function cleanHtml(html: string) {
   return sanitizeHtml(html, {
@@ -95,6 +96,7 @@ export function extractCollection(
   html: string,
   pageUrl: string,
   origin: string,
+  scope?: SourceScope,
 ) {
   const $ = load(html)
   const main = $(
@@ -112,7 +114,7 @@ export function extractCollection(
     )
       return
     const p = productLink($(el).attr("href")!, origin)
-    if (p) products.set(p.handle, p)
+    if (p && inSourceScope(p.url, origin, scope)) products.set(p.handle, p)
   })
   const next = $(
     "a[rel=next], a.pagination__item--next, .pagination a[aria-label*='Next'], .pagination a[aria-label*='Weiter']",
@@ -134,6 +136,8 @@ export function extractCollection(
         nextUrl = url.href
     })
   }
+  if (nextUrl && !inSourceScope(nextUrl, origin, scope))
+    throw new Error(`Pagination hors du marché sélectionné : ${nextUrl}`)
   const empty =
     /no products|keine produkte|aucun produit|no results|keine ergebnisse|\bcollection is empty\b/i.test(
       root.text().replace(/\s+/g, " "),

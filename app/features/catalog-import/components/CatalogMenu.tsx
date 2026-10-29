@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button"
 import { effectiveMenu, type Structure } from "../../../../convex/catalogue/model"
+import { collectionKey } from "../../../../convex/catalogue/source"
 
 export function CatalogMenu({ structure, origin, showCollection }: {
   structure: Structure
@@ -28,7 +29,10 @@ function MenuTree({ nodes, showCollection }: {
   nodes: Structure["menu"]
   showCollection: (key: string) => void
 }) {
-  const show = (url: string) => showCollection(decodeURIComponent(new URL(url).pathname.split("/")[2]))
+  const show = (url: string) => {
+    const key = collectionKey(url, new URL(url).origin)
+    if (key) showCollection(key)
+  }
   return (
     <ul className="space-y-2 text-sm">
       {nodes.map((node) => <li key={node.key} className="[overflow-wrap:anywhere]">

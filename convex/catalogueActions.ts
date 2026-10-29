@@ -31,6 +31,10 @@ import { proposeTags } from "./catalogue/ai";
 import type { TagLanguage } from "./catalogue/tags";
 import { exportStorage, signedExport } from "./catalogue/storage";
 import { importStep } from "./catalogue/shopify";
+import { requireUserId } from "./authz";
+import { sourceOrigin } from "./catalogue/source";
+import { discoverSourceScopes } from "./catalogue/markets";
+import { inSourceScope, sourceScopeValidator } from "./catalogue/scope";
 
 type Fence = { id: Id<"catalogues">; generation: number; token: string };
 type Page = {
@@ -53,6 +57,21 @@ function sourceUrl(input: string, origin: string) {
   return `${origin}${url.pathname}${url.search}`;
 }
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
+export const discoverMarkets = action({
+  args: { url: v.string() },
+  returns: v.object({ origin: v.string(), scopes: v.array(sourceScopeValidator) }),
+  handler: async (ctx, args) => {
+    await requireUserId(ctx);
+    const origin = sourceOrigin(args.url);
+    return withSourceBudget(async () => {
+      const xml = await fetchPublic(`${origin}/sitemap.xml`);
+      const html = await fetchPublic(origin);
+      const scopes = discoverSourceScopes(xml, origin, html);
+      if (scopes.length > 50) throw new Error("Plus de 50 segments détectés. Utilisez une boutique source plus ciblée.");
+      return { origin, scopes };
+    }, 2, 450);
+  },
+});
 export const download = action({
   args: { id: v.id("catalogues") },
   returns: v.string(),
@@ -62,7 +81,10 @@ export const download = action({
     );
     if (!c.exportKey || c.exportVersion !== c.version || c.work)
       throw new Error("Régénérez le JSON du catalogue courant.");
-    return signedExport(c.exportKey);
+    const segment = c.sourceScope?.path.slice(1) || `principal-${c.sourceScope?.language ?? "default"}`;
+    return signedExport(c.exportKey, c.sourceScope
+      ? `catalogue-${new URL(c.origin).hostname}-${segment}.json`
+      : "catalogue.json");
   },
 });
 export const suggestTags = action({
@@ -123,10 +145,12 @@ async function discovery(
   w: Work,
 ) {
   let s = decode<Structure>(c.structure);
+  const base = `${c.origin}${c.sourceScope?.path ?? ""}`;
+  const inScope = (url: string) => inSourceScope(url, c.origin, c.sourceScope);
   if (w.phase === "menu") {
-    const html = await fetchPublic(c.origin);
+    const html = await fetchPublic(base);
     try {
-      s.menu = collectionMenu(extractMenu(html, c.origin).menu, c.origin);
+      s.menu = collectionMenu(extractMenu(html, c.origin).menu, c.origin, c.sourceScope);
     } catch (e) {
       s.warnings.push(message(e));
     }
@@ -163,7 +187,7 @@ async function discovery(
         });
       visit(s.menu);
       w.phase = "ranking";
-      w.url = `${c.origin}/collections/all?sort_by=best-selling`;
+      w.url = `${base}/collections/all?sort_by=best-selling`;
       w.rank = 0;
       w.visited = [];
       return checkpoint(ctx, f, w, s);
@@ -175,11 +199,12 @@ async function discovery(
       throw new Error("Sitemap XML invalide.");
     const maps = xml("sitemap > loc")
       .toArray()
-      .map((el) => sourceUrl(xml(el).text(), c.origin))
-      .filter((u) => /sitemap_(products|collections)/.test(u));
+      .map((el) => xml(el).text().trim())
+      .filter((u) => /sitemap_(products|collections)/.test(u) && inScope(u))
+      .map((url) => sourceUrl(url, c.origin));
     const locations = xml("url > loc")
       .toArray()
-      .map((el) => xml(el).text());
+      .map((el) => xml(el).text().trim()).filter(inScope);
     const offset = w.offset ?? 0,
       slice = locations.slice(offset, offset + 100);
     const links = slice.flatMap((url) => {
@@ -239,7 +264,7 @@ async function discovery(
   }
   if (w.phase === "ranking") {
     const url = w.url!,
-      result = extractCollection(await fetchPublic(url), url, c.origin);
+      result = extractCollection(await fetchPublic(url), url, c.origin, c.sourceScope);
     const fingerprint = hash(encode(result.products.map((p) => p.handle)));
     if (fingerprint === w.pageFingerprint)
       throw new Error(
@@ -259,7 +284,7 @@ async function discovery(
     if (result.nextUrl && !enough) {
       const next = new URL(sourceUrl(result.nextUrl, c.origin));
       if (
-        next.origin !== c.origin ||
+        next.origin !== c.origin || !inScope(next.href) ||
         next.searchParams.get("sort_by") !== "best-selling" ||
         (w.visited ?? []).includes(next.href)
       )
@@ -306,7 +331,7 @@ async function discovery(
     }
     const url = w.url ?? `${col.url}?sort_by=best-selling`,
       html = await fetchPublic(url),
-      result = extractCollection(html, url, c.origin);
+      result = extractCollection(html, url, c.origin, c.sourceScope);
     const fingerprint = hash(encode(result.products.map((p) => p.handle)));
     if (fingerprint === w.pageFingerprint || (w.visited ?? []).includes(url))
       throw new Error(`Pagination répétée : ${col.title}`);
@@ -338,7 +363,7 @@ async function discovery(
       w.visited = [];
       if (w.addition) {
         w.phase = "ranking";
-        w.url = `${c.origin}/collections/all?sort_by=best-selling`;
+        w.url = `${base}/collections/all?sort_by=best-selling`;
         w.rank = 0;
       }
     }
@@ -535,6 +560,7 @@ async function exportCatalogue(
         encode({
           formatVersion: 2,
           origin: c.origin,
+          sourceScope: c.sourceScope,
           mode: c.mode,
           topN: c.topN,
           tagLanguage: c.tagLanguage ?? "en",

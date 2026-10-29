@@ -7,7 +7,7 @@ import type { Doc, Id } from "../_generated/dataModel"
 import { shopifyGraphql } from "../shopify/client"
 import { shopifyCredentialsForShop } from "../shopScope"
 import { allImportElements } from "./importSelection"
-import { isImportableProduct } from "./source"
+import { isImportableProduct, collectionKey } from "./source"
 import { parseCollectionTags } from "./tags"
 import {
   decode,
@@ -46,7 +46,7 @@ export function targetMenu(
       throw new Error("Le menu dépasse les trois niveaux acceptés par Shopify.")
     return nodes.map((n) => {
       const key = n.url
-        ? decodeURIComponent(new URL(n.url, origin).pathname.split("/")[2])
+        ? collectionKey(n.url, origin)
         : null
       const target = key ? mappings[key] : null
       if (key && !target)
@@ -161,7 +161,8 @@ export async function importStep(
     const needed = new Set<string>()
     const visit = (nodes: Structure["menu"]) => {
       for (const node of nodes) {
-        if (node.url) needed.add(decodeURIComponent(new URL(node.url, c.origin).pathname.split("/")[2]))
+        const key = node.url ? collectionKey(node.url, c.origin) : null
+        if (key) needed.add(key)
         visit(node.children)
       }
     }
@@ -556,14 +557,12 @@ export async function importStep(
               new URL(c.origin).hostname.replace(/^www\./, "")
             )
               continue
-            const collection = url.pathname.match(
-                /^\/collections\/([^/]+)\/?$/,
-              )?.[1],
+            const collection = collectionKey(url.href, c.origin),
               product = productLinkForImport(url.pathname)
-            if (collection && w.mappings?.[decodeURIComponent(collection)])
+            if (collection && w.mappings?.[collection])
               a.attr(
                 "href",
-                `${w.domain}/collections/${w.mappings[decodeURIComponent(collection)].handle}`,
+                `${w.domain}/collections/${w.mappings[collection].handle}`,
               )
             else if (product) {
               const mapped: string | null = await ctx.runQuery(

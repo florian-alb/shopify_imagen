@@ -1,3 +1,5 @@
+import { urlScopePath } from "./scope"
+
 export type MenuNode = {
   key: string
   title: string
@@ -108,7 +110,7 @@ export function productLink(input: string, origin: string): ProductLink | null {
     const handle = decodeURIComponent(match[1]).replace(/\.(?:json|js)$/, "")
     return {
       handle,
-      url: `${origin}/products/${encodeURIComponent(handle)}`,
+      url: `${origin}${urlScopePath(u.href, origin) ?? ""}/products/${encodeURIComponent(handle)}`,
       collections: [],
     }
   } catch {
@@ -125,7 +127,7 @@ export function collectionKey(input: string, origin: string) {
     )
       return null
     const match = u.pathname.match(
-      /^\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?collections\/([^/]+)\/?$/i,
+      /^\/(?:[a-z]{2,3}(?:-[a-z]{4})?(?:-(?:[a-z]{2}|\d{3}))?\/)?collections\/([^/]+)\/?$/i,
     )
     return match ? decodeURIComponent(match[1]) : null
   } catch {
