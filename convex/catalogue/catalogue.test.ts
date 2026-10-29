@@ -218,6 +218,61 @@ async function setup(mode: "ALL" | "TOP_N" = "ALL", topN?: number, tagLanguage?:
   };
   return { t, user, id, owner, read, drain, validate };
 }
+test("segmented catalogues keep identical Shopify identities, localized content and exports isolated", async () => {
+  const f = await setup();
+  const localized = "/de-de";
+  for (const [url, body] of [...source.pages]) {
+    if (url.endsWith("/sitemap.xml")) continue;
+    source.pages.set(`${origin}${localized}${url.slice(origin.length)}`,
+      body.split(`${origin}/`).join(`${origin}${localized}/`).split('href="/').join(`href="${localized}/`)
+        .split("Title a").join("Deutscher Titel"));
+  }
+  source.pages.set(`${origin}/sitemap.xml`, source.pages.get(`${origin}/sitemap.xml`)!.replace("</sitemapindex>",
+    `<sitemap><loc>${origin}${localized}/sitemap_products_1.xml</loc></sitemap><sitemap><loc>${origin}${localized}/sitemap_collections_1.xml</loc></sitemap><sitemap><loc>https://other.example/en-gb/sitemap_products_1.xml</loc></sitemap></sitemapindex>`));
+  source.pages.set(origin, `<html lang="fr">${source.pages.get(origin)}</html>`);
+  const discovery = await f.user.action(api.catalogueActions.discoverMarkets, { url: `${origin}/sitemap.xml` });
+  expect(discovery.scopes).toEqual([{ path: "", language: "fr" }, { path: localized, language: "de", market: "DE" }]);
+  const ids = await f.user.mutation(api.catalogues.createSegmented, {
+    url: origin, mode: "TOP_N", topN: 2, scopes: discovery.scopes,
+  });
+  expect(ids).toHaveLength(2);
+  for (const [i, id] of ids.entries()) {
+    async function drain() {
+      for (let step = 0; step < 100; step++) {
+        const c = (await f.t.query(internal.catalogues.context, { id }))!;
+        if (c.status !== "working") return c;
+        await f.t.action(internal.catalogueActions.work, { id, generation: c.generation });
+      }
+      throw new Error("Segment worker did not settle");
+    }
+    const c = await drain();
+    expect(c.status).toBe("tags");
+    expect(c.total).toBe(2);
+    const structure = decode<Structure>(c.structure);
+    expect(structure.collections.every((col) => col.url.startsWith(`${origin}${i ? localized : ""}/collections/`))).toBe(true);
+    expect(targetMenu(structure, Object.fromEntries(structure.collections.map((col) => [col.key, { id: `target-${col.key}`, handle: col.key }])), origin))
+      .toEqual([expect.objectContaining({ items: [expect.objectContaining({ resourceId: "target-cats" })] })]);
+    await f.user.mutation(api.catalogues.saveTags, {
+      id, version: c.version, values: structure.collections.map((col) => ({ key: col.key, tag: col.tag })), validate: true, collect: true,
+    });
+    expect((await drain()).complete).toBe(2);
+    await f.user.mutation(api.catalogues.exportJson, { id, allowPartial: true });
+    await drain();
+    const exported = JSON.parse(source.exportText);
+    expect(exported.sourceScope).toEqual(discovery.scopes[i]);
+    expect(exported.products).toHaveLength(2);
+    expect(exported.products.every((p: { url: string }) => p.url.startsWith(`${origin}${i ? localized : ""}/products/`))).toBe(true);
+    expect(exported.products.find((p: { data: { handle: string } }) => p.data.handle === "a").data.title)
+      .toBe(i ? "Deutscher Titel" : "Title a");
+    // Export storage belongs to a different catalogue, as in real R2.
+    source.exportToken = "";
+  }
+  const outsider = f.t.withIdentity({ subject: await f.t.run((ctx) => ctx.db.insert("users", { approvalStatus: "approved" })) });
+  await expect(outsider.query(api.catalogues.get, { id: ids[1] })).rejects.toThrow("inaccessible");
+  await expect(f.t.action(api.catalogueActions.discoverMarkets, { url: origin })).rejects.toThrow("Authentication");
+  await expect(f.user.mutation(api.catalogues.createSegmented, { url: origin, mode: "ALL", scopes: [] })).rejects.toThrow("Sélectionnez");
+  await expect(f.user.mutation(api.catalogues.createSegmented, { url: origin, mode: "ALL", scopes: [{ path: "/de-de" }, { path: "/DE-DE" }] })).rejects.toThrow("une seule fois");
+});
 test("discovery keeps an explicitly empty Montessori collection and completes its memberships", async () => {
   const f = await setup();
   source.pages.set(

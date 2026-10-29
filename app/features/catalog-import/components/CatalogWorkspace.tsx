@@ -26,6 +26,7 @@ import { CatalogMenu } from "./CatalogMenu"
 import { CatalogImportResult } from "./CatalogImportResult"
 import { CatalogWorkStatus } from "./CatalogWorkStatus"
 import type { Catalogue } from "../types"
+import { sourceScopeLabel } from "../lib/source-scope"
 import { ImportConfirmation } from "./ImportConfirmation"
 import type { TagLanguage } from "../../../../convex/catalogue/tags"
 import { isImportableProduct } from "../../../../convex/catalogue/source"
@@ -148,6 +149,7 @@ function Workspace({ c }: { c: Catalogue }) {
             <h1 className="text-2xl font-semibold tracking-tight">
               {new URL(c.origin).hostname.replace(/^www\./, "")}
             </h1>
+            <p className="mt-1 text-sm font-medium">{sourceScopeLabel(c.sourceScope)}</p>
             <p className="mt-1 text-sm text-muted-foreground">
               {c.mode === "ALL" ? "Tout le catalogue" : `Top ${c.topN}`}
               {c.initialCount > 0 && c.total > c.initialCount
@@ -184,6 +186,7 @@ function Workspace({ c }: { c: Catalogue }) {
             <CatalogCsvExport
               id={c._id}
               origin={c.origin}
+              sourceScope={c.sourceScope}
               version={c.version}
               generation={c.generation}
               total={c.total}

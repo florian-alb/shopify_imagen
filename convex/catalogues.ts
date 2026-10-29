@@ -18,6 +18,7 @@ import { isImportableProduct, sourceOrigin } from "./catalogue/source"
 import { productCsv } from "./catalogue/csv"
 import { allImportElements, hasImportElements } from "./catalogue/importSelection"
 import { normalizeCollectionTags, tagLanguageValidator } from "./catalogue/tags"
+import { normalizeSourceScope, sourceScopeValidator, inSourceScope, type SourceScope } from "./catalogue/scope"
 import {
   decode,
   encode,
@@ -85,49 +86,71 @@ async function launch(ctx: MutationCtx, c: Doc<"catalogues">, work: Work) {
     generation,
   })
 }
+const createArgs = {
+  url: v.string(),
+  mode: v.union(v.literal("ALL"), v.literal("TOP_N")),
+  topN: v.optional(v.number()),
+  tagLanguage: v.optional(tagLanguageValidator),
+}
+type CreateArgs = {
+  url: string; mode: "ALL" | "TOP_N"; topN?: number
+  tagLanguage?: Doc<"catalogues">["tagLanguage"]
+}
+async function createCatalogue(ctx: MutationCtx, args: CreateArgs, sourceScope: SourceScope) {
+  if (
+    args.mode === "TOP_N" &&
+    (!Number.isSafeInteger(args.topN) || args.topN! < 1)
+  )
+    throw new Error("N doit être un entier strictement positif.")
+  const ownerId = await requireUserId(ctx),
+    origin = sourceOrigin(args.url),
+    now = Date.now()
+  const id = await ctx.db.insert("catalogues", {
+    ownerId,
+    origin,
+    sourceScope,
+    mode: args.mode,
+    tagLanguage: args.tagLanguage ?? "en",
+    tagVersion: 0,
+    ...(args.mode === "TOP_N" ? { topN: args.topN } : {}),
+    status: "working",
+    phase: "menu",
+    structure: encode(emptyStructure()),
+    work: encode({ kind: "discover", phase: "menu" }),
+    generation: 1,
+    version: 0,
+    total: 0,
+    complete: 0,
+    failed: 0,
+    sourceCount: 0,
+    initialCount: 0,
+    createdAt: now,
+    updatedAt: now,
+  })
+  await ctx.scheduler.runAfter(0, internal.catalogueActions.work, {
+    id,
+    generation: 1,
+  })
+  return id
+}
 export const create = mutation({
-  args: {
-    url: v.string(),
-    mode: v.union(v.literal("ALL"), v.literal("TOP_N")),
-    topN: v.optional(v.number()),
-    tagLanguage: v.optional(tagLanguageValidator),
-  },
+  args: { ...createArgs, sourceScope: v.optional(sourceScopeValidator) },
   returns: v.id("catalogues"),
+  handler: async (ctx, args) => createCatalogue(ctx, args, normalizeSourceScope(args.sourceScope ?? { path: "" })),
+})
+export const createSegmented = mutation({
+  args: { ...createArgs, scopes: v.array(sourceScopeValidator) },
+  returns: v.array(v.id("catalogues")),
   handler: async (ctx, args) => {
-    if (
-      args.mode === "TOP_N" &&
-      (!Number.isSafeInteger(args.topN) || args.topN! < 1)
-    )
-      throw new Error("N doit être un entier strictement positif.")
-    const ownerId = await requireUserId(ctx),
-      origin = sourceOrigin(args.url),
-      now = Date.now()
-    const id = await ctx.db.insert("catalogues", {
-      ownerId,
-      origin,
-      mode: args.mode,
-      tagLanguage: args.tagLanguage ?? "en",
-      tagVersion: 0,
-      ...(args.mode === "TOP_N" ? { topN: args.topN } : {}),
-      status: "working",
-      phase: "menu",
-      structure: encode(emptyStructure()),
-      work: encode({ kind: "discover", phase: "menu" }),
-      generation: 1,
-      version: 0,
-      total: 0,
-      complete: 0,
-      failed: 0,
-      sourceCount: 0,
-      initialCount: 0,
-      createdAt: now,
-      updatedAt: now,
-    })
-    await ctx.scheduler.runAfter(0, internal.catalogueActions.work, {
-      id,
-      generation: 1,
-    })
-    return id
+    await requireUserId(ctx)
+    if (!args.scopes.length || args.scopes.length > 50)
+      throw new Error("Sélectionnez entre un et 50 segments source.")
+    const scopes = args.scopes.map(normalizeSourceScope)
+    if (new Set(scopes.map((s) => s.path)).size !== scopes.length)
+      throw new Error("Chaque marché et langue doit être sélectionné une seule fois.")
+    const ids: Id<"catalogues">[] = []
+    for (const scope of scopes) ids.push(await createCatalogue(ctx, args, scope))
+    return ids
   },
 })
 export const list = query({
@@ -144,6 +167,7 @@ export const list = query({
       rows.map((c) => ({
         id: c._id,
         origin: c.origin,
+        sourceScope: c.sourceScope,
         mode: c.mode,
         topN: c.topN,
         status: c.status,
@@ -775,6 +799,8 @@ export const links = internalMutation({
       sourceCount = c.sourceCount
     const s = decode<Structure>(c.structure)
     for (const link of a.links) {
+      if (!inSourceScope(link.url, c.origin, c.sourceScope))
+        throw new Error("Produit hors du marché et de la langue sélectionnés.")
       let p = await ctx.db
         .query("produits")
         .withIndex("by_catalogue_handle", (q) =>
@@ -1097,6 +1123,8 @@ export const rankPage = internalMutation({
       sourceCount = c.sourceCount
     const s = decode<Structure>(c.structure)
     for (const link of a.products) {
+      if (!inSourceScope(link.url, c.origin, c.sourceScope))
+        throw new Error("Produit hors du marché et de la langue sélectionnés.")
       let p = await ctx.db
         .query("produits")
         .withIndex("by_catalogue_handle", (q) =>

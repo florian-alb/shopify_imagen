@@ -134,7 +134,7 @@ export async function exportStorage<T>(
     client.destroy()
   }
 }
-export async function signedExport(key: string) {
+export async function signedExport(key: string, filename = "catalogue.json") {
   const { client, bucket } = storage()
   try {
     return await getSignedUrl(
@@ -142,7 +142,7 @@ export async function signedExport(key: string) {
       new GetObjectCommand({
         Bucket: bucket,
         Key: key,
-        ResponseContentDisposition: 'attachment; filename="catalogue.json"',
+        ResponseContentDisposition: `attachment; filename="${filename.replace(/[^a-zA-Z0-9._-]/g, "-")}"`,
       }),
       { expiresIn: 300 },
     )

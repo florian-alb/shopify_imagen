@@ -4,10 +4,12 @@ import { api, type Id } from "@/lib/convex"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { buildCsvFiles, type CsvProgress } from "../lib/csv-export"
+import type { SourceScope } from "../../../../convex/catalogue/scope"
 
 type Props = {
   id: Id<"catalogues">
   origin: string
+  sourceScope?: SourceScope
   version: number
   generation: number
   total: number
@@ -17,7 +19,7 @@ type Props = {
 }
 type Download = { url: string; name: string }
 
-export function CatalogCsvExport({ id, origin, version, generation, total, partial, incompleteCount, disabled }: Props) {
+export function CatalogCsvExport({ id, origin, sourceScope, version, generation, total, partial, incompleteCount, disabled }: Props) {
   const client = useConvex()
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -56,9 +58,10 @@ export function CatalogCsvExport({ id, origin, version, generation, total, parti
       )
       abort.signal.throwIfAborted()
       const hostname = new URL(origin).hostname.replace(/^www\./, "")
+      const segment = sourceScope ? `-${sourceScope.path.slice(1) || `principal-${sourceScope.language ?? "default"}`}` : ""
       const ready = files.map((blob, i) => ({
         url: URL.createObjectURL(blob),
-        name: `catalogue-${hostname}${files.length > 1 ? `-${i + 1}` : ""}.csv`,
+        name: `catalogue-${hostname}${segment}${files.length > 1 ? `-${i + 1}` : ""}.csv`,
       }))
       urls.current = ready.map((file) => file.url)
       setDownloads(ready)
