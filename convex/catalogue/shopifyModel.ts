@@ -5,6 +5,32 @@ export const uniqueIdentifier = (origin: string, id: string) => ({
   key: "source_id",
   value: identity(origin, id),
 })
+export function productInTargetCurrency(
+  product: ReturnType<typeof effective>,
+  targetCurrency: string | undefined,
+) {
+  const target = targetCurrency?.trim().toUpperCase()
+  if (!target) throw new Error("Devise cible non vérifiée.")
+  return {
+    ...product,
+    variants: product.variants.map((variant) => {
+      const source = variant.currency?.trim().toUpperCase()
+      if (!source)
+        throw new Error("Devise source non vérifiée. Aucune conversion implicite.")
+      if (
+        source !== target &&
+        !((source === "USD" && target === "EUR") ||
+          (source === "EUR" && target === "USD"))
+      )
+        throw new Error(
+          `Conversion ${source} vers ${target} non configurée. Seul le taux fixe 1 EUR = 1 USD est disponible.`,
+        )
+      // Temporary business rate: 1 EUR = 1 USD. Preserve price and compare-at
+      // decimal strings exactly; Shopify interprets both in the shop currency.
+      return { ...variant, currency: target }
+    }),
+  }
+}
 export function productInput(
   product: ReturnType<typeof effective>,
   origin: string,

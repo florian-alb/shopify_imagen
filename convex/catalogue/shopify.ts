@@ -21,7 +21,7 @@ import {
   type RemoteResult,
 } from "./model"
 import { cleanHtml, importDescription } from "./extract"
-import { productInput, uniqueIdentifier } from "./shopifyModel"
+import { productInTargetCurrency, productInput, uniqueIdentifier } from "./shopifyModel"
 import * as gql from "./graphql"
 
 type Fence = { id: Id<"catalogues">; generation: number; token: string }
@@ -343,14 +343,7 @@ export async function importStep(
       )
         continue
       try {
-        if (data.variants.some((v) => !v.currency))
-          throw new Error(
-            "Devise source non vérifiée. Aucune conversion implicite.",
-          )
-        if (data.variants.some((v) => v.currency && v.currency !== w.currency))
-          throw new Error(
-            `Devise source différente de ${w.currency}. Aucune conversion implicite.`,
-          )
+        const converted = productInTargetCurrency(data, w.currency)
         const found = await request<{ productByIdentifier: Mapping | null }>(
           gql.FIND_PRODUCT,
           {
@@ -377,7 +370,7 @@ export async function importStep(
             startedAt: Date.now(),
           })
         } else {
-          const input = productInput(data, c.origin, importDescription(data))
+          const input = productInput(converted, c.origin, importDescription(data))
           const line = {
             input,
             identifier: {

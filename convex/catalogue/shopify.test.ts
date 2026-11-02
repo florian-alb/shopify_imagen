@@ -6,7 +6,7 @@ import schema from "../schema"
 import { api, internal } from "../_generated/api"
 import { extractProduct, importDescription } from "./extract"
 import { encode, decode, type CatalogProduct, type Structure, type Work, type RemoteResult } from "./model"
-import { productInput } from "./shopifyModel"
+import { productInTargetCurrency, productInput } from "./shopifyModel"
 import { REQUIRED_SHOPIFY_ADMIN_SCOPES } from "../shopify/scopes"
 import type { ImportSelection } from "./importSelection"
 import { parseCollectionTags } from "./tags"
@@ -25,6 +25,7 @@ const remote = vi.hoisted(() => ({
   collectionExists: false,
   membershipMissing: false,
   scopes: [] as string[],
+  currency: "EUR",
 }))
 vi.mock("../shopify/client", () => ({
   shopifyGraphql: async (query: string, variables: Record<string, unknown>) => {
@@ -37,7 +38,7 @@ vi.mock("../shopify/client", () => ({
           })),
         },
         shop: {
-          currencyCode: "EUR",
+          currencyCode: remote.currency,
           primaryDomain: { url: "https://destination.example" },
         },
       }
@@ -189,6 +190,7 @@ beforeEach(() => {
     collectionExists: false,
     membershipMissing: false,
     scopes: [...REQUIRED_SHOPIFY_ADMIN_SCOPES],
+    currency: "EUR",
   })
   vi.stubGlobal(
     "fetch",
@@ -445,6 +447,88 @@ test("existing products keep merchant tags and active status without productSet"
     remote.calls.some((x) => x.query.includes("CatalogImportDescription")),
   ).toBe(false)
 })
+test.each([
+  ["USD", "EUR"],
+  ["EUR", "USD"],
+  ["EUR", "EUR"],
+  ["GBP", "GBP"],
+  [" usd ", "EUR"],
+])("imports %s prices into %s at the configured 1:1 rate without changing source data", async (sourceCurrency, targetCurrency) => {
+  remote.currency = targetCurrency
+  const f = await fixture({ products: true, collections: false, menu: false })
+  const source = await f.t.run(async (ctx) => {
+    const p = (await ctx.db.get(f.productId))!
+    const data = decode<CatalogProduct>(p.data!)
+    data.variants[0] = { ...data.variants[0], currency: sourceCurrency, price: "19.99", compareAtPrice: "29.99" }
+    const encoded = encode(data)
+    await ctx.db.patch(f.productId, {
+      data: encoded,
+      remote: encode({ shopId: f.shopId, status: "failed", error: "Devise source différente de EUR. Aucune conversion implicite.", catalogueVersion: 1, importGeneration: 1 }),
+    })
+    await ctx.db.patch(f.id, { status: "partial", work: undefined })
+    return { data: encoded, jsonSource: p.jsonSource }
+  })
+  await f.t.withIdentity({ subject: f.owner }).mutation(api.catalogues.startImport, {
+    id: f.id, shopId: f.shopId, version: 1, allowPartial: false,
+    selection: { products: true, collections: false, menu: false },
+  })
+  const c = await f.run()
+  expect(decode(c.lastImport!)).toMatchObject({ complete: 1, created: 1, failed: 0 })
+  expect(remote.uploads).toHaveLength(1)
+  expect(JSON.parse(remote.uploads[0]).input.variants[0]).toMatchObject({ price: "19.99", compareAtPrice: "29.99" })
+  const p = (await f.t.query(internal.catalogues.byId, { id: f.productId }))!
+  expect(p.data).toBe(source.data)
+  expect(p.jsonSource).toBe(source.jsonSource)
+  expect(decode<RemoteResult>(p.remote!).status).toBe("complete")
+})
+
+test.each([
+  ["", "EUR", "Devise source non vérifiée"],
+  ["USD", "", "Devise cible non vérifiée"],
+  ["GBP", "EUR", "Conversion GBP vers EUR non configurée"],
+  ["USD", "CAD", "Conversion USD vers CAD non configurée"],
+])("blocks unconfigured or unknown currency conversions (%s → %s)", async (sourceCurrency, targetCurrency, error) => {
+  remote.currency = targetCurrency
+  const f = await fixture({ products: true, collections: false, menu: false })
+  await f.t.run(async (ctx) => {
+    const p = (await ctx.db.get(f.productId))!
+    const data = decode<CatalogProduct>(p.data!)
+    data.variants[0].currency = targetCurrency || "EUR"
+    // Validate every variant before sending any part of the product.
+    data.variants.push({ ...data.variants[0], id: "457", currency: sourceCurrency })
+    await ctx.db.patch(f.productId, { data: encode(data) })
+  })
+  const c = await f.run()
+  expect(decode(c.lastImport!)).toMatchObject({ complete: 0, created: 0, failed: 1 })
+  expect(remote.uploads).toHaveLength(0)
+  expect(remote.calls.some((call) => call.query.includes("CatalogImportFindProduct"))).toBe(false)
+  const p = (await f.t.query(internal.catalogues.byId, { id: f.productId }))!
+  expect(decode<RemoteResult>(p.remote!)).toMatchObject({ status: "failed", error: expect.stringContaining(error) })
+})
+
+test("converts all variants to the target currency, retaining exact decimals, zero prices and absent compare-at prices", () => {
+  const source = extractProduct(
+    { handle: "cat", url: "https://source.example/products/cat", collections: [] },
+    raw,
+    null,
+  )
+  source.variants = [
+    { ...source.variants[0], currency: "USD", price: "19.9900", compareAtPrice: "29.9900" },
+    { ...source.variants[0], id: "457", currency: "EUR", price: "0.00", compareAtPrice: null },
+  ]
+  const before = encode(source)
+  const converted = productInTargetCurrency({ ...source, tags: [], excluded: false, reviewed: false }, "EUR")
+  expect(converted.variants.map(({ currency, price, compareAtPrice }) => ({ currency, price, compareAtPrice }))).toEqual([
+    { currency: "EUR", price: "19.9900", compareAtPrice: "29.9900" },
+    { currency: "EUR", price: "0.00", compareAtPrice: null },
+  ])
+  expect(productInput(converted, "https://source.example", importDescription(source)).variants).toMatchObject([
+    { price: "19.9900", compareAtPrice: "29.9900" },
+    { price: "0.00" },
+  ])
+  expect(encode(source)).toBe(before)
+})
+
 test.each([
   { products: true, collections: true, menu: true },
   { products: false, collections: true, menu: false },
