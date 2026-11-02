@@ -1,5 +1,13 @@
 # Qualification de la refonte catalogue
 
+## Conversion USD/EUR à l’import Shopify — 3 novembre 2026
+
+- Le refus systématique d’une devise différente est remplacé, pour EUR/USD uniquement, par le taux métier temporaire **1 EUR = 1 USD**, dans les deux sens. Prix de vente et prix barrés de chaque variante gardent leur montant exact ; les variantes sont préparées dans la devise cible diagnostiquée sur Shopify. Données source et exports conservés, produits déjà présents non repricés. Aucune migration ni nouvelle collecte.
+- Avant correction, les tests reproduisent notamment le refus USD→EUR et EUR→USD. Après correction : **762 tests réussis, 94 fichiers**, avec `npm test -- --maxWorkers=2`. Dix nouveaux cas couvrent les imports/reprises d’une ancienne erreur de devise, les mêmes devises, la normalisation des codes, le refus d’une devise inconnue ou d’une paire non configurée, toutes les variantes, les décimales exactes, les prix nuls, les prix barrés absents et la conservation des JSON source/normalisé. Shopify est simulé.
+- `npm run typecheck`, `npx tsc --noEmit -p convex/tsconfig.json`, `npm run check:convex-contract` (**116 références**), `npm run build`, ESLint ciblé et `git diff --check` réussis. Le build garde son avertissement de taille des chunks.
+- Banc navigateur isolé : confirmation d’import affichée, destination fictive sélectionnée, bouton Importer activé après l’accord partiel ; aucun warning/error console observé. Aucun import déclenché. Ce contrôle ne valide pas la conversion réelle côté Shopify et ne constitue pas un E2E authentifié.
+- `npx convex dev --once --typecheck enable` accepté sur **dev `curious-greyhound-437`**. Simulation de déploiement acceptée sur **prod `youthful-bandicoot-479`**, sans application ; aucun index ajouté/supprimé ni changement d’authentification annoncé. Le déploiement réel de ce correctif et un import Shopify réel restent à autoriser précisément. Éviter `--verbose` sur la CLI Convex : ce mode journalise des variables d’environnement sensibles.
+
 ## Marchés et langues du sitemap — 29 octobre 2026
 
 - Lecture publique réelle du sitemap `https://revedeveilleuse.com/sitemap.xml` : sept préfixes (`principal`, `en-gb`, `de-de`, `it-it`, `nl-nl`, `es-es`, `pl-pl`). Le sitemap produits allemand conserve ses handles traduits, par exemple `/de-de/products/birnen-nachtlicht`. Aucune collecte complète de cette boutique n’est revendiquée.
